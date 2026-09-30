@@ -1,0 +1,121 @@
+:root {
+  --accent: #2f6fdf;
+  --accent-soft: #e6eefc;
+  --text: #1d2433;
+  --muted: #5b6475;
+  --bg: #f6f8fc;
+  --card: #ffffff;
+  --end: #4a5568;
+  --danger: #c53030;
+  --tutor: #eef3ff;
+  --patient: #eaf7ee;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body {
+  margin: 0;
+  font-family: "Segoe UI", Arial, sans-serif; color: var(--text); background: var(--bg);
+}
+/* Screens fill the window (dvh follows mobile browser bars), with room reserved at the
+   bottom for the fixed emergency button so nothing ever sits under it. */
+.screen {
+  min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 1.75rem; text-align: center;
+  padding: 1rem 1rem calc(5rem + env(safe-area-inset-bottom, 0px));
+}
+h1 { font-size: clamp(2.2rem, 7vw, 3.5rem); margin: 0; }
+.lead { font-size: clamp(1.4rem, 4.5vw, 2rem); margin: 0; color: var(--muted); }
+.status { min-height: 2.5rem; font-size: 1.4rem; color: var(--muted); margin: 0; }
+
+.big {
+  font-size: clamp(1.6rem, 6vw, 2.6rem); font-weight: bold; border: none; cursor: pointer;
+  border-radius: 1.5rem; padding: 1.1rem clamp(1rem, 4vw, 2.6rem); min-width: min(12rem, 40vw);
+}
+.big:active { transform: scale(.97); }
+.big:disabled { opacity: .5; cursor: default; }
+.primary { color: #fff; background: var(--accent); box-shadow: 0 6px 18px rgba(47,111,223,.35); }
+.secondary { color: var(--accent); background: var(--accent-soft); }
+.secondary.active { color: #fff; background: var(--accent); }
+.end { color: #fff; background: var(--end); }
+
+.avatar {
+  width: clamp(9rem, 32vw, 13rem); height: auto; border-radius: 50%;
+  box-shadow: 0 0 0 .4rem #fff, 0 8px 24px rgba(47,111,223,.25);
+}
+/* Shrinks on short windows so the captions keep their room. */
+.avatar.small { width: min(9rem, 22vw, 15vh); flex-shrink: 0; transition: box-shadow .3s; }
+/* Not a moving avatar: just a soft glowing ring while she speaks. */
+.avatar[data-state="speaking"] { animation: speak-glow 1.2s ease-in-out infinite; }
+@keyframes speak-glow {
+  0%, 100% { box-shadow: 0 0 0 .4rem #fff, 0 0 0 .7rem rgba(47,111,223,.25); }
+  50% { box-shadow: 0 0 0 .4rem #fff, 0 0 0 1.2rem rgba(47,111,223,.45); }
+}
+
+/* Session screen */
+/* Session layout: header (photo, status, mic) at the top, buttons pinned at the bottom,
+   and the captions take whatever is left and scroll inside it. */
+#screen-session { height: 100vh; height: 100dvh; justify-content: flex-start; gap: .8rem; }
+#screen-session > .indicator, #screen-session > .mic { flex-shrink: 0; }
+.indicator {
+  display: flex; align-items: center; gap: .6rem; font-size: 1.5rem; color: var(--muted);
+}
+.indicator .dot { width: 1.1rem; height: 1.1rem; border-radius: 50%; background: #b8c0cc; }
+.indicator[data-state="listening"] .dot { background: #38a169; animation: pulse 1.6s infinite; }
+.indicator[data-state="speaking"] .dot { background: var(--accent); animation: pulse .8s infinite; }
+@keyframes pulse { 50% { transform: scale(1.5); opacity: .6; } }
+
+.mic { display: flex; align-items: center; gap: .6rem; font-size: 1.5rem; width: min(100%, 20rem); }
+.mic-bar { flex: 1; height: .9rem; background: #e3e7f0; border-radius: 1rem; overflow: hidden; }
+#mic-level { height: 100%; width: 0; background: #38a169; transition: width .08s linear; }
+.captions {
+  width: min(100%, 52rem); flex: 1 1 0; min-height: 0; overflow-y: auto;
+  display: flex; flex-direction: column; gap: .8rem; padding: .5rem;
+}
+.line {
+  font-size: clamp(1.4rem, 4.2vw, 2rem); line-height: 1.5; padding: .7rem 1.1rem;
+  border-radius: 1.1rem; max-width: 90%; text-align: start;
+}
+.line.tutor { background: var(--tutor); align-self: flex-start; }
+.line.patient { background: var(--patient); align-self: flex-end; }
+.line.live .text { color: var(--muted); } /* still being spoken: provisional */
+.line .who { display: block; font-size: .95rem; color: var(--muted); font-weight: bold; }
+.controls {
+  display: flex; gap: 1rem; flex-wrap: wrap; justify-content: center; flex-shrink: 0;
+  width: 100%; /* lets the buttons wrap instead of widening the page on narrow phones */
+}
+
+/* Emergency */
+.emergency {
+  position: fixed; bottom: calc(1rem + env(safe-area-inset-bottom, 0px)); inset-inline-start: 1rem;
+  font-size: 1.2rem; font-weight: bold; color: #fff; background: var(--danger);
+  border: none; border-radius: 2rem; padding: .8rem 1.3rem; cursor: pointer;
+  box-shadow: 0 4px 12px rgba(197,48,48,.35); z-index: 10;
+}
+.overlay {
+  position: fixed; inset: 0; background: rgba(20,24,33,.75); z-index: 20;
+  display: flex; align-items: center; justify-content: center; padding: 1rem;
+}
+.overlay-card {
+  background: var(--card); border-radius: 1.5rem; padding: 1.5rem 2rem; max-width: 40rem;
+  width: 100%; max-height: 95vh; overflow-y: auto; text-align: start;
+}
+.overlay-card h2 { color: var(--danger); font-size: 2rem; margin-top: 0; }
+.overlay-card .call { font-size: 2rem; font-weight: bold; }
+.overlay-card .call a { color: var(--danger); }
+.befast { font-size: 1.35rem; line-height: 1.7; padding-inline-start: 1.2rem; }
+.overlay-card p { font-size: 1.35rem; }
+
+/* ?debug=1 event log: pinned bottom-left, above the page */
+.debug-panel {
+  position: fixed; left: .75rem; top: .75rem; z-index: 30; direction: ltr;
+  width: min(34rem, 60vw); background: #111827; border-radius: .6rem; padding: .5rem;
+  box-shadow: 0 6px 20px rgba(0,0,0,.3); opacity: .94;
+}
+.debug-panel button {
+  font-size: .85rem; margin-bottom: .4rem; padding: .3rem .7rem; border-radius: .4rem;
+  border: none; cursor: pointer;
+}
+.debug-log {
+  margin: 0; text-align: left; font: 12px/1.4 Consolas, monospace; white-space: pre-wrap;
+  color: #d1fae5; max-height: 22vh; overflow-y: auto;
+}

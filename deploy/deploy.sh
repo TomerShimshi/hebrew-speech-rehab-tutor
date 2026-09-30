@@ -14,6 +14,10 @@ SERVICE="${SERVICE:-hebrew-tutor}"
 cd "$(dirname "$0")/.."
 
 # --allow-unauthenticated is temporary: Google sign-in + allowlist arrives in sub-plan 03.
+PROJECT_ID="$(gcv config get-value project 2>/dev/null)"
+# The app reads the private patient profile straight from its bucket (see setup_gcp.sh).
+PROFILE_URI="gs://${PROJECT_ID}-private/patient_profile.md"
+
 gcloud run deploy "$SERVICE" \
   --source . \
   --region "$REGION" \
@@ -21,6 +25,7 @@ gcloud run deploy "$SERVICE" \
   --max-instances 1 \
   --memory 512Mi \
   --set-secrets GEMINI_API_KEY=gemini-api-key:latest \
+  --set-env-vars "PATIENT_PROFILE_URI=${PROFILE_URI}" \
   --allow-unauthenticated
 
 URL="$(gcv run services describe "$SERVICE" --region "$REGION" --format='value(status.url)')"
@@ -31,8 +36,6 @@ echo ">> Health:   $(curl -fsS "$URL/api/health" || echo 'health check failed')"
 # Keep only what's live -- git is the history. Everything below is idempotent
 # and best-effort: a cleanup failure never fails the deploy.
 # ---------------------------------------------------------------------------
-PROJECT_ID="$(gcv config get-value project 2>/dev/null)"
-
 echo ">> Cleanup: deleting old Cloud Run revisions..."
 LATEST="$(gcv run services describe "$SERVICE" --region "$REGION" \
   --format='value(status.latestReadyRevisionName)')"

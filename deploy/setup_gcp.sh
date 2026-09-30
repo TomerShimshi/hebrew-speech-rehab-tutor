@@ -61,7 +61,8 @@ gcloud services enable \
   cloudresourcemanager.googleapis.com \
   pubsub.googleapis.com \
   cloudfunctions.googleapis.com \
-  eventarc.googleapis.com
+  eventarc.googleapis.com \
+  storage.googleapis.com
 
 echo ">> Gemini API key secret..."
 if ! gcloud secrets describe "$SECRET_NAME" >/dev/null 2>&1; then
@@ -96,6 +97,32 @@ RUNTIME_SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
 gcloud secrets add-iam-policy-binding "$SECRET_NAME" \
   --member="serviceAccount:${RUNTIME_SA}" \
   --role="roles/secretmanager.secretAccessor" >/dev/null
+
+# Private, de-identified patient profile: kept out of git and the image (the repo is
+# public). Its home is a private bucket only the app's service account can read; the
+# app reads it directly (PATIENT_PROFILE_URI, see deploy.sh). Re-run to upload edits.
+PRIVATE_BUCKET="gs://${PROJECT_ID}-private"
+PROFILE_FILE="prompts/patient_profile.local.md"
+PROFILE_OBJECT="${PRIVATE_BUCKET}/patient_profile.md"
+echo ">> Private bucket for the patient profile..."
+if ! gcloud storage buckets describe "$PRIVATE_BUCKET" >/dev/null 2>&1; then
+  gcloud storage buckets create "$PRIVATE_BUCKET" \
+    --location="$REGION" \
+    --uniform-bucket-level-access \
+    --public-access-prevention
+fi
+gcloud storage buckets add-iam-policy-binding "$PRIVATE_BUCKET" \
+  --member="serviceAccount:${RUNTIME_SA}" \
+  --role="roles/storage.objectViewer" >/dev/null
+if [[ -f "$PROFILE_FILE" ]]; then
+  tr -d '\r' < "$PROFILE_FILE" | gcloud storage cp - "$PROFILE_OBJECT" --content-type="text/markdown; charset=utf-8"
+  echo "   uploaded $PROFILE_FILE -> $PROFILE_OBJECT"
+  echo "   (you may now delete the local copy; local dev can read the bucket instead)"
+elif gcloud storage objects describe "$PROFILE_OBJECT" >/dev/null 2>&1; then
+  echo "   $PROFILE_OBJECT already in place (no local copy to upload)"
+else
+  echo "   no profile yet -- create $PROFILE_FILE and re-run to upload it"
+fi
 
 # ---------------------------------------------------------------------------
 # Budget kill switch: budget -> Pub/Sub topic -> function that disables

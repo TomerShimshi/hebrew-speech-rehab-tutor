@@ -4,3 +4,6 @@ venv/
 __pycache__/
 *.pyc
 .pytest_cache/
+
+# Private patient data (never commit; lives in Secret Manager on GCP)
+*.local.*

@@ -4,35 +4,62 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>מדברים עברית</title>
-  <style>
-    :root { --accent: #2f6fdf; --text: #1d2433; --bg: #f6f8fc; }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0; min-height: 100vh; display: flex; flex-direction: column;
-      align-items: center; justify-content: center; gap: 2rem; padding: 1.5rem;
-      font-family: "Segoe UI", Arial, sans-serif; color: var(--text); background: var(--bg);
-      text-align: center;
-    }
-    h1 { font-size: clamp(2.2rem, 7vw, 3.5rem); margin: 0; }
-    p { font-size: clamp(1.4rem, 4.5vw, 2rem); margin: 0; }
-    #talk {
-      font-size: clamp(2rem, 8vw, 3.2rem); font-weight: bold; color: #fff;
-      background: var(--accent); border: none; border-radius: 2rem;
-      padding: 1.5rem 3.5rem; cursor: pointer; box-shadow: 0 6px 18px rgba(47,111,223,.35);
-    }
-    #talk:active { transform: scale(.97); }
-    #status { min-height: 2.5rem; }
-  </style>
+  <link rel="stylesheet" href="style.css?v=__ASSET_VERSION__">
 </head>
 <body>
-  <h1>שלום! 👋</h1>
-  <p>האימון היומי שלנו מחכה</p>
-  <button id="talk" type="button">שנתחיל?</button>
-  <p id="status" aria-live="polite"></p>
-  <script>
-    document.getElementById("talk").addEventListener("click", () => {
-      document.getElementById("status").textContent = "בקרוב…";
-    });
-  </script>
+  <!-- Start screen -->
+  <main id="screen-start" class="screen">
+    <img class="avatar" src="tutor-512.jpg" onerror="this.onerror=null; this.src='tutor.svg'" alt="המאמנת">
+    <h1>שלום! 👋</h1>
+    <p class="lead">האימון היומי שלנו מחכה</p>
+    <button id="talk" class="big primary" type="button">שנתחיל?</button>
+    <p id="start-status" class="status" aria-live="polite"></p>
+  </main>
+
+  <!-- In-session screen -->
+  <main id="screen-session" class="screen" hidden>
+    <img id="session-avatar" class="avatar small" src="tutor-512.jpg" onerror="this.onerror=null; this.src='tutor.svg'" alt="המאמנת" data-state="connecting">
+    <div id="indicator" class="indicator" data-state="connecting">
+      <span class="dot"></span><span id="indicator-text">מתחברת…</span>
+    </div>
+    <div class="mic" aria-hidden="true">🎤<div class="mic-bar"><div id="mic-level"></div></div></div>
+    <div id="captions" class="captions" aria-live="polite"></div>
+    <div class="controls">
+      <button id="thinking" class="big secondary" type="button">אני חושב…</button>
+      <button id="end" class="big end" type="button">סיום</button>
+    </div>
+  </main>
+
+  <!-- Ended screen -->
+  <main id="screen-ended" class="screen" hidden>
+    <h1>כל הכבוד! 👏</h1>
+    <p class="lead">נתראה מחר</p>
+    <button id="again" class="big secondary" type="button">לחזור להתחלה</button>
+  </main>
+
+  <!-- Always-visible emergency button + BE-FAST overlay -->
+  <button id="emergency" class="emergency" type="button">מרגיש פתאום לא טוב?</button>
+  <div id="emergency-overlay" class="overlay" role="alertdialog" aria-labelledby="em-title" hidden>
+    <div class="overlay-card">
+      <h2 id="em-title">ייתכן שאלה סימנים של שבץ</h2>
+      <p class="call">התקשרו עכשיו למד״א: <a href="tel:101">101</a></p>
+      <ul class="befast">
+        <li><b>שיווי משקל</b> – סחרחורת או קושי פתאומי ללכת</li>
+        <li><b>עיניים</b> – טשטוש או אובדן ראייה פתאומי</li>
+        <li><b>פנים</b> – צד אחד של הפנים צונח</li>
+        <li><b>ידיים</b> – חולשה או נימול ביד או ברגל</li>
+        <li><b>דיבור</b> – קושי פתאומי לדבר או להבין</li>
+        <li><b>זמן</b> – כל דקה חשובה, לא לחכות</li>
+      </ul>
+      <p>קראו גם לבן משפחה.</p>
+      <button id="emergency-close" class="big secondary" type="button">סגירה</button>
+    </div>
+  </div>
+
+  <div id="debug-panel" class="debug-panel" hidden>
+    <button id="debug-copy" type="button">Copy log</button>
+    <pre id="debug-log" class="debug-log"></pre>
+  </div>
+  <script type="module" src="app.js?v=__ASSET_VERSION__"></script>
 </body>
 </html>

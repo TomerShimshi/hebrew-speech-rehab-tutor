@@ -32,3 +32,15 @@ def test_index_page_is_served_in_hebrew_rtl():
     assert response.status_code == 200
     assert 'dir="rtl"' in response.text
     assert "שנתחיל?" in response.text
+
+
+def test_static_assets_are_revalidated():
+    response = _client(None).get("/app.js")
+    assert response.headers["cache-control"] == "no-cache"
+
+
+def test_index_links_versioned_assets():
+    html = _client(None).get("/").text
+    assert "__ASSET_VERSION__" not in html
+    assert 'href="style.css?v=' in html
+    assert 'src="app.js?v=' in html

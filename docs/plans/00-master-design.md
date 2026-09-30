@@ -148,7 +148,7 @@ The rest of this document is the target design.
 | | **Live model** (`LIVE_MODEL`, gemini-3.8-live) | **Agent model** (`SUMMARY_MODEL`, gemini-3.8-flash) |
 |---|---|---|
 | Job | Only talk with Dad: encourage him, cue him, practice with him, give homework | Every tool call: memory, progress, research, planning, recommendations |
-| Tools | **None**, so no added latency | Function-calling loop (at most ~8 rounds) plus structured output |
+| Tools | **Only `end_session`** (she hangs up after her goodbye; added in 02). Nothing else, so no added latency | Function-calling loop (at most ~8 rounds) plus structured output |
 | Input | System prompt = `prompts/tutor.yaml` + the rendered **ClassPlan** + consolidated memory | Firestore data, Upstash data, YAML knowledge, web search |
 
 **The transcript is saved deterministically, never by an LLM.** The browser sends transcript turns to `POST /api/session/{id}/turns` every ~10 s and once more at the end. Plain Python writes them to Firestore. The Opus audio upload goes to Cloud Storage the same way.
