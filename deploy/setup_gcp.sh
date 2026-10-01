@@ -62,7 +62,11 @@ gcloud services enable \
   pubsub.googleapis.com \
   cloudfunctions.googleapis.com \
   eventarc.googleapis.com \
-  storage.googleapis.com
+  storage.googleapis.com \
+  firestore.googleapis.com \
+  firebaserules.googleapis.com \
+  identitytoolkit.googleapis.com \
+  firebase.googleapis.com
 
 echo ">> Gemini API key secret..."
 if ! gcloud secrets describe "$SECRET_NAME" >/dev/null 2>&1; then
@@ -97,6 +101,37 @@ RUNTIME_SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
 gcloud secrets add-iam-policy-binding "$SECRET_NAME" \
   --member="serviceAccount:${RUNTIME_SA}" \
   --role="roles/secretmanager.secretAccessor" >/dev/null
+
+# ---------------------------------------------------------------------------
+# Firestore: sessions + transcripts. Only the backend's service account touches it
+# (IAM); client access is denied by firestore.rules.
+# ---------------------------------------------------------------------------
+echo ">> Firestore database..."
+if ! gcloud firestore databases describe --database="(default)" >/dev/null 2>&1; then
+  gcloud firestore databases create --database="(default)" --location="$REGION" --type=firestore-native
+fi
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member="serviceAccount:${RUNTIME_SA}" --role="roles/datastore.user" --condition=None >/dev/null
+
+echo ">> Firestore security rules (deny all client access)..."
+TOKEN="$(gcv auth print-access-token)"
+RULES_JSON="$(python -c 'import json,sys; print(json.dumps({"source": {"files": [{"name": "firestore.rules", "content": open("firestore.rules", encoding="utf-8").read()}]}}))')"
+RULESET="$(curl -fsS -X POST "https://firebaserules.googleapis.com/v1/projects/${PROJECT_ID}/rulesets" \
+  -H "Authorization: Bearer ${TOKEN}" -H "x-goog-user-project: ${PROJECT_ID}" \
+  -H "Content-Type: application/json" -d "$RULES_JSON" \
+  | python -c 'import json,sys; print(json.load(sys.stdin)["name"])')"
+RELEASE="projects/${PROJECT_ID}/releases/cloud.firestore"
+RELEASE_BODY="{\"release\": {\"name\": \"${RELEASE}\", \"rulesetName\": \"${RULESET}\"}}"
+if ! curl -fsS -X PATCH "https://firebaserules.googleapis.com/v1/${RELEASE}" \
+    -H "Authorization: Bearer ${TOKEN}" -H "x-goog-user-project: ${PROJECT_ID}" \
+    -H "Content-Type: application/json" -d "$RELEASE_BODY" >/dev/null 2>&1; then
+  # First time: the release doesn't exist yet.
+  curl -fsS -X POST "https://firebaserules.googleapis.com/v1/projects/${PROJECT_ID}/releases" \
+    -H "Authorization: Bearer ${TOKEN}" -H "x-goog-user-project: ${PROJECT_ID}" \
+    -H "Content-Type: application/json" -d "{\"name\": \"${RELEASE}\", \"rulesetName\": \"${RULESET}\"}" >/dev/null
+fi
+echo "   released $RULESET"
+unset TOKEN
 
 # Private, de-identified patient profile: kept out of git and the image (the repo is
 # public). Its home is a private bucket only the app's service account can read; the

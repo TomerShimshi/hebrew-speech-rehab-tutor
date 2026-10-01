@@ -19,7 +19,11 @@ const SILENCE_NUDGE_MS = 30 * 1000;
 const $ = (id) => document.getElementById(id);
 // Carry app.js's ?v=<asset version> onto the worklets, so a deploy never runs stale audio code.
 const ASSET_QUERY = new URL(import.meta.url).search;
-const screens = { start: $("screen-start"), session: $("screen-session"), ended: $("screen-ended") };
+const { initAuth, signIn, signOut, idToken } = await import(`./auth.js${ASSET_QUERY}`);
+const screens = {
+  signin: $("screen-signin"), start: $("screen-start"), session: $("screen-session"), ended: $("screen-ended"),
+};
+const FLUSH_MS = 10 * 1000; // transcript lines are saved every ~10 s (and at the end)
 
 let s = null; // active session state
 
@@ -84,10 +88,15 @@ function newLine(speaker) {
   const box = $("captions");
   box.appendChild(line);
   box.scrollTop = box.scrollHeight;
-  return { line, textEl: line.querySelector(".text"), live: "", gem: "" };
+  const entry = {
+    line, textEl: line.querySelector(".text"), live: "", gem: "", speaker,
+    seq: s.nextSeq++, t: (performance.now() - s.startedAt) / 1000, interrupted: false,
+  };
+  return entry;
 }
 
 function renderUser(u) {
+  markDirty(u);
   u.textEl.textContent = u.gem || u.live;
   u.line.classList.toggle("live", !u.gem);
   $("captions").scrollTop = $("captions").scrollHeight;
@@ -114,11 +123,16 @@ function addTutorText(text) {
   onTutorOutput();
   if (!s.tutorLine) s.tutorLine = newLine("tutor");
   s.tutorLine.textEl.textContent += text;
+  markDirty(s.tutorLine);
   $("captions").scrollTop = $("captions").scrollHeight;
 }
 
 function endTutorTurn(reason) {
   log("turn", `tutor turn ended (${reason})`);
+  if (reason === "interrupted" && s.tutorLine) {
+    s.tutorLine.interrupted = true; // he talked over her: keep that in the transcript
+    markDirty(s.tutorLine);
+  }
   s.modelActive = false;
   s.tutorLine = null;
   s.userLine = null; // his next words start a new line
@@ -267,16 +281,76 @@ function sendNote(text) {
   sendJson({ realtimeInput: { text } });
 }
 
-async function fetchToken(resumeHandle) {
-  const res = await fetch("api/session/start", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    // The handle is baked into the new token server-side (the token's locked config wins).
-    body: JSON.stringify({ resume_handle: resumeHandle || null }),
+// Every API call carries the Google sign-in token; the server checks it + the allowlist.
+async function api(path, body, { keepalive = false } = {}) {
+  return fetch(path, {
+    method: body === undefined ? "GET" : "POST",
+    keepalive, // lets the last transcript flush finish even while the tab is closing
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${await idToken()}` },
+    body: body === undefined ? undefined : JSON.stringify(body),
   });
+}
+
+async function fetchToken(resumeHandle) {
+  const res = await api("api/session/start", {
+    // The handle is baked into the new token server-side (the token's locked config wins);
+    // on a reconnect the same session (and transcript) continues.
+    resume_handle: resumeHandle || null,
+    session_id: s.sessionId,
+  });
+  if (res.status === 401 || res.status === 403) throw new Error("צריך להתחבר מחדש כדי להמשיך.");
   if (res.status === 429) throw new Error("נראה שהיו הרבה אימונים בשעה האחרונה. נסה שוב מאוחר יותר.");
   if (!res.ok) throw new Error("לא הצלחנו להתחיל את האימון. נסה שוב בעוד רגע.");
-  return res.json();
+  const t = await res.json();
+  s.sessionId = t.session_id;
+  return t;
+}
+
+// ---- transcript saving --------------------------------------------------------
+// Plain code, no LLM: every caption line has a seq; lines that changed are re-sent and the
+// server upserts them by seq, so retries never duplicate.
+function markDirty(line) {
+  if (s && line) s.dirty.add(line);
+}
+
+function turnPayload(line) {
+  return {
+    seq: line.seq,
+    speaker: line.speaker,
+    text: line.speaker === "tutor" ? line.textEl.textContent : line.gem,
+    live_text: line.speaker === "patient" ? line.live : "",
+    t_start_s: Math.max(0, line.t),
+    interrupted: !!line.interrupted,
+  };
+}
+
+async function flushTurns(sess, { keepalive = false } = {}) {
+  if (!sess?.sessionId || sess.dirty.size === 0 || sess.flushing) return;
+  const lines = [...sess.dirty].slice(0, 50);
+  lines.forEach((l) => sess.dirty.delete(l));
+  sess.flushing = true;
+  try {
+    const res = await api(`api/session/${sess.sessionId}/turns`, { turns: lines.map(turnPayload) }, { keepalive });
+    if (!res.ok && res.status !== 409) throw new Error(`HTTP ${res.status}`);
+    log("save", `saved ${lines.length} line(s)`);
+  } catch (err) {
+    lines.forEach((l) => sess.dirty.add(l)); // retry on the next flush
+    log("save", `flush failed: ${err.message}`);
+  } finally {
+    sess.flushing = false;
+  }
+  if (sess.dirty.size && !keepalive) await flushTurns(sess); // more than 50 were pending
+}
+
+async function finishRemote(sess, reason) {
+  if (!sess.sessionId) return;
+  await flushTurns(sess, { keepalive: true });
+  try {
+    await api(`api/session/${sess.sessionId}/end`, { reason }, { keepalive: true });
+    log("save", `session ended on server (${reason})`);
+  } catch (err) {
+    log("save", `end failed: ${err.message}`); // next start marks it "abandoned"
+  }
 }
 
 async function openSocket(isResume) {
@@ -295,7 +369,7 @@ async function openSocket(isResume) {
     log("ws", `closed code=${e.code} reason=${e.reason || "-"}`);
     if (!s || s.ending || ws !== s.ws) return;
     // Already hanging up: the goodbyes are done, so just end -- never reconnect.
-    if (s.hangingUp) return endSession();
+    if (s.hangingUp) return endSession(undefined, "tutor_goodbye");
     // Unexpected close (e.g. the ~10 min connection limit): resume with a fresh token.
     console.warn("Live socket closed", e.code, e.reason);
     reconnect();
@@ -402,7 +476,7 @@ function hangUpAfterGoodbye() {
     if (finished || now - startedAt > 20000) {
       if (!finished) log("tool", "hang-up safety cap reached");
       clearInterval(timer);
-      endSession();
+      endSession(undefined, "tutor_goodbye");
     }
   }, 200);
 }
@@ -417,7 +491,7 @@ async function startSession() {
     startedAt: performance.now(), tutorLine: null, userLine: null, modelActive: false,
     rec: null, recBase: 0, recCount: 0, tutorAudio: false, echoUntil: 0,
     lastAudioAt: 0, hangingUp: false, lastUserAt: performance.now(), nudged: false,
-    lastUserText: "",
+    lastUserText: "", sessionId: null, nextSeq: 0, dirty: new Set(), flushing: false,
   };
   try {
     s.audio = await startAudio(); // inside the click handler: required to unlock audio on tablets
@@ -438,6 +512,8 @@ async function startSession() {
     return endSession(err.message);
   }
   s.wrapTimer = setTimeout(() => sendNote(NOTE_WRAP_UP), SESSION_WRAP_UP_MS);
+  const sess = s;
+  s.flushTimer = setInterval(() => flushTurns(sess), FLUSH_MS);
   // If he goes quiet after she finished talking (e.g. after her goodbye, or he walked away),
   // tell her once; she decides whether to hang up or check on him.
   s.silenceTimer = setInterval(() => {
@@ -456,12 +532,14 @@ async function startSession() {
   } catch { /* not supported: fine */ }
 }
 
-function endSession(errorMessage) {
+function endSession(errorMessage, reason = errorMessage ? "error" : "end_button") {
   if (!s) return;
-  log("session", errorMessage ? `ended with error: ${errorMessage}` : "ended");
+  log("session", errorMessage ? `ended with error: ${errorMessage}` : `ended (${reason})`);
   s.ending = true;
   clearTimeout(s.wrapTimer);
   clearInterval(s.silenceTimer);
+  clearInterval(s.flushTimer);
+  finishRemote(s, reason); // final transcript flush + mark the session ended (async)
   s.rec?.abort();
   s.ws?.close();
   stopAudio(s.audio);
@@ -478,7 +556,7 @@ function endSession(errorMessage) {
 }
 
 $("talk").addEventListener("click", startSession);
-$("end").addEventListener("click", () => { log("ui", "end button"); endSession(); });
+$("end").addEventListener("click", () => { log("ui", "end button"); endSession(undefined, "end_button"); });
 $("again").addEventListener("click", () => show("start"));
 $("thinking").addEventListener("click", () => {
   sendNote(NOTE_THINKING);
@@ -486,5 +564,53 @@ $("thinking").addEventListener("click", () => {
   btn.classList.add("active");
   setTimeout(() => btn.classList.remove("active"), 1500);
 });
+// Tab closing mid-session: save what we have. The session stays "active" and is marked
+// "abandoned" on the next start (its transcript is kept).
+window.addEventListener("pagehide", () => { if (s) flushTurns(s, { keepalive: true }); });
+
+// ---- sign-in -----------------------------------------------------------------
+function signinMessage(text, offerSwitch = false) {
+  $("signin-status").textContent = text;
+  $("signin-switch").hidden = !offerSwitch;
+}
+
+async function onUserChanged(user) {
+  if (s) return; // never interrupt a running session
+  if (!user) {
+    show("signin");
+    return;
+  }
+  const res = await api("api/me").catch(() => null);
+  if (res?.ok) {
+    signinMessage("");
+    show("start");
+  } else if (res?.status === 403) {
+    show("signin");
+    signinMessage(`החשבון ${user.email} לא מורשה להשתמש באפליקציה.`, true);
+  } else {
+    show("signin");
+    signinMessage("לא הצלחנו להתחבר לשרת. נסה שוב בעוד רגע.");
+  }
+}
+
+$("signin").addEventListener("click", async () => {
+  signinMessage("");
+  try {
+    await signIn();
+  } catch (err) {
+    log("auth", `sign-in failed: ${err.code || err.message}`);
+    signinMessage("ההתחברות לא הצליחה. נסה שוב.");
+  }
+});
+$("signin-switch").addEventListener("click", () => signOut());
+$("signout").addEventListener("click", () => signOut());
+
+try {
+  await initAuth(onUserChanged);
+} catch (err) {
+  log("auth", `init failed: ${err.message}`);
+  signinMessage("ההתחברות עדיין לא מוגדרת בשרת.");
+}
+
 $("emergency").addEventListener("click", () => { $("emergency-overlay").hidden = false; });
 $("emergency-close").addEventListener("click", () => { $("emergency-overlay").hidden = true; });

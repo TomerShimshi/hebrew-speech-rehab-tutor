@@ -7,13 +7,24 @@
   <link rel="stylesheet" href="style.css?v=__ASSET_VERSION__">
 </head>
 <body>
+  <!-- Sign-in screen -->
+  <main id="screen-signin" class="screen">
+    <img class="avatar" src="tutor-512.jpg" alt="המאמנת" onerror="this.onerror=null; this.src='tutor.svg'">
+    <h1>שלום! 👋</h1>
+    <p class="lead">כדי להתחיל, צריך להתחבר פעם אחת</p>
+    <button id="signin" class="big primary" type="button">התחברות עם Google</button>
+    <p id="signin-status" class="status" aria-live="polite"></p>
+    <button id="signin-switch" class="link" type="button" hidden>התחברות עם חשבון אחר</button>
+  </main>
+
   <!-- Start screen -->
-  <main id="screen-start" class="screen">
+  <main id="screen-start" class="screen" hidden>
     <img class="avatar" src="tutor-512.jpg" onerror="this.onerror=null; this.src='tutor.svg'" alt="המאמנת">
     <h1>שלום! 👋</h1>
     <p class="lead">האימון היומי שלנו מחכה</p>
     <button id="talk" class="big primary" type="button">שנתחיל?</button>
     <p id="start-status" class="status" aria-live="polite"></p>
+    <button id="signout" class="link" type="button">התנתקות</button>
   </main>
 
   <!-- In-session screen -->
