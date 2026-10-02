@@ -1,6 +1,9 @@
 """FastAPI entrypoint: `uvicorn app.main:app`."""
 
+import datetime as dt
 import hashlib
+import json
+from typing import Literal
 import time
 from functools import lru_cache
 from pathlib import Path
@@ -11,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from google import genai
 
 from app.agent.memory_update import run_memory_update
-from app.auth import User, verify_user, verify_sweeper
+from app.auth import User, require_caregiver, verify_user, verify_sweeper
 from app.config import Settings, get_settings
 from app.live_token import create_live_token
 from app.llm import generate, text_client
@@ -104,9 +107,9 @@ def public_config(settings: Settings = Depends(get_settings)) -> dict:
 
 
 @app.get("/api/me")
-def me(user: User = Depends(verify_user)) -> dict:
-    # Lets the page tell right after sign-in whether this account is allowed.
-    return {"email": user.email}
+def me(user: User = Depends(verify_user), settings: Settings = Depends(get_settings)) -> dict:
+    # Lets the page tell right after sign-in whether this account is allowed (and a caregiver).
+    return {"email": user.email, "is_caregiver": user.email in settings.caregiver_email_set}
 
 
 def memory_block(memory: dict | None) -> str:
@@ -268,6 +271,54 @@ def index() -> str:
     # stale copy after a deploy -- even one cached before we sent Cache-Control headers.
     html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
     return html.replace("__ASSET_VERSION__", asset_version())
+
+
+# ---- caregiver tools: forget memory / delete everything ---------------------------------
+
+@app.get("/api/admin/accounts")
+def admin_accounts(
+    _caregiver: User = Depends(require_caregiver),
+    settings: Settings = Depends(get_settings),
+    store: SessionStore = Depends(get_store),
+) -> dict:
+    # Only allowlisted accounts can be managed (their record id is the email).
+    return {"accounts": [
+        {"email": email, **store.account_overview(email)} for email in sorted(settings.allowed_email_set)
+    ]}
+
+
+@app.post("/api/admin/reset")
+def admin_reset(
+    email: str = Body(..., embed=True, max_length=320),
+    scope: Literal["memory", "everything"] = Body(..., embed=True),
+    confirm_email: str = Body(..., embed=True, max_length=320),
+    caregiver: User = Depends(require_caregiver),
+    settings: Settings = Depends(get_settings),
+    store: SessionStore = Depends(get_store),
+    archive: PromptArchive = Depends(get_prompt_archive),
+) -> dict:
+    """Forget an account's memory (transcripts kept) or delete all of its data -- e.g. to
+    demo the tutor from scratch. The previous memory is backed up to the private bucket."""
+    pid = email.strip().lower()
+    if pid not in settings.allowed_email_set:
+        raise HTTPException(status_code=404, detail="Unknown account")
+    if confirm_email.strip().lower() != pid:
+        raise HTTPException(status_code=400, detail="Type the account's email to confirm")
+    memory = store.get_memory(pid)
+    backup_uri = None
+    if memory:
+        stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        backup_uri = archive.save_backup(
+            pid=pid, name=f"{stamp}-{scope}.json",
+            content=json.dumps(memory, ensure_ascii=False, indent=2, default=str),
+        )
+    if scope == "memory":
+        store.forget_memory(pid)
+        deleted_sessions = 0
+    else:
+        deleted_sessions = store.delete_account(pid)
+    print(f"[admin] {caregiver.email} reset {pid} ({scope}); backup={backup_uri}", flush=True)
+    return {"email": pid, "scope": scope, "deleted_sessions": deleted_sessions, "backup": backup_uri}
 
 
 # Mounted last so API routes take precedence over static files.

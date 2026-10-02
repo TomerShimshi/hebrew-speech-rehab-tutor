@@ -30,6 +30,19 @@ class PromptArchive:
         self._prefix = (prefix or "").rstrip("/")
         self._upload = upload
 
+    def save_backup(self, *, pid: str, name: str, content: str) -> str | None:
+        """A JSON backup next to the prompts (debug/memory-backups/...), same 30-day expiry."""
+        if not self._prefix:
+            return None
+        base = self._prefix.rsplit("/", 1)[0]  # .../debug/prompts -> .../debug
+        uri = f"{base}/memory-backups/{pid}/{name}"
+        try:
+            self._upload(uri, content)
+            return uri
+        except Exception as exc:  # noqa: BLE001
+            _log(f"could not save {uri}: {exc!r:.200}")
+            return None
+
     def save(self, *, pid: str, sid: str, prompt_text: str, meta: dict) -> str | None:
         """Returns the gs:// uri, or None if archiving is off or failed."""
         if not self._prefix:

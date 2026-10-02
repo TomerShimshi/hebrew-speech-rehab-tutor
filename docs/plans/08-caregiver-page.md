@@ -32,3 +32,12 @@ Tomer (and the family) can see and manage everything without opening the Firesto
 
 ## Commit
 `Sub-plan 08: caregiver dashboard with profile editing, memory rollback and GitHub issues`
+
+## Built early (2026-10-02, Tomer's request for demos)
+A caregiver-only **"ניהול"** ("admin") screen already exists. The link is on the start screen and shows only for `CAREGIVER_EMAILS`; the server enforces it with `require_caregiver` → 403.
+- Pick an allowlisted account, then choose **"שכחי את הזיכרון"** ("forget the memory": deletes `memory/current`, keeps transcripts and memory history) or **"מחיקה מלאה"** ("delete everything": a recursive delete of that account's sessions, turns, memory, history and flags).
+- Confirm by typing the account's email.
+- Before deleting, the memory is backed up as JSON to `gs://heb-practice-private/debug/memory-backups/<email>/` (30-day expiry).
+- Endpoints: `GET /api/admin/accounts`, `POST /api/admin/reset`.
+
+08 should build on this: add the memory viewer, rollback to a `memory_history` version, and restore from a backup.

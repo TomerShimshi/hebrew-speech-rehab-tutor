@@ -25,6 +25,7 @@ docs/plans/01-gcp-skeleton.md
 docs/plans/02-voice-agent-v0.md
 docs/plans/03-auth-db-transcripts.md
 docs/plans/04-memory-update.md
+docs/plans/04.5-memory-reset.md        ← added: caregiver UI to forget memory / reset an account + mic mute
 docs/plans/05-next-class-builder.md
 docs/plans/06-games-integration.md
 docs/plans/07-web-search-subagent.md
@@ -107,6 +108,11 @@ The rest of this document is the target design.
 - The tutor prompt now includes `memory_prompt`.
 
 *Done when:* the second session opens by recalling the first, and memory history shows both versions.
+
+**M4.5: Forget memory / reset an account + microphone mute** (added at Tomer's request)
+- A caregiver-only "ניהול" screen: forget an account's memory (transcripts kept) or delete all of its data, with typed confirmation and a JSON backup in the private bucket. It's an early slice of the caregiver page (08).
+
+*Done when:* "forget memory" makes the next session greet like a first meeting, and Dad's account can't see or call it.
 
 **M5: Next-class builder (call #3) + ClassPlan**
 - The `ClassPlan` schema, `prompts/next_class.yaml`, `therapy_techniques.yaml` and the `get_therapy_technique` tool.

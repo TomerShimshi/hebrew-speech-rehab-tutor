@@ -53,6 +53,10 @@ class SessionStore(Protocol):
     def save_memory(self, pid: str, sid: str, memory: dict, previous: dict | None) -> None: ...
     def add_flag(self, pid: str, sid: str, flag: dict) -> None: ...
     def list_patient_ids(self) -> list[str]: ...
+    # caregiver resets (forget memory / delete everything)
+    def account_overview(self, pid: str) -> dict: ...
+    def forget_memory(self, pid: str) -> None: ...
+    def delete_account(self, pid: str) -> int: ...
 
 
 def _turn_fields(turn: TurnIn) -> dict:
@@ -128,10 +132,33 @@ class InMemorySessionStore:
         self.memory[pid] = {**memory, "updated_at": _now()}
 
     def add_flag(self, pid, sid, flag):
-        self.flags.append({**flag, "session_id": sid, "created_at": _now(), "status": "open"})
+        self.flags.append({**flag, "pid": pid, "session_id": sid, "created_at": _now(), "status": "open"})
 
     def list_patient_ids(self):
-        return sorted({pid for pid, _ in self.sessions})
+        return sorted({pid for pid, _ in self.sessions} | set(self.memory))
+
+    def account_overview(self, pid):
+        memory = self.memory.get(pid) or {}
+        return {
+            "sessions": sum(1 for p, _ in self.sessions if p == pid),
+            "has_memory": bool(memory.get("memory_prompt")),
+            "sessions_processed": memory.get("sessions_processed", 0),
+            "words": len(memory.get("word_bank", {})),
+        }
+
+    def forget_memory(self, pid):
+        self.memory.pop(pid, None)
+
+    def delete_account(self, pid):
+        keys = [k for k in self.sessions if k[0] == pid]
+        for key in keys:
+            self.sessions.pop(key)
+            self.turns.pop(key, None)
+        self.memory.pop(pid, None)
+        for key in [k for k in self.memory_history if k[0] == pid]:
+            self.memory_history.pop(key)
+        self.flags = [f for f in self.flags if f.get("pid") != pid]
+        return len(keys)
 
 
 class FirestoreSessionStore:
@@ -236,6 +263,27 @@ class FirestoreSessionStore:
 
     def list_patient_ids(self):
         return [doc.id for doc in self._db.collection("patients").list_documents()]
+
+    def account_overview(self, pid):
+        memory = self.get_memory(pid) or {}
+        sessions = self._patient(pid).collection("sessions").count().get()[0][0].value
+        return {
+            "sessions": int(sessions),
+            "has_memory": bool(memory.get("memory_prompt")),
+            "sessions_processed": memory.get("sessions_processed", 0),
+            "words": len(memory.get("word_bank", {})),
+        }
+
+    def forget_memory(self, pid):
+        # Only the live memory: transcripts, sessions and memory_history are kept.
+        self._patient(pid).collection("memory").document("current").delete()
+
+    def delete_account(self, pid):
+        sessions = int(self._patient(pid).collection("sessions").count().get()[0][0].value)
+        # recursive_delete removes the patient doc and every subcollection under it
+        # (sessions + turns, memory, memory_history, flags).
+        self._db.recursive_delete(self._patient(pid))
+        return sessions
 
     def add_flag(self, pid, sid, flag):
         self._patient(pid).collection("flags").document().set({

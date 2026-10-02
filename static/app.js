@@ -22,6 +22,7 @@ const ASSET_QUERY = new URL(import.meta.url).search;
 const { initAuth, signIn, signOut, idToken } = await import(`./auth.js${ASSET_QUERY}`);
 const screens = {
   signin: $("screen-signin"), start: $("screen-start"), session: $("screen-session"), ended: $("screen-ended"),
+  admin: $("screen-admin"),
 };
 const FLUSH_MS = 10 * 1000; // transcript lines are saved every ~10 s (and at the end)
 
@@ -33,8 +34,10 @@ function show(name) {
 
 function setIndicator(state) {
   const labels = { connecting: "מתחברת…", listening: "מקשיבה לך…", speaking: "מדברת…" };
-  $("indicator").dataset.state = state;
-  $("indicator-text").textContent = labels[state];
+  // While muted, the status says so (unless she's still finishing a sentence).
+  const shown = s?.muted && state === "listening" ? "muted" : state;
+  $("indicator").dataset.state = shown;
+  $("indicator-text").textContent = shown === "muted" ? "המיקרופון מושתק" : labels[state];
   $("session-avatar").dataset.state = state;
   if (s) {
     const speaking = state === "speaking";
@@ -157,7 +160,7 @@ function addUserFinal(text) {
 }
 
 function recognizerMuted() {
-  return s.modelActive || s.tutorAudio || performance.now() < s.echoUntil;
+  return s.muted || s.modelActive || s.tutorAudio || performance.now() < s.echoUntil;
 }
 
 function startLiveRecognizer() {
@@ -232,9 +235,13 @@ async function startAudio() {
   mute.gain.value = 0;
   capNode.connect(mute).connect(capCtx.destination);
   capNode.port.onmessage = (e) => {
-    showMicLevel(e.data);
     if (s?.hangingUp) return; // she's hanging up: don't send his audio anymore
-    sendJson({ realtimeInput: { audio: { data: b64FromBuffer(e.data), mimeType: MIC_MIME } } });
+    // Muted = the MIC is muted, nothing else: we keep streaming, but pure silence. Background
+    // noise can't interrupt her, and Gemini still sees the silence after his last words, so it
+    // answers him normally (stopping the stream instead could leave it waiting).
+    const chunk = s?.muted ? new ArrayBuffer(e.data.byteLength) : e.data;
+    if (!s?.muted) showMicLevel(e.data);
+    sendJson({ realtimeInput: { audio: { data: b64FromBuffer(chunk), mimeType: MIC_MIME } } });
   };
 
   const playCtx = new AudioContext({ sampleRate: 24000 });
@@ -493,7 +500,7 @@ async function startSession() {
     startedAt: performance.now(), tutorLine: null, userLine: null, modelActive: false,
     rec: null, recBase: 0, recCount: 0, tutorAudio: false, echoUntil: 0,
     lastAudioAt: 0, hangingUp: false, lastUserAt: performance.now(), nudged: false,
-    lastUserText: "", sessionId: null, nextSeq: 0, dirty: new Set(), flushing: false,
+    lastUserText: "", sessionId: null, nextSeq: 0, dirty: new Set(), flushing: false, muted: false,
   };
   try {
     s.audio = await startAudio(); // inside the click handler: required to unlock audio on tablets
@@ -505,6 +512,10 @@ async function startSession() {
     return;
   }
   $("captions").replaceChildren();
+  $("mute").classList.remove("active");
+  $("mute").setAttribute("aria-pressed", "false");
+  $("mute").textContent = "🔇 השתקה";
+  document.querySelector(".mic").classList.remove("muted");
   s.rec = startLiveRecognizer();
   show("session");
   setIndicator("connecting");
@@ -560,6 +571,28 @@ function endSession(errorMessage, reason = errorMessage ? "error" : "end_button"
 $("talk").addEventListener("click", startSession);
 $("end").addEventListener("click", () => { log("ui", "end button"); endSession(undefined, "end_button"); });
 $("again").addEventListener("click", () => show("start"));
+// Mute = mute the MICROPHONE only (like muting yourself on a call): the session goes on as
+// usual -- she keeps talking and still answers what he said last -- but background noise
+// (TV, people talking) can't interrupt her. See the capture handler: silence is streamed.
+function setMuted(muted) {
+  if (!s) return;
+  s.muted = muted;
+  if (muted) {
+    $("mic-level").style.width = "0%";
+  } else {
+    s.recBase = s.recCount; // drop anything the live recognizer picked up while muted
+  }
+  log("ui", muted ? "muted" : "unmuted");
+  const btn = $("mute");
+  btn.classList.toggle("active", muted);
+  btn.setAttribute("aria-pressed", String(muted));
+  btn.textContent = muted ? "🎤 החזרת הקול" : "🔇 השתקה";
+  document.querySelector(".mic").classList.toggle("muted", muted);
+  setIndicator(s.tutorAudio ? "speaking" : "listening");
+}
+
+$("mute").addEventListener("click", () => setMuted(!s?.muted));
+
 $("thinking").addEventListener("click", () => {
   sendNote(NOTE_THINKING);
   const btn = $("thinking");
@@ -584,6 +617,8 @@ async function onUserChanged(user) {
   }
   const res = await api("api/me").catch(() => null);
   if (res?.ok) {
+    const me = await res.json();
+    $("admin-open").hidden = !me.is_caregiver; // Dad never sees it; the server enforces it too
     signinMessage("");
     show("start");
   } else if (res?.status === 403) {
@@ -605,6 +640,58 @@ $("signin").addEventListener("click", async () => {
   }
 });
 $("signin-switch").addEventListener("click", () => signOut());
+
+// ---- caregiver tools: forget memory / delete everything -------------------------
+let adminAccounts = [];
+
+function adminDescribe() {
+  const a = adminAccounts.find((x) => x.email === $("admin-account").value);
+  $("admin-overview").textContent = a
+    ? `${a.sessions} שיחות · ${a.has_memory ? `זיכרון מ־${a.sessions_processed} שיחות, ${a.words} מילים בתרגול` : "אין זיכרון"}`
+    : "";
+  adminValidate();
+}
+
+function adminValidate() {
+  const ok = $("admin-confirm").value.trim().toLowerCase() === $("admin-account").value;
+  $("admin-run").disabled = !ok;
+}
+
+async function adminLoad() {
+  $("admin-status").textContent = "";
+  $("admin-confirm").value = "";
+  const res = await api("api/admin/accounts");
+  if (!res.ok) {
+    $("admin-status").textContent = "אין הרשאת ניהול.";
+    return;
+  }
+  adminAccounts = (await res.json()).accounts;
+  $("admin-account").replaceChildren(...adminAccounts.map((a) => new Option(a.email, a.email)));
+  adminDescribe();
+}
+
+$("admin-open").addEventListener("click", () => { show("admin"); adminLoad(); });
+$("admin-back").addEventListener("click", () => show("start"));
+$("admin-account").addEventListener("change", () => { $("admin-confirm").value = ""; adminDescribe(); });
+$("admin-confirm").addEventListener("input", adminValidate);
+$("admin-run").addEventListener("click", async () => {
+  const email = $("admin-account").value;
+  const scope = document.querySelector('input[name="admin-scope"]:checked').value;
+  $("admin-run").disabled = true;
+  $("admin-status").textContent = "מבצע…";
+  const res = await api("api/admin/reset", { email, scope, confirm_email: $("admin-confirm").value });
+  if (res.ok) {
+    const body = await res.json();
+    $("admin-status").textContent = scope === "memory"
+      ? "הזיכרון נמחק. השיחה הבאה תתחיל כמו פגישה ראשונה."
+      : `נמחקו ${body.deleted_sessions} שיחות וכל הזיכרון.`;
+    await adminLoad();
+    $("admin-status").textContent += body.backup ? " (נשמר גיבוי)" : "";
+  } else {
+    $("admin-status").textContent = "הפעולה נכשלה. נסה שוב.";
+    adminValidate();
+  }
+});
 $("signout").addEventListener("click", () => signOut());
 
 try {

@@ -37,5 +37,5 @@ def test_health_stays_public(env):
 
 
 def test_me_reports_allowed_account(env):
-    assert env.client.get("/api/me", headers=auth("tok-dad")).json() == {"email": "dad@example.com"}
+    assert env.client.get("/api/me", headers=auth("tok-dad")).json() == {"email": "dad@example.com", "is_caregiver": False}
     assert env.client.get("/api/me", headers=auth("tok-stranger")).status_code == 403
