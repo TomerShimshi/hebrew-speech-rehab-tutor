@@ -66,7 +66,8 @@ gcloud services enable \
   firestore.googleapis.com \
   firebaserules.googleapis.com \
   identitytoolkit.googleapis.com \
-  firebase.googleapis.com
+  firebase.googleapis.com \
+  cloudscheduler.googleapis.com
 
 echo ">> Gemini API key secret..."
 if ! gcloud secrets describe "$SECRET_NAME" >/dev/null 2>&1; then
@@ -149,6 +150,13 @@ fi
 gcloud storage buckets add-iam-policy-binding "$PRIVATE_BUCKET" \
   --member="serviceAccount:${RUNTIME_SA}" \
   --role="roles/storage.objectViewer" >/dev/null
+# The app also archives each session's tutor prompt under debug/ (for debugging).
+# objectCreator can CREATE objects only -- it can't overwrite or delete (e.g. the profile).
+gcloud storage buckets add-iam-policy-binding "$PRIVATE_BUCKET" \
+  --member="serviceAccount:${RUNTIME_SA}" \
+  --role="roles/storage.objectCreator" >/dev/null
+# Debug files expire after 30 days.
+gcloud storage buckets update "$PRIVATE_BUCKET" --lifecycle-file=deploy/private-bucket-lifecycle.json >/dev/null
 if [[ -f "$PROFILE_FILE" ]]; then
   tr -d '\r' < "$PROFILE_FILE" | gcloud storage cp - "$PROFILE_OBJECT" --content-type="text/markdown; charset=utf-8"
   echo "   uploaded $PROFILE_FILE -> $PROFILE_OBJECT"
@@ -157,6 +165,39 @@ elif gcloud storage objects describe "$PROFILE_OBJECT" >/dev/null 2>&1; then
   echo "   $PROFILE_OBJECT already in place (no local copy to upload)"
 else
   echo "   no profile yet -- create $PROFILE_FILE and re-run to upload it"
+fi
+
+# ---------------------------------------------------------------------------
+# Hourly memory sweep: Cloud Scheduler calls /internal/memory/sweep with a Google-signed
+# OIDC token for a dedicated service account; the app accepts only that account. It
+# updates memory for sessions still waiting (tab closed, or models were overloaded).
+# Free: Cloud Scheduler includes 3 jobs; when nothing is pending, no Gemini call is made.
+# ---------------------------------------------------------------------------
+SWEEPER_SA="memory-sweeper@${PROJECT_ID}.iam.gserviceaccount.com"
+echo ">> Memory sweep: service account + hourly job..."
+if ! gcloud iam service-accounts describe "$SWEEPER_SA" >/dev/null 2>&1; then
+  gcloud iam service-accounts create memory-sweeper --display-name="Hourly memory sweep (Cloud Scheduler)"
+fi
+SERVICE_URL="$(gcv run services describe hebrew-tutor --region "$REGION" --format='value(status.url)' 2>/dev/null || true)"
+if [[ -z "$SERVICE_URL" ]]; then
+  echo "   app not deployed yet -- run deploy.sh, then re-run this script to create the job"
+else
+  JOB_ARGS=(
+    --location="$REGION"
+    --schedule="0 * * * *"
+    --time-zone="Asia/Jerusalem"
+    --uri="${SERVICE_URL}/internal/memory/sweep"
+    --http-method=POST
+    --oidc-service-account-email="$SWEEPER_SA"
+    --oidc-token-audience="$SERVICE_URL"
+    --attempt-deadline=600s
+  )
+  if gcloud scheduler jobs describe memory-sweep --location="$REGION" >/dev/null 2>&1; then
+    gcloud scheduler jobs update http memory-sweep "${JOB_ARGS[@]}" >/dev/null
+  else
+    gcloud scheduler jobs create http memory-sweep "${JOB_ARGS[@]}" >/dev/null
+  fi
+  echo "   hourly job memory-sweep -> ${SERVICE_URL}/internal/memory/sweep"
 fi
 
 # ---------------------------------------------------------------------------

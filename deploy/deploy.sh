@@ -36,11 +36,16 @@ ENV_VARS="^|^PATIENT_PROFILE_URI=${PROFILE_URI}"
 ENV_VARS+="|GCP_PROJECT_ID=${PROJECT_ID}"
 ENV_VARS+="|ALLOWED_EMAILS=${ALLOWED_EMAILS}"
 ENV_VARS+="|CAREGIVER_EMAILS=$(dotenv CAREGIVER_EMAILS)"
-ENV_VARS+="|PATIENT_ID=$(dotenv PATIENT_ID)"
 ENV_VARS+="|FIREBASE_API_KEY=$(dotenv FIREBASE_API_KEY)"
 ENV_VARS+="|FIREBASE_AUTH_DOMAIN=$(dotenv FIREBASE_AUTH_DOMAIN)"
 ENV_VARS+="|FIREBASE_APP_ID=$(dotenv FIREBASE_APP_ID)"
-ENV_VARS="${ENV_VARS//|PATIENT_ID=|/|}"  # empty PATIENT_ID -> the app's default
+# The hourly memory sweep: only this service account's Google-signed token is accepted,
+# minted for the service URL (see setup_gcp.sh).
+SERVICE_URL="$(gcv run services describe "$SERVICE" --region "$REGION" --format='value(status.url)' 2>/dev/null || true)"
+ENV_VARS+="|SWEEPER_SA_EMAIL=memory-sweeper@${PROJECT_ID}.iam.gserviceaccount.com"
+ENV_VARS+="|SWEEP_AUDIENCE=${SERVICE_URL}"
+# Debug archive of each session's full tutor prompt, in the private bucket.
+ENV_VARS+="|PROMPT_ARCHIVE_URI=gs://${PROJECT_ID}-private/debug/prompts"
 
 gcloud run deploy "$SERVICE" \
   --source . \
@@ -48,6 +53,7 @@ gcloud run deploy "$SERVICE" \
   --min-instances 0 \
   --max-instances 1 \
   --memory 512Mi \
+  --timeout 600 \
   --set-secrets GEMINI_API_KEY=gemini-api-key:latest \
   --set-env-vars "$ENV_VARS" \
   --allow-unauthenticated

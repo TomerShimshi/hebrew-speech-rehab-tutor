@@ -40,8 +40,22 @@ class Settings(BaseSettings):
     firebase_auth_domain: str = ""
     firebase_app_id: str = ""
 
-    # Firestore: one patient for now.
-    patient_id: str = "patient-1"
+    # Debug archive of each session's full tutor prompt (private bucket); empty = off.
+    prompt_archive_uri: str = ""  # e.g. gs://heb-practice-private/debug/prompts
+
+    # Hourly memory sweep (Cloud Scheduler -> POST /internal/memory/sweep with an OIDC token).
+    sweeper_sa_email: str = ""  # the only caller allowed
+    sweep_audience: str = ""  # the service URL the token is minted for
+    memory_sweep_batch: int = 3  # sessions per sweep
+    memory_end_deadline_s: int = 240  # time budget for the update run inside /end
+
+    # Agent calls (memory update etc.): primary model + fallbacks for 503 "high demand".
+    summary_model: str = "gemini-3.8-flash"
+    # (gemini-2.5-flash is listed but returns 404 "no longer available to new users".)
+    summary_fallback_models: str = (
+        "gemini-3.7-flash,gemini-3.6-flash,gemini-flash-latest,gemini-3.5-flash-lite"
+    )
+    memory_max_tool_rounds: int = 8
 
     @property
     def allowed_email_set(self) -> frozenset[str]:

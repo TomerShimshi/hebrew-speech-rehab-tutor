@@ -346,8 +346,10 @@ async function finishRemote(sess, reason) {
   if (!sess.sessionId) return;
   await flushTurns(sess, { keepalive: true });
   try {
-    await api(`api/session/${sess.sessionId}/end`, { reason }, { keepalive: true });
-    log("save", `session ended on server (${reason})`);
+    log("save", `session ended (${reason}); updating memory…`);
+    const res = await api(`api/session/${sess.sessionId}/end`, { reason }, { keepalive: true });
+    const body = await res.json().catch(() => ({}));
+    log("save", `memory update: ${body.memory_status ?? res.status}`);
   } catch (err) {
     log("save", `end failed: ${err.message}`); // next start marks it "abandoned"
   }

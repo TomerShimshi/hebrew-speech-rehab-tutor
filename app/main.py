@@ -1,6 +1,7 @@
 """FastAPI entrypoint: `uvicorn app.main:app`."""
 
 import hashlib
+import time
 from functools import lru_cache
 from pathlib import Path
 
@@ -9,10 +10,13 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from google import genai
 
-from app.auth import User, verify_user
+from app.agent.memory_update import run_memory_update
+from app.auth import User, verify_user, verify_sweeper
 from app.config import Settings, get_settings
 from app.live_token import create_live_token
+from app.llm import generate, text_client
 from app.patient_profile import PatientProfileLoader, extract_vocabulary
+from app.prompt_archive import PromptArchive
 from app.prompts import render_tutor_prompt
 from app.rate_limit import SlidingWindowLimiter
 from app.store import ACTIVE, FirestoreSessionStore, SessionStore
@@ -65,6 +69,27 @@ def get_store() -> SessionStore:
     return FirestoreSessionStore()
 
 
+@lru_cache
+def get_prompt_archive() -> PromptArchive:
+    return PromptArchive(get_settings().prompt_archive_uri)
+
+
+def get_text_client(settings: Settings = Depends(get_settings)):
+    if not settings.gemini_api_key:
+        raise HTTPException(status_code=503, detail="Gemini API key is not configured")
+    return text_client(settings.gemini_api_key)
+
+
+def _bounded_generate(budget_s: float):
+    """generate() with one shared time budget across all calls of a memory update."""
+    deadline = time.monotonic() + budget_s
+
+    def bounded(client, models, contents, config=None):
+        return generate(client, models, contents, config, deadline=deadline)
+
+    return bounded
+
+
 @app.get("/api/config")
 def public_config(settings: Settings = Depends(get_settings)) -> dict:
     # The Firebase web config is public by design; access is enforced by verify_user.
@@ -84,8 +109,25 @@ def me(user: User = Depends(verify_user)) -> dict:
     return {"email": user.email}
 
 
+def memory_block(memory: dict | None) -> str:
+    """The tutor-facing part of this account's memory (written after each session, 04)."""
+    if not memory or not memory.get("memory_prompt"):
+        return ""
+    text = memory["memory_prompt"].strip()
+    focus = memory.get("focus_next_session") or []
+    if focus:
+        text += "\n\nFocus for this session:\n" + "\n".join(f"- {f}" for f in focus)
+    return text
+
+
+def patient_id_for(user: User) -> str:
+    # Every account is its own record (sessions, transcripts, memory), keyed by login email,
+    # so memories never mix -- e.g. Tomer's test sessions vs Dad's real ones.
+    return user.email
+
+
 def _own_active_session(store: SessionStore, settings: Settings, user: User, sid: str) -> dict:
-    session = store.get_session(settings.patient_id, sid)
+    session = store.get_session(patient_id_for(user), sid)
     if session is None or session.get("user_email") != user.email:
         raise HTTPException(status_code=404, detail="Session not found")
     if session.get("status") != ACTIVE:
@@ -105,13 +147,17 @@ def start_session(
     limiter: SlidingWindowLimiter = Depends(get_token_limiter),
     profile: PatientProfileLoader = Depends(get_profile_loader),
     store: SessionStore = Depends(get_store),
+    archive: PromptArchive = Depends(get_prompt_archive),
 ) -> dict:
     if not limiter.allow():
         raise HTTPException(status_code=429, detail="Too many sessions, try again later")
     if session_id:
         _own_active_session(store, settings, user, session_id)  # reconnect: same session
     profile_text = profile.get()
-    prompt = render_tutor_prompt(patient_profile=profile_text)
+    prompt = render_tutor_prompt(
+        patient_profile=profile_text,
+        memory_prompt=memory_block(store.get_memory(patient_id_for(user))),
+    )
     live = create_live_token(
         settings,
         prompt,
@@ -121,13 +167,20 @@ def start_session(
     )
     if not session_id:
         # A session still "active" means its tab was closed without ending: close it out.
-        store.mark_abandoned(settings.patient_id)
+        store.mark_abandoned(patient_id_for(user))
         session_id = store.create_session(
-            settings.patient_id,
+            patient_id_for(user),
             user_email=user.email,
             model=live.model,
             prompt_version=prompt.version,
         )
+        # Debugging aid: keep the exact prompt this session's tutor got (private bucket).
+        prompt_uri = archive.save(
+            pid=patient_id_for(user), sid=session_id, prompt_text=prompt.text,
+            meta={"account": user.email, "model": live.model, "prompt_version": prompt.version},
+        )
+        if prompt_uri:
+            store.update_session(patient_id_for(user), session_id, {"prompt_uri": prompt_uri})
     return {
         "session_id": session_id,
         "token": live.token,
@@ -148,7 +201,7 @@ def save_turns(
 ) -> dict:
     # Deterministic transcript saving: plain code, upsert by seq (retries never duplicate).
     _own_active_session(store, settings, user, session_id)
-    store.upsert_turns(settings.patient_id, session_id, batch.turns)
+    store.upsert_turns(patient_id_for(user), session_id, batch.turns)
     return {"saved": len(batch.turns)}
 
 
@@ -159,10 +212,43 @@ def end_session(
     user: User = Depends(verify_user),
     settings: Settings = Depends(get_settings),
     store: SessionStore = Depends(get_store),
+    profile: PatientProfileLoader = Depends(get_profile_loader),
+    llm_client=Depends(get_text_client),
 ) -> dict:
+    pid = patient_id_for(user)
     _own_active_session(store, settings, user, session_id)
-    store.end_session(settings.patient_id, session_id, body.reason)
-    return {"status": "ended"}
+    store.end_session(pid, session_id, body.reason)
+    # Update the tutor's memory now, inside this request (Cloud Run throttles CPU after the
+    # response). The browser doesn't wait: it sent this with keepalive and moved on.
+    # Failures are recorded and retried by the hourly sweep.
+    memory_status = run_memory_update(
+        store, llm_client, settings, pid, session_id,
+        profile_text=profile.get(), generate_fn=_bounded_generate(settings.memory_end_deadline_s),
+    )
+    return {"status": "ended", "memory_status": memory_status}
+
+
+@app.post("/internal/memory/sweep")
+def memory_sweep(
+    _caller: str = Depends(verify_sweeper),
+    settings: Settings = Depends(get_settings),
+    store: SessionStore = Depends(get_store),
+    profile: PatientProfileLoader = Depends(get_profile_loader),
+    llm_client=Depends(get_text_client),
+) -> dict:
+    """Hourly (Cloud Scheduler): update memory for sessions still waiting -- tabs closed
+    mid-session, or updates that failed because the models were overloaded."""
+    results: dict[str, str] = {}
+    budget = settings.memory_sweep_batch
+    for pid in store.list_patient_ids():
+        for sid in store.pending_memory_sessions(pid, limit=budget - len(results)):
+            results[sid] = run_memory_update(
+                store, llm_client, settings, pid, sid,
+                profile_text=profile.get(), generate_fn=_bounded_generate(240),
+            )
+        if len(results) >= budget:
+            break
+    return {"processed": results}
 
 
 @lru_cache

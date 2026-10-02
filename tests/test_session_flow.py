@@ -13,7 +13,7 @@ def start(env, token="tok-dad"):
 
 def test_full_flow_saves_transcript_in_order(env):
     sid = start(env)
-    pid = env.settings.patient_id
+    pid = DAD
     r = env.client.post(f"/api/session/{sid}/turns", headers=auth(), json={"turns": [
         turn(0, "tutor", "שלום, איך אתה מרגיש?", t=1.2),
         turn(1, "patient", "", live_text="אני מרגיש", t=5.0),
@@ -44,7 +44,7 @@ def test_retrying_a_flush_is_idempotent(env):
     payload = {"turns": [turn(0, "tutor", "שלום"), turn(1, "patient", "היי")]}
     for _ in range(3):
         env.client.post(f"/api/session/{sid}/turns", headers=auth(), json=payload)
-    assert len(env.store.list_turns(env.settings.patient_id, sid)) == 2
+    assert len(env.store.list_turns(DAD, sid)) == 2
 
 
 def test_another_user_cannot_write_to_the_session(env):
@@ -71,7 +71,7 @@ def test_closed_tab_session_is_marked_abandoned_on_next_start(env):
     first = start(env)
     env.client.post(f"/api/session/{first}/turns", headers=auth(), json={"turns": [turn(0, "tutor", "שלום")]})
     second = start(env)  # the first was never ended
-    pid = env.settings.patient_id
+    pid = DAD
     assert env.store.get_session(pid, first)["end_reason"] == "abandoned"
     assert env.store.list_turns(pid, first)  # its transcript is kept
     assert env.store.get_session(pid, second)["status"] == "active"

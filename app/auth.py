@@ -59,6 +59,34 @@ def verify_user(
     return User(uid=str(claims.get("user_id") or claims.get("sub") or ""), email=email)
 
 
+def verify_google_oidc(token: str, audience: str) -> dict:
+    return id_token.verify_oauth2_token(token, _transport(), audience=audience)
+
+
+def get_oidc_verifier() -> TokenVerifier:
+    return verify_google_oidc
+
+
+def verify_sweeper(
+    request: Request,
+    settings: Settings = Depends(get_settings),
+    verify: TokenVerifier = Depends(get_oidc_verifier),
+) -> str:
+    """Only Cloud Scheduler's service account (Google-signed OIDC token) may run the sweep."""
+    if not settings.sweeper_sa_email or not settings.sweep_audience:
+        raise HTTPException(status_code=503, detail="Sweep is not configured")
+    scheme, _, token = request.headers.get("authorization", "").partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        raise HTTPException(status_code=401, detail="Missing token")
+    try:
+        claims = verify(token, settings.sweep_audience)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    if claims.get("email") != settings.sweeper_sa_email or not claims.get("email_verified"):
+        raise HTTPException(status_code=403, detail="Not the scheduler")
+    return claims["email"]
+
+
 def require_caregiver(
     user: User = Depends(verify_user), settings: Settings = Depends(get_settings)
 ) -> User:

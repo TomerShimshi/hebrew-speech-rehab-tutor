@@ -1,9 +1,12 @@
 """Session + transcript storage: Firestore in production, in-memory for tests.
 
-Layout (see docs/plans/03):
+Layout (see docs/plans/03 and 04):
   patients/{pid}
-  patients/{pid}/sessions/{sid}           status, timestamps, end_reason, prompt_version...
+  patients/{pid}/sessions/{sid}           status, timestamps, end_reason, memory_status, summary...
   patients/{pid}/sessions/{sid}/turns/{seq:05d}
+  patients/{pid}/memory/current           the tutor's long-term memory of him (MemoryDoc)
+  patients/{pid}/memory_history/{sid}     the previous memory, saved before each update
+  patients/{pid}/flags/{id}               things the family should see
 """
 
 import datetime as dt
@@ -14,6 +17,21 @@ from app.transcripts import EndReason, TurnIn, turn_doc_id
 
 ACTIVE = "active"
 ENDED = "ended"
+
+# memory_status of an ended session (sub-plan 04)
+MEM_PENDING, MEM_PROCESSING, MEM_DONE, MEM_FAILED, MEM_SKIPPED = (
+    "pending", "processing", "done", "failed", "skipped")
+STALE_PROCESSING = dt.timedelta(minutes=10)  # a crashed update is retried after this
+
+
+def _claimable(session: dict, now: dt.datetime) -> bool:
+    status = session.get("memory_status")
+    if session.get("status") != ENDED:
+        return False
+    if status in (MEM_PENDING, MEM_FAILED):
+        return True
+    claimed_at = session.get("memory_claimed_at")
+    return status == MEM_PROCESSING and (claimed_at is None or now - claimed_at > STALE_PROCESSING)
 
 
 def _now() -> dt.datetime:
@@ -27,6 +45,14 @@ class SessionStore(Protocol):
     def end_session(self, pid: str, sid: str, reason: EndReason) -> None: ...
     def mark_abandoned(self, pid: str) -> int: ...
     def list_turns(self, pid: str, sid: str) -> list[dict]: ...
+    # memory (sub-plan 04)
+    def update_session(self, pid: str, sid: str, fields: dict) -> None: ...
+    def claim_for_memory(self, pid: str, sid: str) -> bool: ...
+    def pending_memory_sessions(self, pid: str, limit: int = 2) -> list[str]: ...
+    def get_memory(self, pid: str) -> dict | None: ...
+    def save_memory(self, pid: str, sid: str, memory: dict, previous: dict | None) -> None: ...
+    def add_flag(self, pid: str, sid: str, flag: dict) -> None: ...
+    def list_patient_ids(self) -> list[str]: ...
 
 
 def _turn_fields(turn: TurnIn) -> dict:
@@ -37,6 +63,9 @@ class InMemorySessionStore:
     def __init__(self) -> None:
         self.sessions: dict[tuple[str, str], dict] = {}
         self.turns: dict[tuple[str, str], dict[str, dict]] = {}
+        self.memory: dict[str, dict] = {}
+        self.memory_history: dict[tuple[str, str], dict] = {}
+        self.flags: list[dict] = []
 
     def create_session(self, pid, *, user_email, model, prompt_version):
         sid = uuid.uuid4().hex
@@ -59,19 +88,50 @@ class InMemorySessionStore:
     def end_session(self, pid, sid, reason):
         self.sessions[(pid, sid)].update(
             status=ENDED, ended_at=_now(), end_reason=reason.value,
-            turn_count=len(self.turns[(pid, sid)]),
+            turn_count=len(self.turns[(pid, sid)]), memory_status=MEM_PENDING,
         )
 
     def mark_abandoned(self, pid):
         stale = [k for k, v in self.sessions.items() if k[0] == pid and v["status"] == ACTIVE]
         for key in stale:
             self.sessions[key].update(
-                status=ENDED, ended_at=_now(), end_reason=EndReason.abandoned.value
+                status=ENDED, ended_at=_now(), end_reason=EndReason.abandoned.value,
+                turn_count=len(self.turns[key]), memory_status=MEM_PENDING,
             )
         return len(stale)
 
     def list_turns(self, pid, sid):
         return [self.turns[(pid, sid)][k] for k in sorted(self.turns[(pid, sid)])]
+
+    def update_session(self, pid, sid, fields):
+        self.sessions[(pid, sid)].update(fields)
+
+    def claim_for_memory(self, pid, sid):
+        session = self.sessions.get((pid, sid))
+        if not session or not _claimable(session, _now()):
+            return False
+        session.update(memory_status=MEM_PROCESSING, memory_claimed_at=_now())
+        return True
+
+    def pending_memory_sessions(self, pid, limit=2):
+        now = _now()
+        found = [v for k, v in self.sessions.items() if k[0] == pid and _claimable(v, now)]
+        found.sort(key=lambda v: v["started_at"])
+        return [v["id"] for v in found[:limit]]
+
+    def get_memory(self, pid):
+        return self.memory.get(pid)
+
+    def save_memory(self, pid, sid, memory, previous):
+        if previous is not None:
+            self.memory_history[(pid, sid)] = previous
+        self.memory[pid] = {**memory, "updated_at": _now()}
+
+    def add_flag(self, pid, sid, flag):
+        self.flags.append({**flag, "session_id": sid, "created_at": _now(), "status": "open"})
+
+    def list_patient_ids(self):
+        return sorted({pid for pid, _ in self.sessions})
 
 
 class FirestoreSessionStore:
@@ -116,19 +176,68 @@ class FirestoreSessionStore:
         count = int(session.collection("turns").count().get()[0][0].value)
         session.update({
             "status": ENDED, "ended_at": self._fs.SERVER_TIMESTAMP, "end_reason": reason.value,
-            "turn_count": count,
+            "turn_count": count, "memory_status": MEM_PENDING,
         })
 
     def mark_abandoned(self, pid):
         sessions = self._patient(pid).collection("sessions")
         stale = list(sessions.where(filter=self._fs.FieldFilter("status", "==", ACTIVE)).stream())
         for snap in stale:
+            count = int(snap.reference.collection("turns").count().get()[0][0].value)
             snap.reference.update({
                 "status": ENDED, "ended_at": self._fs.SERVER_TIMESTAMP,
-                "end_reason": EndReason.abandoned.value,
+                "end_reason": EndReason.abandoned.value, "turn_count": count,
+                "memory_status": MEM_PENDING,
             })
         return len(stale)
 
     def list_turns(self, pid, sid):
         turns = self._session(pid, sid).collection("turns").order_by("seq").stream()
         return [snap.to_dict() for snap in turns]
+
+    def update_session(self, pid, sid, fields):
+        self._session(pid, sid).update(fields)
+
+    def claim_for_memory(self, pid, sid):
+        ref = self._session(pid, sid)
+        fs = self._fs
+
+        @fs.transactional
+        def claim(transaction):
+            snap = ref.get(transaction=transaction)
+            if not snap.exists or not _claimable(snap.to_dict(), _now()):
+                return False
+            transaction.update(ref, {"memory_status": MEM_PROCESSING, "memory_claimed_at": _now()})
+            return True
+
+        return claim(self._db.transaction())
+
+    def pending_memory_sessions(self, pid, limit=2):
+        sessions = self._patient(pid).collection("sessions")
+        query = sessions.where(filter=self._fs.FieldFilter(
+            "memory_status", "in", [MEM_PENDING, MEM_FAILED, MEM_PROCESSING]))
+        now = _now()
+        found = [{"id": s.id, **s.to_dict()} for s in query.stream()]
+        found = [s for s in found if _claimable(s, now)]
+        found.sort(key=lambda s: s.get("started_at") or now)
+        return [s["id"] for s in found[:limit]]
+
+    def get_memory(self, pid):
+        snap = self._patient(pid).collection("memory").document("current").get()
+        return snap.to_dict() if snap.exists else None
+
+    def save_memory(self, pid, sid, memory, previous):
+        batch = self._db.batch()
+        if previous is not None:
+            batch.set(self._patient(pid).collection("memory_history").document(sid), previous)
+        batch.set(self._patient(pid).collection("memory").document("current"),
+                  {**memory, "updated_at": self._fs.SERVER_TIMESTAMP})
+        batch.commit()
+
+    def list_patient_ids(self):
+        return [doc.id for doc in self._db.collection("patients").list_documents()]
+
+    def add_flag(self, pid, sid, flag):
+        self._patient(pid).collection("flags").document().set({
+            **flag, "session_id": sid, "created_at": self._fs.SERVER_TIMESTAMP, "status": "open",
+        })

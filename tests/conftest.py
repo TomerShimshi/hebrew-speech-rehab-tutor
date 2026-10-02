@@ -5,12 +5,17 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
-from app.auth import get_token_verifier
+from app.auth import get_oidc_verifier, get_token_verifier
 from app.config import Settings, get_settings
-from app.main import app, get_genai_client, get_profile_loader, get_store, get_token_limiter
+from app.main import (
+    app, get_genai_client, get_profile_loader, get_prompt_archive, get_store, get_text_client,
+    get_token_limiter,
+)
+from app.prompt_archive import PromptArchive
 from app.patient_profile import PatientProfileLoader
 from app.rate_limit import SlidingWindowLimiter
 from app.store import InMemorySessionStore
+from fake_llm import FakeClient
 
 DAD = "dad@example.com"
 TOMER = "tomer@example.com"
@@ -24,6 +29,20 @@ TOKENS = {
     "tok-stranger": {"email": STRANGER, "email_verified": True, "user_id": "u-x"},
     "tok-unverified": {"email": DAD, "email_verified": False, "user_id": "u-dad"},
 }
+
+
+SWEEPER = "memory-sweeper@heb-practice.iam.gserviceaccount.com"
+SWEEP_AUDIENCE = "https://tutor.example"
+OIDC_TOKENS = {
+    "oidc-scheduler": {"email": SWEEPER, "email_verified": True},
+    "oidc-other": {"email": "someone@heb-practice.iam.gserviceaccount.com", "email_verified": True},
+}
+
+
+def fake_oidc_verifier(token: str, audience: str) -> dict:
+    if token not in OIDC_TOKENS or audience != SWEEP_AUDIENCE:
+        raise ValueError("bad token")
+    return OIDC_TOKENS[token]
 
 
 def fake_verifier(token: str, project_id: str) -> dict:
@@ -45,9 +64,12 @@ def auth(token: str = "tok-dad") -> dict:
 
 
 @pytest.fixture
-def env(tmp_path):
+def env(tmp_path, monkeypatch):
+    monkeypatch.setattr("app.llm.time.sleep", lambda s: None)  # no real backoff waits in tests
     """Wires the app with fakes; returns (client, store, settings). Tune via env.configure()."""
-    state = SimpleNamespace(store=InMemorySessionStore(), limit=5, key=SECRET)
+    # llm: the text client used by the memory update (scripted per test; empty = must not be called)
+    # archived: uri -> text the prompt archive "uploaded"
+    state = SimpleNamespace(store=InMemorySessionStore(), limit=5, key=SECRET, llm=FakeClient(), archived={})
 
     def configure(**overrides):
         fields = {
@@ -56,6 +78,10 @@ def env(tmp_path):
             "caregiver_emails": TOMER,
             "patient_profile_uri": None,
             "patient_profile_path": tmp_path / "none.md",
+            "sweeper_sa_email": SWEEPER,
+            "sweep_audience": SWEEP_AUDIENCE,
+            "summary_model": "primary",
+            "summary_fallback_models": "fallback",
         }
         settings = Settings(**{**fields, **overrides})
         limiter = SlidingWindowLimiter(state.limit, window_s=3600)
@@ -64,6 +90,10 @@ def env(tmp_path):
         app.dependency_overrides[get_profile_loader] = lambda: PatientProfileLoader(settings)
         app.dependency_overrides[get_store] = lambda: state.store
         app.dependency_overrides[get_token_verifier] = lambda: fake_verifier
+        app.dependency_overrides[get_oidc_verifier] = lambda: fake_oidc_verifier
+        app.dependency_overrides[get_text_client] = lambda: state.llm
+        app.dependency_overrides[get_prompt_archive] = lambda: PromptArchive(
+            settings.prompt_archive_uri, upload=lambda uri, text: state.archived.__setitem__(uri, text))
         if state.key:
             app.dependency_overrides[get_genai_client] = lambda: SimpleNamespace(
                 auth_tokens=FakeAuthTokens()
