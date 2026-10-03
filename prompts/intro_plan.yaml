@@ -1,0 +1,29 @@
+# The fixed plan for an account's FIRST session (or the first after "forget memory").
+# No LLM involved. Goal: get to know him -- and seed the memory with HIS people and places,
+# which later name-retrieval sessions practice. Nothing should feel like a test.
+plan_type: intro
+primary_goal:
+  type: intro
+  description: >
+    Get to know him as a person, warmly and without any feeling of a test. Collect the
+    names that matter in his life: family members (and grandchildren), friends, the town
+    he lives in and grew up in, places he loves to visit, his work, his hobbies.
+recall_from_last_time: ""
+warmup: >
+  Introduce yourself briefly as his speaking-practice partner, then ask how he is today.
+probe: []
+practice: []
+activity: >
+  Ask him, one question at a time, to tell you about: the people closest to him (ask for
+  their names, naturally: "איך קוראים לה?"), where he lives and where he grew up, a place
+  in Israel he loves, what he did for work, and what he enjoys doing. Follow up on what he
+  says and let him talk. If a name doesn't come, help gently with a hint and move on.
+conversation_topics:
+  - his family and grandchildren
+  - places in Israel he loves
+  - his work and hobbies
+homework: >
+  Ask him to think, until next time, of one place he would like to tell you about.
+fatigue_fallback: >
+  Switch to an easy, pleasant topic he clearly enjoys, and keep your questions simple.
+avoid: []

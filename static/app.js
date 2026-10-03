@@ -2,7 +2,7 @@
 // Gemini Live directly over a WebSocket (audio never passes through our server).
 // The prompt/voice/VAD are locked into the token server-side; we only name the model.
 
-const SESSION_WRAP_UP_MS = 11 * 60 * 1000; // ask the tutor to close at ~11 min (limit is 15)
+const SESSION_WRAP_UP_MS = 9 * 60 * 1000; // ask the tutor to close at ~9 min (limit is 15)
 const MIC_MIME = "audio/pcm;rate=16000";
 
 // Short English stage directions the tutor receives as text (it always replies in Hebrew).
@@ -10,7 +10,9 @@ const NOTE_START = "[The patient just opened the app. Greet him and begin the se
 const NOTE_THINKING =
   "[He pressed the 'I'm thinking' button: he needs more time to find his words. " +
   "Say only a very short reassurance (like 'קח את הזמן'), then wait silently for him.]";
-const NOTE_WRAP_UP = "[About 10 minutes have passed. Move to the closing stage now and end on a success.]";
+const NOTE_WRAP_UP =
+  "[About 9 minutes have passed: time to wrap up. Let him finish what he is saying, then move " +
+  "to the closing naturally.]";
 const NOTE_SILENCE =
   "[He has been silent for 30 seconds. If you already said goodbye, call end_session now. " +
   "Otherwise gently check whether he is still there (one short question in Hebrew).]";
@@ -524,13 +526,21 @@ async function startSession() {
   } catch (err) {
     return endSession(err.message);
   }
-  s.wrapTimer = setTimeout(() => sendNote(NOTE_WRAP_UP), SESSION_WRAP_UP_MS);
+  // The tutor never starts closing on her own (prompt); this note tells her when. It waits for a
+  // quiet moment -- not while she talks or right after he spoke -- so it never cuts a thread.
+  s.wrapTimer = setTimeout(() => { if (s) s.wrapDue = true; }, SESSION_WRAP_UP_MS);
   const sess = s;
   s.flushTimer = setInterval(() => flushTurns(sess), FLUSH_MS);
   // If he goes quiet after she finished talking (e.g. after her goodbye, or he walked away),
   // tell her once; she decides whether to hang up or check on him.
   s.silenceTimer = setInterval(() => {
     if (!s || s.hangingUp || s.modelActive || s.tutorAudio) return;
+    if (s.wrapDue && performance.now() - Math.max(s.lastUserAt, s.lastAudioAt) > 2000) {
+      s.wrapDue = false;
+      log("ui", "wrap-up note sent");
+      sendNote(NOTE_WRAP_UP);
+      return;
+    }
     const quietFor = performance.now() - Math.max(s.lastUserAt, s.lastAudioAt);
     if (quietFor < SILENCE_NUDGE_MS) {
       s.nudged = false;

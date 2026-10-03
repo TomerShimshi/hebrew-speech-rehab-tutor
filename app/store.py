@@ -7,6 +7,7 @@ Layout (see docs/plans/03 and 04):
   patients/{pid}/memory/current           the tutor's long-term memory of him (MemoryDoc)
   patients/{pid}/memory_history/{sid}     the previous memory, saved before each update
   patients/{pid}/flags/{id}               things the family should see
+  patients/{pid}/plans/next               the lesson plan for the coming session (05)
 """
 
 import datetime as dt
@@ -21,7 +22,10 @@ ENDED = "ended"
 # memory_status of an ended session (sub-plan 04)
 MEM_PENDING, MEM_PROCESSING, MEM_DONE, MEM_FAILED, MEM_SKIPPED = (
     "pending", "processing", "done", "failed", "skipped")
-STALE_PROCESSING = dt.timedelta(minutes=10)  # a crashed update is retried after this
+STALE_PROCESSING = dt.timedelta(minutes=10)
+
+# plan_status of a session whose memory is done (sub-plan 05)
+PLAN_PENDING, PLAN_DONE, PLAN_FAILED = "pending", "done", "failed"  # a crashed update is retried after this
 
 
 def _claimable(session: dict, now: dt.datetime) -> bool:
@@ -57,6 +61,11 @@ class SessionStore(Protocol):
     def account_overview(self, pid: str) -> dict: ...
     def forget_memory(self, pid: str) -> None: ...
     def delete_account(self, pid: str) -> int: ...
+    # lesson plans (sub-plan 05)
+    def get_next_plan(self, pid: str) -> dict | None: ...
+    def save_next_plan(self, pid: str, sid: str, plan: dict) -> None: ...
+    def recent_session_plans(self, pid: str, n: int = 5) -> list[dict]: ...
+    def pending_plan_sessions(self, pid: str, limit: int = 2) -> list[str]: ...
 
 
 def _turn_fields(turn: TurnIn) -> dict:
@@ -70,6 +79,7 @@ class InMemorySessionStore:
         self.memory: dict[str, dict] = {}
         self.memory_history: dict[tuple[str, str], dict] = {}
         self.flags: list[dict] = []
+        self.next_plans: dict[str, dict] = {}
 
     def create_session(self, pid, *, user_email, model, prompt_version):
         sid = uuid.uuid4().hex
@@ -148,6 +158,7 @@ class InMemorySessionStore:
 
     def forget_memory(self, pid):
         self.memory.pop(pid, None)
+        self.next_plans.pop(pid, None)  # the next session is an intro again
 
     def delete_account(self, pid):
         keys = [k for k in self.sessions if k[0] == pid]
@@ -155,10 +166,28 @@ class InMemorySessionStore:
             self.sessions.pop(key)
             self.turns.pop(key, None)
         self.memory.pop(pid, None)
+        self.next_plans.pop(pid, None)
         for key in [k for k in self.memory_history if k[0] == pid]:
             self.memory_history.pop(key)
         self.flags = [f for f in self.flags if f.get("pid") != pid]
         return len(keys)
+
+    def get_next_plan(self, pid):
+        return self.next_plans.get(pid)
+
+    def save_next_plan(self, pid, sid, plan):
+        self.next_plans[pid] = {**plan, "built_after_session": sid, "built_at": _now()}
+
+    def recent_session_plans(self, pid, n=5):
+        sessions = sorted((v for k, v in self.sessions.items() if k[0] == pid),
+                          key=lambda v: v["started_at"], reverse=True)
+        return [v["class_plan"] for v in sessions if v.get("class_plan")][:n]
+
+    def pending_plan_sessions(self, pid, limit=2):
+        found = [v for k, v in self.sessions.items()
+                 if k[0] == pid and v.get("plan_status") in (PLAN_PENDING, PLAN_FAILED)]
+        found.sort(key=lambda v: v["started_at"], reverse=True)
+        return [v["id"] for v in found[:limit]]
 
 
 class FirestoreSessionStore:
@@ -275,8 +304,10 @@ class FirestoreSessionStore:
         }
 
     def forget_memory(self, pid):
-        # Only the live memory: transcripts, sessions and memory_history are kept.
+        # Only the live memory (and the plan built from it): transcripts, sessions and
+        # memory_history are kept. The next session is an intro again.
         self._patient(pid).collection("memory").document("current").delete()
+        self._patient(pid).collection("plans").document("next").delete()
 
     def delete_account(self, pid):
         sessions = int(self._patient(pid).collection("sessions").count().get()[0][0].value)
@@ -284,6 +315,27 @@ class FirestoreSessionStore:
         # (sessions + turns, memory, memory_history, flags).
         self._db.recursive_delete(self._patient(pid))
         return sessions
+
+    def get_next_plan(self, pid):
+        snap = self._patient(pid).collection("plans").document("next").get()
+        return snap.to_dict() if snap.exists else None
+
+    def save_next_plan(self, pid, sid, plan):
+        self._patient(pid).collection("plans").document("next").set(
+            {**plan, "built_after_session": sid, "built_at": self._fs.SERVER_TIMESTAMP})
+
+    def recent_session_plans(self, pid, n=5):
+        query = (self._patient(pid).collection("sessions")
+                 .order_by("started_at", direction=self._fs.Query.DESCENDING).limit(n * 3))
+        plans = [s.to_dict().get("class_plan") for s in query.stream()]
+        return [p for p in plans if p][:n]
+
+    def pending_plan_sessions(self, pid, limit=2):
+        query = self._patient(pid).collection("sessions").where(
+            filter=self._fs.FieldFilter("plan_status", "in", [PLAN_PENDING, PLAN_FAILED]))
+        found = [{"id": s.id, **s.to_dict()} for s in query.stream()]
+        found.sort(key=lambda v: v.get("started_at") or _now(), reverse=True)
+        return [v["id"] for v in found[:limit]]
 
     def add_flag(self, pid, sid, flag):
         self._patient(pid).collection("flags").document().set({

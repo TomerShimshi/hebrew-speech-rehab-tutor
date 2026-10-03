@@ -1,0 +1,49 @@
+# Curated, evidence-informed practice techniques per goal type (given to the plan builder).
+# Sources (see docs/plans/00-master-design.md): ASHA aphasia practice portal, Aphasia United /
+# AARP best-practice statements, cueing-hierarchy and SFA studies, script training, and Hebrew
+# morphology-based naming work. These suit MILD, high-level difficulties.
+prompt_version: "0.1"
+
+name_retrieval:
+  - name: Semantic description -> name
+    how: Describe a person or place by its features (where it is, what it's known for, a
+      personal connection) and let him name it. Uncued first; then the hint ladder.
+    example: '"העיר על שפת הכנרת, שהולכים אליה לטבול במעיינות החמים" -> טבריה'
+  - name: Personal names from his life
+    how: Use people and places from the memory (family, friends, his town, trips). Ask him to
+      name them in context ("איך קוראים לנכדה שסיפרת עליה?"). These matter most to him.
+  - name: Semantic Feature Analysis (light)
+    how: When a name is hard, explore its features together (where, what, who, when) before
+      the first-syllable hint; this strengthens retrieval routes.
+  - name: Retrieval spacing
+    how: Return to a missed name 2-3 minutes later in the same session, uncued.
+
+discourse:
+  - name: Procedure telling
+    how: He explains, step by step, how to do something familiar (make coffee, plant a tree,
+      prepare for a trip). Prompt only "ומה אחר כך?" -- let him organize it himself.
+  - name: Story in order
+    how: He tells a short story from his life with a beginning, middle and end; at the end,
+      ask him to summarize it in one or two sentences.
+  - name: Summarize
+    how: He summarizes something he recently watched, read or heard (news, a program, an
+      event), then gives his opinion with one reason.
+
+high_level_language:
+  - name: Category fluency
+    how: Name as many items as he can in a category in about a minute ("ערים בגליל", "פירות
+      שגדלים בארץ", "שחקני כדורגל ישראלים"). Count gently, praise the effort.
+  - name: Synonyms and precise words
+    how: Offer a common word and ask for another word with the same meaning, or a more
+      precise one ("גדול" -> "ענק", "עצום").
+  - name: Sayings and their meaning
+    how: Start a familiar Hebrew saying and let him complete it, then explain what it means
+      ("אין חכם כבעל..." -> "ניסיון").
+  - name: Word definitions
+    how: Ask him to explain a word in his own words, as if to a child.
+
+conversation:
+  - name: Interest-led talk
+    how: Open questions about something he loves; follow up on details; he talks most.
+  - name: Opinion with reasons
+    how: Ask for his opinion on a light topic and one or two reasons.

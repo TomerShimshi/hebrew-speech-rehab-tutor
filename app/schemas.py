@@ -94,3 +94,70 @@ class MemoryDoc(BaseModel):
     last_session_id: str | None = None
     sessions_processed: int = 0
     prompt_version: str | None = None
+
+
+# ---- lesson plan (sub-plan 05) -------------------------------------------------------------
+# No length caps in the schema sent to Gemini (it handles plain schemas most reliably);
+# ClassPlan.tidy() trims anything oversized after parsing.
+
+class GoalType(str, Enum):
+    intro = "intro"  # first session / after "forget memory": getting to know him
+    name_retrieval = "name_retrieval"  # people & places, esp. from his own life
+    discourse = "discourse"  # telling a story in order, explaining step by step
+    high_level_language = "high_level_language"  # category naming, synonyms, sayings
+    conversation = "conversation"  # an easier free-talk day
+
+
+class PrimaryGoal(BaseModel):
+    type: GoalType
+    description: str
+
+
+class ProbeItem(BaseModel):
+    target: str  # the word/name he should come up with
+    kind: str = Field(description="'treated' (practiced before, from the word bank) or 'untreated' (new, same kind)")
+    elicit: str  # how the tutor asks for it WITHOUT hints (e.g. a description)
+    bridge: str = Field(default="", description="A natural lead-in linking it to a topic he is likely to talk about")
+
+
+class PracticeItem(BaseModel):
+    target: str
+    elicit: str
+    hint_meaning: str
+    hint_first_syllable: str  # as spoken, e.g. "טְבֶ..." -- never the letter's name
+    sentence_completion: str
+
+
+class ClassPlan(BaseModel):
+    plan_type: str = Field(description="'intro' or 'regular'")
+    primary_goal: PrimaryGoal
+    recall_from_last_time: str = ""
+    warmup: str = ""
+    # 3-5 uncued check-in items every regular session: the progress measurement (05).
+    probe: list[ProbeItem] = Field(default=[], min_length=0, json_schema_extra={"minItems": 3, "maxItems": 5})
+    practice: list[PracticeItem] = []
+    activity: str = ""
+    conversation_topics: list[str] = []
+    homework: str = ""
+    fatigue_fallback: str = ""
+    avoid: list[str] = []
+
+    def tidy(self) -> "ClassPlan":
+        """Trim to sane sizes (the model occasionally over-delivers)."""
+        def cut(text: str, n: int = 400) -> str:
+            return " ".join((text or "").split())[:n]
+
+        return self.model_copy(update={
+            "plan_type": "intro" if self.plan_type == "intro" else "regular",
+            "primary_goal": self.primary_goal.model_copy(update={"description": cut(self.primary_goal.description, 600)}),
+            "recall_from_last_time": cut(self.recall_from_last_time),
+            "warmup": cut(self.warmup),
+            "probe": [p.model_copy(update={"kind": "treated" if p.kind == "treated" else "untreated"})
+                      for p in self.probe[:5]],
+            "practice": self.practice[:8],
+            "activity": cut(self.activity, 600),
+            "conversation_topics": [cut(t, 150) for t in self.conversation_topics[:3]],
+            "homework": cut(self.homework),
+            "fatigue_fallback": cut(self.fatigue_fallback),
+            "avoid": [cut(a, 150) for a in self.avoid[:8]],
+        })

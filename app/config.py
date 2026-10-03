@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     sweeper_sa_email: str = ""  # the only caller allowed
     sweep_audience: str = ""  # the service URL the token is minted for
     memory_sweep_batch: int = 3  # sessions per sweep
-    memory_end_deadline_s: int = 240  # time budget for the update run inside /end
+    memory_end_deadline_s: int = 300  # time budget for memory update + next plan inside /end
 
     # Agent calls (memory update etc.): primary model + fallbacks for 503 "high demand".
     summary_model: str = "gemini-3.8-flash"

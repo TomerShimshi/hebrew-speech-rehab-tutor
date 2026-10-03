@@ -27,7 +27,7 @@ def test_key_rules_present():
     assert text.startswith("## LANGUAGE\nLANGUAGE RULE")  # Hebrew rule comes first
     assert "speak ONLY Modern Israeli Hebrew" in text
     assert "101" in text  # emergency number
-    assert "specific subject he would like to talk about" in text
+    assert "something special he'd like to talk about" in " ".join(text.split())
     assert "ALWAYS refer to yourself in the feminine" in text
 
 
@@ -37,3 +37,10 @@ def test_read_optional_text_handles_missing_file(tmp_path):
     f = tmp_path / "p.md"
     f.write_text("  profile  \n", encoding="utf-8")
     assert read_optional_text(f) == "profile"
+
+
+def test_conversation_flow_rules_present():
+    text = render_tutor_prompt().text
+    assert "ONE THREAD AT A TIME" in text and "BRIDGE every change of topic" in text
+    assert "do NOT start closing on your own" in text
+    assert "say again" not in text.split("Closing")[1].split("Ending the call")[0].replace("Don't ask him to repeat or \"say again\" anything", "")

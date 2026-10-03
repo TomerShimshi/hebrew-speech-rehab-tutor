@@ -16,10 +16,11 @@ from google.genai import types
 
 from app.agent.memory_tools import MemoryDraft, build_memory_tools
 from app.agent.runner import run_tool_loop
+from app.class_plan import render_class_plan
 from app.config import REPO_ROOT, Settings
 from app.llm import generate
-from app.schemas import SECTION_NAMES, ConsolidatedMemory, MemoryDoc, MemorySections
-from app.store import MEM_DONE, MEM_FAILED, MEM_SKIPPED, SessionStore
+from app.schemas import SECTION_NAMES, ClassPlan, ConsolidatedMemory, MemoryDoc, MemorySections
+from app.store import MEM_DONE, MEM_FAILED, MEM_SKIPPED, PLAN_PENDING, SessionStore
 
 PROMPT_PATH = REPO_ROOT / "prompts" / "memory_update.yaml"
 MIN_PATIENT_LINES = 2
@@ -107,12 +108,23 @@ def run_memory_update(
         )
         prompts = load_prompts()
         models = _models(settings)
+        # The plan this session used (05): lets the agent score its check-in items.
+        plan = None
+        raw_plan = (store.get_session(pid, sid) or {}).get("class_plan")
+        if raw_plan:
+            try:
+                plan = ClassPlan(**raw_plan)
+                draft.probe_kinds = {p.target: p.kind for p in plan.probe}
+            except Exception:  # noqa: BLE001 -- an old/odd plan must not break the update
+                plan = None
+        plan_text = render_class_plan(plan) if plan else "(no plan: a free session)"
 
         # ---- phase 1: tools ---------------------------------------------------------
         context = (
             f"# PATIENT PROFILE\n{profile_text or '(none)'}\n\n"
             f"# CURRENT MEMORY\n{format_memory(previous)}\n\n"
             f"# RECENT SESSION SUMMARIES (oldest first)\n{_recent_summaries_text(recent)}\n\n"
+            f"# TODAY'S PLAN (what the tutor was asked to do)\n{plan_text}\n\n"
             f"# TRANSCRIPT OF THE SESSION THAT JUST ENDED ({today.isoformat()})\n{format_transcript(turns)}"
         )
         run = run_tool_loop(
@@ -161,6 +173,8 @@ def run_memory_update(
             store.add_flag(pid, sid, flag.model_dump(mode="json"))
         session_fields = {
             "memory_status": MEM_DONE,
+            "plan_status": PLAN_PENDING,  # next: build the next session's plan (05)
+            "probe_results": draft.probe_results,
             "memory_error": None,
             "memory_model": result.model,
             "memory_attempts": run.attempts + result.attempts,

@@ -30,9 +30,15 @@ def test_retries_503_then_falls_back_to_next_model():
 
 def test_backoff_between_attempts():
     slept = []
-    client = FakeClient(server_error(429), server_error(), text("ok"))
+    client = FakeClient(server_error(500), server_error(), text("ok"))
     llm.generate(client, ["m"], "x", sleep=slept.append)
     assert slept == [2, 6]
+
+
+def test_quota_429_skips_straight_to_the_next_model():
+    client = FakeClient(server_error(429), text("ok"))
+    result = gen(client, MODELS, "x")
+    assert (result.model, result.attempts) == ("fallback", 2)
 
 
 def test_client_errors_are_not_retried():

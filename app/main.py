@@ -14,6 +14,8 @@ from fastapi.staticfiles import StaticFiles
 from google import genai
 
 from app.agent.memory_update import run_memory_update
+from app.agent.next_class import build_next_plan
+from app.class_plan import plan_for_session, render_class_plan
 from app.auth import User, require_caregiver, verify_user, verify_sweeper
 from app.config import Settings, get_settings
 from app.live_token import create_live_token
@@ -22,7 +24,7 @@ from app.patient_profile import PatientProfileLoader, extract_vocabulary
 from app.prompt_archive import PromptArchive
 from app.prompts import render_tutor_prompt
 from app.rate_limit import SlidingWindowLimiter
-from app.store import ACTIVE, FirestoreSessionStore, SessionStore
+from app.store import ACTIVE, MEM_DONE, FirestoreSessionStore, SessionStore
 from app.transcripts import EndRequest, TurnsBatch
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
@@ -157,9 +159,12 @@ def start_session(
     if session_id:
         _own_active_session(store, settings, user, session_id)  # reconnect: same session
     profile_text = profile.get()
+    # Today's lesson plan (05): the built plan, the intro plan for a new/reset account, or none.
+    plan = plan_for_session(store, patient_id_for(user))
     prompt = render_tutor_prompt(
         patient_profile=profile_text,
         memory_prompt=memory_block(store.get_memory(patient_id_for(user))),
+        class_plan=render_class_plan(plan),
     )
     live = create_live_token(
         settings,
@@ -180,10 +185,18 @@ def start_session(
         # Debugging aid: keep the exact prompt this session's tutor got (private bucket).
         prompt_uri = archive.save(
             pid=patient_id_for(user), sid=session_id, prompt_text=prompt.text,
-            meta={"account": user.email, "model": live.model, "prompt_version": prompt.version},
+            meta={"account": user.email, "session_id": session_id, "model": live.model,
+                  "prompt_version": prompt.version},
+            # e.g. "regular-discourse", "intro", or "no-plan" -- part of the file name
+            label=f"{plan.plan_type}-{plan.primary_goal.type.value}" if plan and plan.plan_type == "regular"
+            else (plan.plan_type if plan else "no-plan"),
         )
-        if prompt_uri:
-            store.update_session(patient_id_for(user), session_id, {"prompt_uri": prompt_uri})
+        session_fields = {"prompt_uri": prompt_uri} if prompt_uri else {}
+        if plan:
+            # The memory update scores the check-in items against exactly this plan.
+            session_fields.update(class_plan=plan.model_dump(mode="json"), plan_type=plan.plan_type)
+        if session_fields:
+            store.update_session(patient_id_for(user), session_id, session_fields)
     return {
         "session_id": session_id,
         "token": live.token,
@@ -224,11 +237,18 @@ def end_session(
     # Update the tutor's memory now, inside this request (Cloud Run throttles CPU after the
     # response). The browser doesn't wait: it sent this with keepalive and moved on.
     # Failures are recorded and retried by the hourly sweep.
+    bounded = _bounded_generate(settings.memory_end_deadline_s)  # one budget for both calls
+    profile_text = profile.get()
     memory_status = run_memory_update(
-        store, llm_client, settings, pid, session_id,
-        profile_text=profile.get(), generate_fn=_bounded_generate(settings.memory_end_deadline_s),
+        store, llm_client, settings, pid, session_id, profile_text=profile_text, generate_fn=bounded,
     )
-    return {"status": "ended", "memory_status": memory_status}
+    plan_status = None
+    if memory_status == MEM_DONE:
+        # The next session's lesson plan, built from the memory we just updated (05).
+        plan_status = build_next_plan(
+            store, llm_client, settings, pid, session_id, profile_text=profile_text, generate_fn=bounded,
+        )
+    return {"status": "ended", "memory_status": memory_status, "plan_status": plan_status}
 
 
 @app.post("/internal/memory/sweep")
@@ -243,12 +263,23 @@ def memory_sweep(
     mid-session, or updates that failed because the models were overloaded."""
     results: dict[str, str] = {}
     budget = settings.memory_sweep_batch
+    profile_text = profile.get()
     for pid in store.list_patient_ids():
         for sid in store.pending_memory_sessions(pid, limit=budget - len(results)):
             results[sid] = run_memory_update(
                 store, llm_client, settings, pid, sid,
-                profile_text=profile.get(), generate_fn=_bounded_generate(240),
+                profile_text=profile_text, generate_fn=_bounded_generate(240),
             )
+        # Plans that are missing (memory done, plan failed or never built): newest only --
+        # a plan always reflects the latest memory, so one per account is enough.
+        for sid in store.pending_plan_sessions(pid, limit=1):
+            if len(results) >= budget:
+                break
+            status = build_next_plan(
+                store, llm_client, settings, pid, sid,
+                profile_text=profile_text, generate_fn=_bounded_generate(180),
+            )
+            results[f"plan:{sid}"] = status
         if len(results) >= budget:
             break
     return {"processed": results}

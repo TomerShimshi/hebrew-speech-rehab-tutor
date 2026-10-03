@@ -50,11 +50,14 @@ def render_tutor_prompt(
     }
     parts = []
     for key, title in _SECTIONS:
-        # str.replace, not str.format: the Hebrew examples and future content may contain braces.
         body = template.get(key, "")
+        used = [name for name in values if "{" + name + "}" in body]
+        if used and not any(values[name].strip() for name in used):
+            continue  # its placeholder is empty: drop the whole section (incl. any guidance text)
+        # str.replace, not str.format: the Hebrew examples and future content may contain braces.
         for name, value in values.items():
             body = body.replace("{" + name + "}", value)
         body = body.strip()
-        if body:  # empty placeholders drop their whole section
+        if body:
             parts.append(f"## {title}\n{body}")
     return TutorPrompt(version=str(template["prompt_version"]), text="\n\n".join(parts))

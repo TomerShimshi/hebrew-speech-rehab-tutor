@@ -16,6 +16,19 @@ def consolidated(prompt):
     return text("{}", parsed=ConsolidatedMemory(memory_prompt=prompt, focus_next_session=["ask about the grandchildren"]))
 
 
+def plan_reply():
+    from app.schemas import ClassPlan
+    plan = ClassPlan(
+        plan_type="regular",
+        primary_goal={"type": "name_retrieval", "description": "Names of his grandchildren and places."},
+        probe=[{"target": "טבריה", "kind": "untreated", "elicit": "העיר על הכנרת"},
+               {"target": "חיפה", "kind": "untreated", "elicit": "העיר עם הכרמל"},
+               {"target": "עכו", "kind": "untreated", "elicit": "העיר העתיקה עם החומות"}],
+        homework="Think of a place to tell me about.",
+    )
+    return text("{}", parsed=plan)
+
+
 def talk(env, token="tok-dad", turns=TALK):
     sid = env.client.post("/api/session/start", headers=auth(token)).json()["session_id"]
     env.client.post(f"/api/session/{sid}/turns", headers=auth(token), json={"turns": turns})
@@ -57,13 +70,14 @@ def test_starting_a_session_only_abandons_your_own_open_sessions(env):
 
 # ---- /end runs the memory update -----------------------------------------------------------
 
-def test_end_runs_the_memory_update(env):
-    env.llm = FakeClient(text("nothing to add"), consolidated("He talked about his grandchildren."))
+def test_end_runs_the_memory_update_then_builds_the_next_plan(env):
+    env.llm = FakeClient(text("nothing to add"), consolidated("He talked about his grandchildren."), plan_reply())
     env.configure()
     sid = talk(env)
     r = env.client.post(f"/api/session/{sid}/end", headers=auth(), json={"reason": "tutor_goodbye"})
-    assert r.json() == {"status": "ended", "memory_status": "done"}
+    assert r.json() == {"status": "ended", "memory_status": "done", "plan_status": "done"}
     assert env.store.get_session(DAD, sid)["memory_status"] == "done"
+    assert env.store.get_next_plan(DAD)["primary_goal"]["type"] == "name_retrieval"
 
 
 def test_end_still_succeeds_when_the_models_are_down(env):
@@ -96,9 +110,9 @@ def test_sweep_processes_abandoned_and_failed_sessions(env):
     env.configure()
     assert sweep(env).json() == {"processed": {abandoned: "failed"}}
 
-    env.llm = FakeClient(text("ok"), consolidated("Recovered memory."))  # an hour later
+    env.llm = FakeClient(text("ok"), consolidated("Recovered memory."), plan_reply())  # an hour later
     env.configure()
-    assert sweep(env).json() == {"processed": {abandoned: "done"}}
+    assert sweep(env).json() == {"processed": {abandoned: "done", f"plan:{abandoned}": "done"}}
     assert env.store.get_memory(DAD)["memory_prompt"] == "Recovered memory."
     assert sweep(env).json() == {"processed": {}}  # nothing left
 
@@ -141,8 +155,9 @@ def test_each_session_archives_its_exact_prompt(env):
     env.configure(prompt_archive_uri="gs://bucket/debug/prompts/")
     env.store.save_memory(DAD, "s0", {"memory_prompt": "He loves the Galilee."}, None)
     sid = env.client.post("/api/session/start", headers=auth("tok-dad")).json()["session_id"]
-    uri = f"gs://bucket/debug/prompts/{DAD}/{sid}.md"
-    assert env.store.get_session(DAD, sid)["prompt_uri"] == uri
+    uri = env.store.get_session(DAD, sid)["prompt_uri"]
+    # readable name: <Israel date_time>_<plan>_<sid8>.md (memory but no plan yet -> "no-plan")
+    assert uri.startswith(f"gs://bucket/debug/prompts/{DAD}/") and uri.endswith(f"_no-plan_{sid[:8]}.md")
     sent = FakeAuthTokens.last_config.live_connect_constraints.config.system_instruction.parts[0].text
     assert sent in env.archived[uri]  # exactly what Gemini got
     assert "He loves the Galilee." in env.archived[uri] and f"**account:** {DAD}" in env.archived[uri]

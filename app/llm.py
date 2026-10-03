@@ -15,10 +15,11 @@ from functools import lru_cache
 from google import genai
 from google.genai import errors, types
 
-RETRYABLE_CODES = {429, 500, 502, 503, 504}
-# "Model not found / no longer available to new users" (seen live for gemini-2.5-flash):
-# no point retrying that model, but the next model in the chain may well work.
-SKIP_MODEL_CODES = {404}
+RETRYABLE_CODES = {500, 502, 503, 504}
+# Skip straight to the next model (retrying the same one can't help):
+#  404 = model not available (seen live: gemini-2.5-flash "no longer available to new users")
+#  429 = quota exhausted (seen live: free-tier daily limits) -- doesn't recover in seconds
+SKIP_MODEL_CODES = {404, 429}
 REQUEST_TIMEOUT_MS = 90_000
 
 

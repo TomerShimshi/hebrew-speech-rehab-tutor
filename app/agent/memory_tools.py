@@ -28,6 +28,9 @@ class MemoryDraft:
     today: dt.date
     summary: SessionSummary | None = None
     flags: list[Flag] = field(default_factory=list)
+    # probe target -> "treated"/"untreated", from the plan the session used (05)
+    probe_kinds: dict[str, str] = field(default_factory=dict)
+    probe_results: list[dict] = field(default_factory=list)
 
 
 def _norm(text: str) -> str:
@@ -76,6 +79,14 @@ def build_memory_tools(draft: MemoryDraft) -> list[Tool]:
             low_confidence=args.get("asr_confidence") == "low",
         )
         draft.word_bank[word] = stats
+        if args.get("probe"):
+            # A check-in item from today's plan: also kept on the session for progress charts.
+            draft.probe_results = [r for r in draft.probe_results if r["word"] != word]
+            draft.probe_results.append({
+                "word": word, "result": result.value,
+                "kind": draft.probe_kinds.get(word, "untreated"),
+                "low_confidence": args.get("asr_confidence") == "low",
+            })
         return {"ok": True, "next_due": stats.next_due}
 
     def save_session_summary(args: dict) -> dict:
@@ -116,6 +127,8 @@ def build_memory_tools(draft: MemoryDraft) -> list[Tool]:
                     "cue_level": {"type": "string", "description": "Which hint worked, e.g. 'meaning', 'first syllable', 'sentence completion'."},
                     "asr_confidence": {"type": "string", "enum": ["high", "low"],
                                        "description": "low if the two transcript versions disagree about this word."},
+                    "probe": {"type": "boolean",
+                              "description": "true if this word was one of TODAY'S PLAN check-in items."},
                 },
                 "required": ["word", "result", "asr_confidence"],
             },
