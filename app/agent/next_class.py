@@ -15,6 +15,7 @@ from google.genai import types
 from app import word_bank
 from app.agent.memory_update import format_memory
 from app.config import REPO_ROOT, Settings
+from app.games import render_games_for_plan
 from app.llm import generate
 from app.schemas import ClassPlan, MemoryDoc
 from app.store import PLAN_DONE, PLAN_FAILED, SessionStore
@@ -57,7 +58,8 @@ def _recent_plans_text(plans: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def build_context(memory_raw: dict, recent_plans: list[dict], profile_text: str, today: dt.date) -> str:
+def build_context(memory_raw: dict, recent_plans: list[dict], profile_text: str, today: dt.date,
+                  games_text: str = "(no games account linked)") -> str:
     memory = MemoryDoc(**memory_raw)
     due = word_bank.due_words(memory.word_bank, today)
     bank = ", ".join(
@@ -75,6 +77,7 @@ def build_context(memory_raw: dict, recent_plans: list[dict], profile_text: str,
         f"# WORD BANK\ndue for practice today: {', '.join(due) or '(none)'}\nall recent: {bank}\n\n"
         f"# RECENT SESSIONS (oldest first)\n{recent}\n\n"
         f"# RECENT PLANS' GOALS (newest first)\n{_recent_plans_text(recent_plans)}\n\n"
+        f"# GAMES (the Simon games app; trends computed from his real data)\n{games_text}\n\n"
         f"# TECHNIQUES YOU MAY USE\n{techniques_text()}"
     )
 
@@ -89,6 +92,7 @@ def build_next_plan(
     profile_text: str = "",
     today: dt.date | None = None,
     generate_fn=generate,
+    games=None,  # a GamesSnapshot for his Simon profile (06), or None
 ) -> str:
     """Builds and saves the next plan after session `sid`. Returns the plan_status."""
     today = today or dt.date.today()
@@ -98,7 +102,8 @@ def build_next_plan(
             # Nothing to build on: the next session will be the intro plan.
             store.update_session(pid, sid, {"plan_status": PLAN_DONE, "plan_model": None})
             return PLAN_DONE
-        context = build_context(memory_raw, store.recent_session_plans(pid, 5), profile_text, today)
+        context = build_context(memory_raw, store.recent_session_plans(pid, 5), profile_text, today,
+                                games_text=render_games_for_plan(games))
         result = generate_fn(
             client, _models(settings), context,
             types.GenerateContentConfig(
@@ -122,6 +127,16 @@ def build_next_plan(
         if len(plan.probe) < MIN_PROBE_ITEMS:
             # Without check-in items there's no progress measurement: don't accept it.
             raise ValueError(f"plan has {len(plan.probe)} probe items (need {MIN_PROBE_ITEMS}+)")
+        # Games: keep only homework for games he actually has (no invented ids), with their
+        # Hebrew names from the catalog; recommendations are saved separately (de-duplicated).
+        known = {g.id: g for g in (games.games if games and not games.error else [])}
+        plan = plan.model_copy(update={
+            "game_homework": [h.model_copy(update={"name_he": known[h.game_id].name_he or h.game_id})
+                              for h in plan.game_homework if h.game_id in known and known[h.game_id].route],
+        })
+        for rec in plan.games_app_feedback:
+            store.add_games_recommendation(pid, sid, rec.model_dump(mode="json"))
+        plan = plan.model_copy(update={"games_app_feedback": []})
         store.save_next_plan(pid, sid, {**plan.model_dump(mode="json"),
                                         "prompt_version": str(load_prompt().get("prompt_version"))})
         store.update_session(pid, sid, {"plan_status": PLAN_DONE, "plan_model": result.model, "plan_error": None})

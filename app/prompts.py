@@ -19,6 +19,7 @@ _SECTIONS = (
     ("safety", "SAFETY"),
     ("patient_profile", "PATIENT PROFILE"),
     ("memory_prompt", "WHAT YOU REMEMBER FROM PREVIOUS SESSIONS"),
+    ("games_recent", "HIS GAMES APP"),
     ("class_plan", "TODAY'S PLAN"),
 )
 
@@ -39,6 +40,7 @@ def render_tutor_prompt(
     *,
     patient_profile: str = "",
     memory_prompt: str = "",
+    games_recent: str = "",
     class_plan: str = "",
     template_path: Path = TUTOR_PROMPT_PATH,
 ) -> TutorPrompt:
@@ -46,6 +48,7 @@ def render_tutor_prompt(
     values = {
         "patient_profile": patient_profile,
         "memory_prompt": memory_prompt,
+        "games_recent": games_recent,
         "class_plan": class_plan,
     }
     parts = []

@@ -8,8 +8,8 @@ from fastapi.testclient import TestClient
 from app.auth import get_oidc_verifier, get_token_verifier
 from app.config import Settings, get_settings
 from app.main import (
-    app, get_genai_client, get_profile_loader, get_prompt_archive, get_store, get_text_client,
-    get_token_limiter,
+    app, get_games_reader, get_genai_client, get_profile_loader, get_prompt_archive, get_store,
+    get_text_client, get_token_limiter,
 )
 from app.prompt_archive import PromptArchive
 from app.patient_profile import PatientProfileLoader
@@ -69,7 +69,9 @@ def env(tmp_path, monkeypatch):
     """Wires the app with fakes; returns (client, store, settings). Tune via env.configure()."""
     # llm: the text client used by the memory update (scripted per test; empty = must not be called)
     # archived: uri -> text the prompt archive "uploaded"
-    state = SimpleNamespace(store=InMemorySessionStore(), limit=5, key=SECRET, llm=FakeClient(), archived={})
+    # games_reader: a fake Upstash (None = games not configured); tests NEVER reach the real one
+    state = SimpleNamespace(store=InMemorySessionStore(), limit=5, key=SECRET, llm=FakeClient(), archived={},
+                            games_reader=None)
 
     def configure(**overrides):
         fields = {
@@ -92,6 +94,7 @@ def env(tmp_path, monkeypatch):
         app.dependency_overrides[get_token_verifier] = lambda: fake_verifier
         app.dependency_overrides[get_oidc_verifier] = lambda: fake_oidc_verifier
         app.dependency_overrides[get_text_client] = lambda: state.llm
+        app.dependency_overrides[get_games_reader] = lambda: state.games_reader
         app.dependency_overrides[get_prompt_archive] = lambda: PromptArchive(
             settings.prompt_archive_uri, upload=lambda uri, text: state.archived.__setitem__(uri, text))
         if state.key:

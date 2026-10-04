@@ -16,6 +16,7 @@ from google import genai
 from app.agent.memory_update import run_memory_update
 from app.agent.next_class import build_next_plan
 from app.class_plan import plan_for_session, render_class_plan
+from app.games import UpstashReader, game_link, games_snapshot, profile_for, recent_games_line
 from app.auth import User, require_caregiver, verify_user, verify_sweeper
 from app.config import Settings, get_settings
 from app.live_token import create_live_token
@@ -72,6 +73,36 @@ def get_token_limiter() -> SlidingWindowLimiter:
 @lru_cache
 def get_store() -> SessionStore:
     return FirestoreSessionStore()
+
+
+@lru_cache
+def get_games_reader():
+    s = get_settings()
+    if not (s.upstash_redis_rest_url and s.upstash_redis_readonly_token):
+        return None  # games integration not configured: everything else works as before
+    return UpstashReader(s.upstash_redis_rest_url, s.upstash_redis_readonly_token)
+
+
+def games_for(pid: str, settings: Settings, reader):
+    """His Simon games snapshot (read-only), or None if this account has no games profile."""
+    profile_name = profile_for(pid, settings.simon_profiles)
+    if reader is None or not profile_name:
+        return None
+    return games_snapshot(reader, profile_name)
+
+
+def homework_buttons(plan, pid: str, settings: Settings) -> list[dict]:
+    """Links for the plan's game homework, built in code (never by the model)."""
+    profile_name = profile_for(pid, settings.simon_profiles)
+    if not plan or not plan.game_homework or not profile_name or not settings.simon_app_url:
+        return []
+    from app.games import local_catalog
+    routes = {g["id"]: g.get("route", "") for g in local_catalog().get("games", [])}
+    return [
+        {"name_he": h.name_he or h.game_id, "why": h.why,
+         "url": game_link(settings.simon_app_url, routes[h.game_id], profile_name)}
+        for h in plan.game_homework if routes.get(h.game_id)
+    ]
 
 
 @lru_cache
@@ -153,6 +184,7 @@ def start_session(
     profile: PatientProfileLoader = Depends(get_profile_loader),
     store: SessionStore = Depends(get_store),
     archive: PromptArchive = Depends(get_prompt_archive),
+    games_reader=Depends(get_games_reader),
 ) -> dict:
     if not limiter.allow():
         raise HTTPException(status_code=429, detail="Too many sessions, try again later")
@@ -161,10 +193,13 @@ def start_session(
     profile_text = profile.get()
     # Today's lesson plan (05): the built plan, the intro plan for a new/reset account, or none.
     plan = plan_for_session(store, patient_id_for(user))
+    # What he played in the Simon app lately -- fresh at every start, computed in code (06).
+    games = games_for(patient_id_for(user), settings, games_reader)
     prompt = render_tutor_prompt(
         patient_profile=profile_text,
         memory_prompt=memory_block(store.get_memory(patient_id_for(user))),
         class_plan=render_class_plan(plan),
+        games_recent=recent_games_line(games),
     )
     live = create_live_token(
         settings,
@@ -204,6 +239,8 @@ def start_session(
         "ws_url": live.ws_url,
         "expires_at": live.expires_at.isoformat(),
         "prompt_version": prompt.version,
+        # buttons for the end screen: the game homework the tutor will suggest
+        "game_homework": homework_buttons(plan, patient_id_for(user), settings),
     }
 
 
@@ -230,6 +267,7 @@ def end_session(
     store: SessionStore = Depends(get_store),
     profile: PatientProfileLoader = Depends(get_profile_loader),
     llm_client=Depends(get_text_client),
+    games_reader=Depends(get_games_reader),
 ) -> dict:
     pid = patient_id_for(user)
     _own_active_session(store, settings, user, session_id)
@@ -247,6 +285,7 @@ def end_session(
         # The next session's lesson plan, built from the memory we just updated (05).
         plan_status = build_next_plan(
             store, llm_client, settings, pid, session_id, profile_text=profile_text, generate_fn=bounded,
+            games=games_for(pid, settings, games_reader),
         )
     return {"status": "ended", "memory_status": memory_status, "plan_status": plan_status}
 
@@ -258,9 +297,11 @@ def memory_sweep(
     store: SessionStore = Depends(get_store),
     profile: PatientProfileLoader = Depends(get_profile_loader),
     llm_client=Depends(get_text_client),
+    games_reader=Depends(get_games_reader),
 ) -> dict:
     """Hourly (Cloud Scheduler): update memory for sessions still waiting -- tabs closed
-    mid-session, or updates that failed because the models were overloaded."""
+    mid-session, or updates that failed because the models were overloaded -- and rebuild
+    next plans that are stale because he played the games after they were built (06)."""
     results: dict[str, str] = {}
     budget = settings.memory_sweep_batch
     profile_text = profile.get()
@@ -272,14 +313,26 @@ def memory_sweep(
             )
         # Plans that are missing (memory done, plan failed or never built): newest only --
         # a plan always reflects the latest memory, so one per account is enough.
+        games = games_for(pid, settings, games_reader)
         for sid in store.pending_plan_sessions(pid, limit=1):
             if len(results) >= budget:
                 break
             status = build_next_plan(
                 store, llm_client, settings, pid, sid,
-                profile_text=profile_text, generate_fn=_bounded_generate(180),
+                profile_text=profile_text, generate_fn=_bounded_generate(180), games=games,
             )
             results[f"plan:{sid}"] = status
+        # Stale plan: he played after it was built -> rebuild it with the fresh games data.
+        next_plan = store.get_next_plan(pid)
+        played = games.latest_played if games and not games.error else None
+        built_at = next_plan.get("built_at") if next_plan else None
+        if (played and built_at and played > built_at and len(results) < budget
+                and next_plan.get("built_after_session")):
+            sid = next_plan["built_after_session"]
+            results[f"replan:{sid}"] = build_next_plan(
+                store, llm_client, settings, pid, sid,
+                profile_text=profile_text, generate_fn=_bounded_generate(180), games=games,
+            )
         if len(results) >= budget:
             break
     return {"processed": results}

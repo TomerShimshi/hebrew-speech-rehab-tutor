@@ -1,0 +1,78 @@
+# The Simon games app (github.com/TomerShimshi/simon), as the tutor understands it.
+# Fallback catalog: if Simon ever publishes an Upstash key "games_catalog_v1", that wins.
+# A game that's in Upstash but not here is still used ("unknown game": fields interpreted
+# from the data), so new games show up without changing this file.
+#
+# key: the per-profile Upstash key (stored as "<profile>:<key>", e.g. "efraim:progress_v1").
+# route: the page in the Simon app (link: <SIMON_APP_URL><route>?user=<profile>).
+# progress: which fields show improvement, and in which direction.
+games:
+  - id: simon
+    key: progress_v1
+    name_he: סיימון
+    route: /simon
+    skills: [working memory, attention, sequencing]
+    fields:
+      best_length: longest color sequence repeated correctly
+      rounds_played: rounds in the session
+      rounds_correct: rounds repeated correctly
+      step_ms: speed of the sequence (lower = faster = harder)
+    progress: best_length up; rounds_correct / rounds_played up; step_ms down
+    speech_link: none directly -- attention and working memory support following longer sentences
+
+  - id: memory
+    key: memory_progress_v1
+    name_he: משחק הזיכרון
+    route: /memory
+    skills: [visual memory, attention]
+    fields:
+      pair_count: number of card pairs (higher = harder)
+      moves: moves to finish (lower = better)
+      mismatches: wrong pairs flipped (lower = better)
+      completed: finished the board
+    progress: mismatches and moves down at the same pair_count; pair_count up
+    speech_link: none directly -- general memory and focus
+
+  - id: subword
+    key: subword_progress_v1
+    name_he: מילים בתוך מילה
+    route: /subword
+    skills: [word retrieval, Hebrew word building, spelling]
+    fields:
+      base_words: the long words he built smaller words from
+      words_found_count: words he found
+      hints_used: hints used (lower = more independent)
+    progress: words_found_count up; hints_used down
+    speech_link: lexical retrieval -- finding words from letters
+
+  - id: scramble
+    key: scramble_progress_v1
+    name_he: מילים מבולגנות
+    route: /scramble
+    skills: [word retrieval by category, spelling]
+    fields:
+      category: the word category he chose (e.g. places, food)
+      words_shown: words in the round
+      words_solved_count: words he unscrambled
+      hints_used: hints used
+      revealed_count: words he gave up on and revealed
+    progress: words_solved_count up; hints_used and revealed_count down
+    speech_link: strong -- category-based retrieval, including names of places; a natural match
+      for name_retrieval and category-fluency days
+
+  - id: change_word
+    key: change_word_progress_v1
+    name_he: החלפת מילה
+    route: /change
+    skills: [word retrieval from clues, flexible thinking, spelling]
+    fields:
+      pairs_shown: the riddles in the round
+      changes_solved: words he changed correctly
+      first_words_solved: first words he solved
+      hints_used: hints used
+      revealed_count: answers revealed
+    progress: changes_solved up; hints_used and revealed_count down
+    speech_link: strong -- retrieving a word from a description/clue, like the tutor's hint ladder;
+      fits high_level_language days
+
+visits_key: engagement_v1  # {"visit_dates": [...]}: days the app was opened

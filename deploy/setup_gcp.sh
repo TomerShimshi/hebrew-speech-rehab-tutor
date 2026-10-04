@@ -104,6 +104,31 @@ gcloud secrets add-iam-policy-binding "$SECRET_NAME" \
   --role="roles/secretmanager.secretAccessor" >/dev/null
 
 # ---------------------------------------------------------------------------
+# The Simon games app (sub-plan 06): Upstash URL + READ-ONLY token, from .env.
+# The read-only token means this app physically cannot change Simon's data.
+# ---------------------------------------------------------------------------
+dotenv_value() {
+  [[ -f .env ]] || return 0
+  grep -E "^[[:space:]]*$1[[:space:]]*=" .env | tail -n1 | cut -d= -f2- \
+    | tr -d '\r' | sed -E "s/^[[:space:]]*[\"']?//; s/[\"']?[[:space:]]*\$//" || true
+}
+put_secret() {  # put_secret <secret-name> <value>: create if missing, add a version only if changed
+  local name="$1" value="$2"
+  [[ -n "$value" ]] || { echo "   $name: no value in .env -- skipped"; return 0; }
+  gcloud secrets describe "$name" >/dev/null 2>&1 || gcloud secrets create "$name" --replication-policy=automatic >/dev/null
+  if [[ "$value" == "$(gcv secrets versions access latest --secret="$name" 2>/dev/null || true)" ]]; then
+    echo "   $name: up to date"
+  else
+    printf '%s' "$value" | gcloud secrets versions add "$name" --data-file=- >/dev/null && echo "   $name: updated"
+  fi
+  gcloud secrets add-iam-policy-binding "$name" --member="serviceAccount:${RUNTIME_SA}" \
+    --role="roles/secretmanager.secretAccessor" >/dev/null
+}
+echo ">> Simon games app secrets (Upstash, read-only)..."
+put_secret upstash-url "$(dotenv_value UPSTASH_REDIS_REST_URL)"
+put_secret upstash-readonly-token "$(dotenv_value UPSTASH_REDIS_READONLY_TOKEN)"
+
+# ---------------------------------------------------------------------------
 # Firestore: sessions + transcripts. Only the backend's service account touches it
 # (IAM); client access is denied by firestore.rules.
 # ---------------------------------------------------------------------------

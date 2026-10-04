@@ -40,6 +40,12 @@ class Settings(BaseSettings):
     firebase_auth_domain: str = ""
     firebase_app_id: str = ""
 
+    # The Simon games app (sub-plan 06): read-only Upstash access + account -> profile mapping.
+    upstash_redis_rest_url: str = ""
+    upstash_redis_readonly_token: str = ""
+    simon_app_url: str = ""
+    simon_profiles: str = ""  # "dad@x.com=efraim,me@x.com=tomer" (from .env, never the repo)
+
     # Debug archive of each session's full tutor prompt (private bucket); empty = off.
     prompt_archive_uri: str = ""  # e.g. gs://heb-practice-private/debug/prompts
 

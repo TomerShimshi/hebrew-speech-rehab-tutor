@@ -128,6 +128,20 @@ class PracticeItem(BaseModel):
     sentence_completion: str
 
 
+class GameHomework(BaseModel):
+    game_id: str = Field(description="A game id from the GAMES section")
+    why: str = Field(description="One short line linking it to today's goal, in English")
+    name_he: str = ""  # filled in by code from the catalog
+
+
+class GamesAppFeedback(BaseModel):
+    game_id: str
+    kind: str = Field(description="tune_difficulty | bug | ux | new_game | platform")
+    title: str
+    rationale: str
+    evidence: str
+
+
 class ClassPlan(BaseModel):
     plan_type: str = Field(description="'intro' or 'regular'")
     primary_goal: PrimaryGoal
@@ -141,6 +155,13 @@ class ClassPlan(BaseModel):
     homework: str = ""
     fatigue_fallback: str = ""
     avoid: list[str] = []
+    # games (sub-plan 06)
+    game_homework: list[GameHomework] = []
+    games_note: str = ""  # one natural line the tutor may use about his recent games
+    # an in-session activity built on what he actually played (its category / words) -- turns
+    # the game into talking practice, e.g. "tell me about a time you fixed something: which tools?"
+    games_link_activity: str = ""
+    games_app_feedback: list[GamesAppFeedback] = []
 
     def tidy(self) -> "ClassPlan":
         """Trim to sane sizes (the model occasionally over-delivers)."""
@@ -160,4 +181,8 @@ class ClassPlan(BaseModel):
             "homework": cut(self.homework),
             "fatigue_fallback": cut(self.fatigue_fallback),
             "avoid": [cut(a, 150) for a in self.avoid[:8]],
+            "game_homework": self.game_homework[:2],
+            "games_note": cut(self.games_note, 300),
+            "games_link_activity": cut(self.games_link_activity, 500),
+            "games_app_feedback": self.games_app_feedback[:2],
         })

@@ -312,6 +312,7 @@ async function fetchToken(resumeHandle) {
   if (!res.ok) throw new Error("לא הצלחנו להתחיל את האימון. נסה שוב בעוד רגע.");
   const t = await res.json();
   s.sessionId = t.session_id;
+  if (t.game_homework) s.gameHomework = t.game_homework; // buttons for the end screen (06)
   return t;
 }
 
@@ -555,8 +556,25 @@ async function startSession() {
   } catch { /* not supported: fine */ }
 }
 
+// The game homework the tutor suggested, as big buttons that open the Simon game on his
+// profile (links come from the server, built from the catalog -- never from the model).
+function showGameHomework(items) {
+  const box = $("game-homework-buttons");
+  box.replaceChildren(...items.map((g) => {
+    const a = document.createElement("a");
+    a.href = g.url;
+    a.target = "_blank";
+    a.rel = "noopener";
+    a.className = "big primary";
+    a.textContent = `🎮 ${g.name_he}`;
+    return a;
+  }));
+  $("game-homework").hidden = items.length === 0;
+}
+
 function endSession(errorMessage, reason = errorMessage ? "error" : "end_button") {
   if (!s) return;
+  const sess = s;
   log("session", errorMessage ? `ended with error: ${errorMessage}` : `ended (${reason})`);
   s.ending = true;
   clearTimeout(s.wrapTimer);
@@ -574,6 +592,7 @@ function endSession(errorMessage, reason = errorMessage ? "error" : "end_button"
     show("start");
   } else {
     $("start-status").textContent = "";
+    showGameHomework(sess.gameHomework || []);
     show("ended");
   }
 }

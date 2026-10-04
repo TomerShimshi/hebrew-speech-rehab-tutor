@@ -38,6 +38,11 @@ h1 { font-size: clamp(2.2rem, 7vw, 3.5rem); margin: 0; }
 .secondary.active { color: #fff; background: var(--accent); }
 .end { color: #fff; background: var(--end); }
 .links { display: flex; gap: 1.2rem; justify-content: center; }
+/* Game homework on the end screen (06): opens the Simon game on his profile */
+.game-homework { display: flex; flex-direction: column; align-items: center; gap: .6rem; }
+.gh-title { font-size: 1.3rem; color: var(--muted); margin: 0; }
+.gh-buttons { display: flex; flex-wrap: wrap; gap: .8rem; justify-content: center; }
+.gh-buttons a { text-decoration: none; display: inline-block; }
 .danger { color: #fff; background: var(--danger); }
 
 /* Caregiver tools */

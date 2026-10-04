@@ -44,6 +44,13 @@ ENV_VARS+="|FIREBASE_APP_ID=$(dotenv FIREBASE_APP_ID)"
 SERVICE_URL="$(gcv run services describe "$SERVICE" --region "$REGION" --format='value(status.url)' 2>/dev/null || true)"
 ENV_VARS+="|SWEEPER_SA_EMAIL=memory-sweeper@${PROJECT_ID}.iam.gserviceaccount.com"
 ENV_VARS+="|SWEEP_AUDIENCE=${SERVICE_URL}"
+# The Simon games app (06): its address + which account is which Simon profile.
+ENV_VARS+="|SIMON_APP_URL=$(dotenv SIMON_APP_URL)"
+ENV_VARS+="|SIMON_PROFILES=$(dotenv SIMON_PROFILES)"
+SECRETS="GEMINI_API_KEY=gemini-api-key:latest"
+if gcloud secrets describe upstash-readonly-token >/dev/null 2>&1; then
+  SECRETS+=",UPSTASH_REDIS_REST_URL=upstash-url:latest,UPSTASH_REDIS_READONLY_TOKEN=upstash-readonly-token:latest"
+fi
 # Debug archive of each session's full tutor prompt, in the private bucket.
 ENV_VARS+="|PROMPT_ARCHIVE_URI=gs://${PROJECT_ID}-private/debug/prompts"
 
@@ -54,7 +61,7 @@ gcloud run deploy "$SERVICE" \
   --max-instances 1 \
   --memory 512Mi \
   --timeout 600 \
-  --set-secrets GEMINI_API_KEY=gemini-api-key:latest \
+  --set-secrets "$SECRETS" \
   --set-env-vars "$ENV_VARS" \
   --allow-unauthenticated
 

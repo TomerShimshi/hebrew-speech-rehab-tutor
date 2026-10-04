@@ -19,6 +19,13 @@ from app.transcripts import EndReason, TurnIn, turn_doc_id
 ACTIVE = "active"
 ENDED = "ended"
 
+
+def recommendation_id(rec: dict) -> str:
+    """De-duplication key: the same game + kind + title is one recommendation."""
+    import hashlib
+    raw = f"{rec.get('game_id')}|{rec.get('kind')}|{' '.join(str(rec.get('title', '')).lower().split())}"
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+
 # memory_status of an ended session (sub-plan 04)
 MEM_PENDING, MEM_PROCESSING, MEM_DONE, MEM_FAILED, MEM_SKIPPED = (
     "pending", "processing", "done", "failed", "skipped")
@@ -66,6 +73,8 @@ class SessionStore(Protocol):
     def save_next_plan(self, pid: str, sid: str, plan: dict) -> None: ...
     def recent_session_plans(self, pid: str, n: int = 5) -> list[dict]: ...
     def pending_plan_sessions(self, pid: str, limit: int = 2) -> list[str]: ...
+    # games-app recommendations (sub-plan 06)
+    def add_games_recommendation(self, pid: str, sid: str, rec: dict) -> None: ...
 
 
 def _turn_fields(turn: TurnIn) -> dict:
@@ -80,6 +89,7 @@ class InMemorySessionStore:
         self.memory_history: dict[tuple[str, str], dict] = {}
         self.flags: list[dict] = []
         self.next_plans: dict[str, dict] = {}
+        self.recommendations: dict[tuple[str, str], dict] = {}
 
     def create_session(self, pid, *, user_email, model, prompt_version):
         sid = uuid.uuid4().hex
@@ -182,6 +192,15 @@ class InMemorySessionStore:
         sessions = sorted((v for k, v in self.sessions.items() if k[0] == pid),
                           key=lambda v: v["started_at"], reverse=True)
         return [v["class_plan"] for v in sessions if v.get("class_plan")][:n]
+
+    def add_games_recommendation(self, pid, sid, rec):
+        key = (pid, recommendation_id(rec))
+        if key in self.recommendations:
+            r = self.recommendations[key]
+            r.update(times_suggested=r["times_suggested"] + 1, last_session=sid, last_seen=_now())
+        else:
+            self.recommendations[key] = {**rec, "status": "new", "times_suggested": 1,
+                                         "first_session": sid, "last_session": sid, "last_seen": _now()}
 
     def pending_plan_sessions(self, pid, limit=2):
         found = [v for k, v in self.sessions.items()
@@ -329,6 +348,16 @@ class FirestoreSessionStore:
                  .order_by("started_at", direction=self._fs.Query.DESCENDING).limit(n * 3))
         plans = [s.to_dict().get("class_plan") for s in query.stream()]
         return [p for p in plans if p][:n]
+
+    def add_games_recommendation(self, pid, sid, rec):
+        ref = self._patient(pid).collection("games_app_recommendations").document(recommendation_id(rec))
+        snap = ref.get()
+        if snap.exists:
+            ref.update({"times_suggested": self._fs.Increment(1), "last_session": sid,
+                        "last_seen": self._fs.SERVER_TIMESTAMP})
+        else:
+            ref.set({**rec, "status": "new", "times_suggested": 1, "first_session": sid,
+                     "last_session": sid, "last_seen": self._fs.SERVER_TIMESTAMP})
 
     def pending_plan_sessions(self, pid, limit=2):
         query = self._patient(pid).collection("sessions").where(

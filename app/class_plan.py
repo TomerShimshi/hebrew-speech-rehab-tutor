@@ -62,6 +62,13 @@ def render_class_plan(plan: ClassPlan | None) -> str:
         lines.append("Conversation topics: " + "; ".join(plan.conversation_topics))
     if plan.homework:
         lines.append(f"Homework to give at the end: {plan.homework}")
+    if plan.game_homework:
+        lines.append("Game homework to suggest in the closing (a button for it appears on his screen): " + "; ".join(
+            f"{g.name_he or g.game_id} -- {g.why}" for g in plan.game_homework))
+    if plan.games_note:
+        lines.append(f"About his games: {plan.games_note}")
+    if plan.games_link_activity:
+        lines.append(f"Game-linked activity (talking practice built on what he played): {plan.games_link_activity}")
     if plan.fatigue_fallback:
         lines.append(f"If he is tired or frustrated: {plan.fatigue_fallback}")
     if plan.avoid:
