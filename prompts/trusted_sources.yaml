@@ -1,0 +1,9 @@
+# Sites the research sub-agent's web_search uses by default (scope "trusted", via Tavily's
+# include_domains). Results from these domains are marked trusted; "open" searches may return
+# anything else, marked untrusted. Subdomains count (www.asha.org, pubmed.ncbi.nlm.nih.gov).
+trusted_domains:
+  - asha.org                # American Speech-Language-Hearing Association (practice portal)
+  - ncbi.nlm.nih.gov        # PubMed, PMC, StatPearls
+  - nidcd.nih.gov           # US National Institute on Deafness and Other Communication Disorders
+  - aphasiatrials.org       # Aphasia United best-practice recommendations
+  - aphasiapathway.com.au   # Australian Aphasia Rehabilitation Pathway

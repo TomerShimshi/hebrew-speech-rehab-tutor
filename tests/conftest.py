@@ -1,6 +1,11 @@
 """Shared fakes: sign-in, Gemini token minting, Firestore (in-memory), patient profile."""
 
+import os
 from types import SimpleNamespace
+
+# Settings() also reads the developer's .env (even in module-level test constants, created
+# before any fixture runs): tests must never use the real Tavily key. Env vars beat .env.
+os.environ["TAVILY_API_KEY"] = ""
 
 import pytest
 from fastapi.testclient import TestClient

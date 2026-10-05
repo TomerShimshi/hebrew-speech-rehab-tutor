@@ -8,6 +8,9 @@ Layout (see docs/plans/03 and 04):
   patients/{pid}/memory_history/{sid}     the previous memory, saved before each update
   patients/{pid}/flags/{id}               things the family should see
   patients/{pid}/plans/next               the lesson plan for the coming session (05)
+  patients/{pid}/technique_notes/{id}     research findings, keyed by the normalized question (07)
+  patients/{pid}/research_usage/{date}    research runs that day (07)
+  usage/tavily-{YYYY-MM}                  app-wide Tavily searches that month (07)
 """
 
 import datetime as dt
@@ -75,6 +78,14 @@ class SessionStore(Protocol):
     def pending_plan_sessions(self, pid: str, limit: int = 2) -> list[str]: ...
     # games-app recommendations (sub-plan 06)
     def add_games_recommendation(self, pid: str, sid: str, rec: dict) -> None: ...
+    # research (sub-plan 07)
+    def get_technique_note(self, pid: str, note_id: str) -> dict | None: ...
+    def save_technique_note(self, pid: str, note_id: str, note: dict) -> None: ...
+    def recent_technique_notes(self, pid: str, n: int = 3) -> list[dict]: ...
+    def research_runs_on(self, pid: str, day: str) -> int: ...
+    def add_research_run(self, pid: str, day: str) -> None: ...
+    def searches_in_month(self, month: str) -> int: ...
+    def add_search(self, month: str) -> None: ...
 
 
 def _turn_fields(turn: TurnIn) -> dict:
@@ -90,6 +101,9 @@ class InMemorySessionStore:
         self.flags: list[dict] = []
         self.next_plans: dict[str, dict] = {}
         self.recommendations: dict[tuple[str, str], dict] = {}
+        self.technique_notes: dict[tuple[str, str], dict] = {}
+        self.research_runs: dict[tuple[str, str], int] = {}
+        self.monthly_searches: dict[str, int] = {}
 
     def create_session(self, pid, *, user_email, model, prompt_version):
         sid = uuid.uuid4().hex
@@ -201,6 +215,28 @@ class InMemorySessionStore:
         else:
             self.recommendations[key] = {**rec, "status": "new", "times_suggested": 1,
                                          "first_session": sid, "last_session": sid, "last_seen": _now()}
+
+    def get_technique_note(self, pid, note_id):
+        return self.technique_notes.get((pid, note_id))
+
+    def save_technique_note(self, pid, note_id, note):
+        self.technique_notes[(pid, note_id)] = {**note, "created_at": _now()}
+
+    def recent_technique_notes(self, pid, n=3):
+        notes = [v for k, v in self.technique_notes.items() if k[0] == pid]
+        return sorted(notes, key=lambda v: v["created_at"], reverse=True)[:n]
+
+    def research_runs_on(self, pid, day):
+        return self.research_runs.get((pid, day), 0)
+
+    def add_research_run(self, pid, day):
+        self.research_runs[(pid, day)] = self.research_runs_on(pid, day) + 1
+
+    def searches_in_month(self, month):
+        return self.monthly_searches.get(month, 0)
+
+    def add_search(self, month):
+        self.monthly_searches[month] = self.searches_in_month(month) + 1
 
     def pending_plan_sessions(self, pid, limit=2):
         found = [v for k, v in self.sessions.items()
@@ -365,6 +401,35 @@ class FirestoreSessionStore:
         found = [{"id": s.id, **s.to_dict()} for s in query.stream()]
         found.sort(key=lambda v: v.get("started_at") or _now(), reverse=True)
         return [v["id"] for v in found[:limit]]
+
+    def get_technique_note(self, pid, note_id):
+        snap = self._patient(pid).collection("technique_notes").document(note_id).get()
+        return snap.to_dict() if snap.exists else None
+
+    def save_technique_note(self, pid, note_id, note):
+        self._patient(pid).collection("technique_notes").document(note_id).set(
+            {**note, "created_at": self._fs.SERVER_TIMESTAMP})
+
+    def recent_technique_notes(self, pid, n=3):
+        query = (self._patient(pid).collection("technique_notes")
+                 .order_by("created_at", direction=self._fs.Query.DESCENDING).limit(n))
+        return [s.to_dict() for s in query.stream()]
+
+    def research_runs_on(self, pid, day):
+        snap = self._patient(pid).collection("research_usage").document(day).get()
+        return int((snap.to_dict() or {}).get("runs", 0)) if snap.exists else 0
+
+    def add_research_run(self, pid, day):
+        self._patient(pid).collection("research_usage").document(day).set(
+            {"runs": self._fs.Increment(1)}, merge=True)
+
+    def searches_in_month(self, month):
+        snap = self._db.collection("usage").document(f"tavily-{month}").get()
+        return int((snap.to_dict() or {}).get("searches", 0)) if snap.exists else 0
+
+    def add_search(self, month):
+        self._db.collection("usage").document(f"tavily-{month}").set(
+            {"searches": self._fs.Increment(1)}, merge=True)
 
     def add_flag(self, pid, sid, flag):
         self._patient(pid).collection("flags").document().set({

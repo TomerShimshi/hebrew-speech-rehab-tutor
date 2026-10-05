@@ -63,6 +63,14 @@ class Settings(BaseSettings):
     )
     memory_max_tool_rounds: int = 8
 
+    # Research sub-agent (sub-plan 07): Tavily web search, free 1,000 searches/month.
+    # Without a key, research is simply skipped.
+    tavily_api_key: str = ""
+    research_daily_limit: int = 3  # research runs per account per day
+    research_monthly_limit: int = 800  # app-wide Tavily searches per month (below the free 1,000)
+    research_max_searches: int = 3  # per research run
+    research_cache_days: int = 30
+
     @property
     def allowed_email_set(self) -> frozenset[str]:
         return _email_set(self.allowed_emails)

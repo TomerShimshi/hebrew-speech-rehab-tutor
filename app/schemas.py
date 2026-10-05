@@ -96,6 +96,27 @@ class MemoryDoc(BaseModel):
     prompt_version: str | None = None
 
 
+# ---- research findings (sub-plan 07) -------------------------------------------------------
+
+class Confidence(str, Enum):
+    low = "low"
+    medium = "medium"
+    high = "high"
+
+
+class Technique(BaseModel):
+    name: str = Field(description="Short name of the technique, e.g. 'Semantic Feature Analysis'.")
+    how_to: str = Field(description="How the voice tutor can do it in a short home session, 2-4 sentences.")
+    hebrew_example: str = Field(description="One short example of how it sounds in Hebrew.")
+    source_url: str = Field(description="The URL (exactly as a search returned it) that supports it.")
+
+
+class ResearchFindings(BaseModel):
+    summary: str = Field(description="2-4 sentences: what the sources say about the question.")
+    techniques: list[Technique] = Field(description="0-3 techniques; empty if nothing reliable was found.")
+    confidence: Confidence
+
+
 # ---- lesson plan (sub-plan 05) -------------------------------------------------------------
 # No length caps in the schema sent to Gemini (it handles plain schemas most reliably);
 # ClassPlan.tidy() trims anything oversized after parsing.

@@ -51,6 +51,10 @@ SECRETS="GEMINI_API_KEY=gemini-api-key:latest"
 if gcloud secrets describe upstash-readonly-token >/dev/null 2>&1; then
   SECRETS+=",UPSTASH_REDIS_REST_URL=upstash-url:latest,UPSTASH_REDIS_READONLY_TOKEN=upstash-readonly-token:latest"
 fi
+# Research sub-agent (07): without the secret, research is simply skipped.
+if gcloud secrets describe tavily-api-key >/dev/null 2>&1; then
+  SECRETS+=",TAVILY_API_KEY=tavily-api-key:latest"
+fi
 # Debug archive of each session's full tutor prompt, in the private bucket.
 ENV_VARS+="|PROMPT_ARCHIVE_URI=gs://${PROJECT_ID}-private/debug/prompts"
 

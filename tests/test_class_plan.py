@@ -182,3 +182,31 @@ def test_treated_or_untreated_is_decided_by_the_word_bank_not_the_model():
 def test_checkin_lead_ins_are_rendered():
     plan = a_plan(probe=[dict(PROBES[0], bridge="מדברים על הכנרת...")] + PROBES[1:])
     assert "lead-in: מדברים על הכנרת... | ask: העיר על הכנרת" in render_class_plan(plan)
+
+
+def practice_item(target):
+    return {"target": target, "elicit": "x", "hint_meaning": "m", "hint_first_syllable": "s", "sentence_completion": "c"}
+
+
+def test_plan_rules_drop_repeats_and_too_famous_new_items():
+    from app.agent.next_class import enforce_plan_rules
+    probe = PROBES + [{"target": "ירושלים", "kind": "untreated", "elicit": "עיר הבירה"}]
+    practice = [practice_item("עכו"), practice_item("כרמיאל")]
+    plan = enforce_plan_rules(a_plan(probe=probe, practice=practice), practiced={"טבריה"})
+    assert [p.target for p in plan.probe] == ["טבריה", "עכו", "צפת"]
+    assert [p.kind for p in plan.probe] == ["treated", "untreated", "untreated"]
+    assert [p.target for p in plan.practice] == ["כרמיאל"]
+    # a famous name he already practiced is a fair treated item
+    plan = enforce_plan_rules(a_plan(probe=probe), practiced={"ירושלים"})
+    assert "ירושלים" in [p.target for p in plan.probe]
+
+
+def test_plan_rules_reject_thin_plans():
+    import pytest
+    from app.agent.next_class import enforce_plan_rules
+    famous = [{"target": t, "kind": "untreated", "elicit": "x"} for t in ("ירושלים", "תל אביב", "עכו")]
+    with pytest.raises(ValueError, match="usable probe items"):
+        enforce_plan_rules(a_plan(probe=famous), practiced=set())
+    same = [practice_item(p["target"]) for p in PROBES]
+    with pytest.raises(ValueError, match="repeats a check-in item"):
+        enforce_plan_rules(a_plan(practice=same), practiced=set())
