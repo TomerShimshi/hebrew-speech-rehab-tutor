@@ -64,6 +64,7 @@ class FlagKind(str, Enum):
     distress = "distress"
     safety = "safety"
     technical = "technical"
+    tutor_issue = "tutor_issue"  # the tutor made a mistake (8.5): for the caregivers to review
 
 
 class Severity(str, Enum):
@@ -75,6 +76,11 @@ class Flag(BaseModel):
     kind: FlagKind
     severity: Severity
     evidence: str = Field(max_length=1000)
+    # tutor_issue (8.5): the exchange as separate fields, so the page never mixes the English
+    # explanation and the Hebrew quotes in one line
+    issue: str = ""  # invented_fact | insisted | wrong_language | cut_off | other
+    tutor_said: str = Field(default="", max_length=600)
+    he_said: str = Field(default="", max_length=600)
 
 
 class ConsolidatedMemory(BaseModel):
@@ -143,6 +149,9 @@ class ProbeItem(BaseModel):
     kind: str = Field(description="'treated' (practiced before, from the word bank) or 'untreated' (new, same kind)")
     elicit: str = Field(description="HEBREW: exactly how she asks for it, WITHOUT hints (a description).")
     bridge: str = Field(default="", description="HEBREW: the natural lead-in she says, linking it to a topic he talks about.")
+    about_his_life: bool = Field(default=False, description=(
+        "true if the answer comes from HIS OWN life (his family, friends, his places, his events) -- "
+        "then it MUST be a name found in the memory/profile/notes/word bank or said by him; never invented."))
 
 
 class PracticeItem(BaseModel):
@@ -152,6 +161,9 @@ class PracticeItem(BaseModel):
     # as spoken, e.g. "טְבֶ..." -- never the letter's name
     hint_first_syllable: str = Field(description="HEBREW: hint 2, the first syllable as spoken, with vowel marks (e.g. 'טְבֶ...').")
     sentence_completion: str = Field(description="HEBREW: hint 3, a sentence for him to complete.")
+    about_his_life: bool = Field(default=False, description=(
+        "true if the answer comes from HIS OWN life (his family, friends, his places, his events) -- "
+        "then it MUST be a name found in the memory/profile/notes/word bank or said by him; never invented."))
 
 
 class GameHomework(BaseModel):

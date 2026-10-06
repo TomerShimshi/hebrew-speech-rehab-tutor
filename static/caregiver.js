@@ -10,7 +10,8 @@ const ACCOUNT_KEY = "caregiver.account";
 const MOOD = { good: "מצב רוח טוב", ok: "מצב רוח בסדר", low: "מצב רוח ירוד", unknown: "" };
 const RESULT = { uncued: "✓", cued: "~", failed: "✗" };
 const RESULT_TEXT = { uncued: "לבד", cued: "עם רמז", failed: "לא הצליח" };
-const FLAG_KIND = { sudden_decline: "ירידה פתאומית", distress: "מצוקה", safety: "בטיחות", technical: "תקלה טכנית" };
+const FLAG_KIND = { sudden_decline: "ירידה פתאומית", distress: "מצוקה", safety: "בטיחות", technical: "תקלה טכנית",
+                    tutor_issue: "טעות של המאמנת" };
 const END_REASON = { end_button: "כפתור סיום", tutor_goodbye: "המאמנת סיימה", abandoned: "החלון נסגר",
                      error: "תקלה" };
 const GOAL = { name_retrieval: "שליפת שמות", discourse: "סיפור והסבר", high_level_language: "שפה גבוהה",
@@ -105,12 +106,42 @@ function renderFlags(flags) {
   }
   $("flags").replaceChildren(...open.map((f) => el("div", { class: `flag ${f.severity}` },
     el("span", { class: "title", text: `⚠️ ${FLAG_KIND[f.kind] || f.kind}${f.severity === "high" ? " (חמור)" : ""} · ${when(f.created_at)}` }),
-    p(f.evidence),
+    ...flagBody(f),
     confirmButton("טופל", "לסמן שטופל?", async () => {
       try { await api(acct(`/flags/${encodeURIComponent(f.id)}/resolve`), {}); } catch { /* reload shows the truth */ }
       await loadAccount();
     }),
   )));
+}
+
+const ISSUE = { invented_fact: "המציאה עובדה", insisted: "התעקשה", wrong_language: "לא בעברית",
+                cut_off: "קטעה אותו", other: "אחר" };
+
+// Each language on its own line: the English explanation, her words, his words -- never
+// mixed in one line (bidirectional text is unreadable otherwise).
+function flagBody(f) {
+  const quote = (who, text) => text ? el("div", { class: "quote" },
+    el("span", { class: "who", text: `${who}:` }), el("span", { dir: "rtl", text: `«${text}»` })) : null;
+  if (f.tutor_said || f.he_said) {
+    return [ISSUE[f.issue] ? p(`סוג: ${ISSUE[f.issue]}`, "muted kv") : null,
+            quote("המאמנת", f.tutor_said), quote("הוא", f.he_said),
+            f.evidence ? el("p", { class: "kv", dir: "ltr", text: f.evidence }) : null];
+  }
+  // older flags: one free-text line with "[kind] TUTOR: ... HIM: ..." -- split it into lines
+  const m = /^\[(\w+)\]\s*(.*)$/s.exec(f.evidence || "");
+  const body = m ? m[2] : f.evidence || "";
+  const parts = body.split(/\s*(TUTOR:|HIM:)\s*/).filter(Boolean);
+  if (parts.length < 2) return [p(f.evidence)];
+  const lines = [m && ISSUE[m[1]] ? p(`סוג: ${ISSUE[m[1]]}`, "muted kv") : null];
+  for (let i = 0; i < parts.length; i++) {
+    if (parts[i] === "TUTOR:" || parts[i] === "HIM:") {
+      lines.push(quote(parts[i] === "TUTOR:" ? "המאמנת" : "הוא", parts[i + 1] || ""));
+      i++;
+    } else {
+      lines.push(p(parts[i]));
+    }
+  }
+  return lines;
 }
 
 function probeChips(results) {
@@ -156,6 +187,22 @@ function renderSessions(sessions) {
         box.replaceChildren(p("טעינת התמלול נכשלה.", "muted"));
       }
     });
+    const promptBox = el("div", { hidden: true });
+    const promptButton = el("button", { class: "small", type: "button", text: "הפרומפט" });
+    promptButton.addEventListener("click", async () => {
+      if (!promptBox.hidden) { promptBox.hidden = true; promptButton.textContent = "הפרומפט"; return; }
+      promptBox.hidden = false;
+      promptButton.textContent = "הסתרת הפרומפט";
+      busy(promptBox, "טוען");
+      try {
+        const data = await api(acct(`/sessions/${encodeURIComponent(s.id)}/prompt`));
+        promptBox.replaceChildren(data.text
+          ? el("pre", { class: "plan prompt", dir: "auto", text: data.text })
+          : p("הפרומפט של השיחה הזו לא נשמר (נשמר רק לשיחות מ־8.5 והלאה). עותק שמור 30 יום בדלי הפרטי.", "muted"));
+      } catch {
+        promptBox.replaceChildren(p("טעינת הפרומפט נכשלה.", "muted"));
+      }
+    });
     const problems = [s.memory_status === "failed" && "עדכון הזיכרון נכשל", s.plan_status === "failed" && "בניית השיעור נכשלה"]
       .filter(Boolean);
     return el("div", { class: "session" },
@@ -173,7 +220,8 @@ function renderSessions(sessions) {
       s.highlights?.length ? p(`הצלחות: ${s.highlights.join(" · ")}`) : null,
       s.difficulties?.length ? p(`קשיים: ${s.difficulties.join(" · ")}`) : null,
       probeChips(s.probe_results),
-      button, box,
+      el("div", { class: "cg-actions" }, button, promptButton),
+      box, promptBox,
     );
   }));
 }
@@ -252,7 +300,7 @@ function renderMemory(memory) {
 }
 
 function versionKind(version) {
-  if (version?.startsWith("edit-")) return " · לפני הסרת פריט";
+  if (version?.startsWith("edit-")) return " · לפני הסרה (פריט או מילה)";
   if (version?.startsWith("restore-")) return " · לפני שחזור";
   return "";
 }
@@ -287,7 +335,7 @@ function renderWords(rows) {
     $("words").replaceChildren(p("בנק המילים ריק.", "muted"));
     return;
   }
-  const head = ["מילה", "ניסיונות", "✓ לבד", "~ עם רמז", "✗", "תוצאה אחרונה", "הופיעה לאחרונה", "לתרגול שוב"];
+  const head = ["מילה", "ניסיונות", "✓ לבד", "~ עם רמז", "✗", "תוצאה אחרונה", "הופיעה לאחרונה", "לתרגול שוב", ""];
   $("words").replaceChildren(el("div", { class: "table-wrap" }, el("table", { class: "words" },
     el("thead", {}, el("tr", {}, head.map((h) => el("th", { text: h })))),
     el("tbody", {}, rows.map((r) => el("tr", {},
@@ -295,8 +343,23 @@ function renderWords(rows) {
       el("td", { text: r.cued ?? 0 }), el("td", { text: r.failed ?? 0 }),
       el("td", { text: `${RESULT[r.last_result] || ""} ${RESULT_TEXT[r.last_result] || ""}${r.last_cue_level ? ` (${r.last_cue_level})` : ""}` }),
       el("td", { text: r.last_seen || "" }), el("td", { text: r.next_due || "" }),
+      el("td", {}, confirmButton("✕", `להסיר את "${r.word}"?`, (where) => removeWord(r.word, where), "x")),
     ))),
   )));
+}
+
+async function removeWord(word, where) {
+  busy(where, "מסיר");
+  busy($("words-status"), `מסיר את "${word}" מבנק המילים`);
+  try {
+    await api(acct("/word-bank/remove"), { word });
+    await loadAccount();
+    $("words-status").textContent = `✓ "${word}" הוסרה מבנק המילים. הגרסה הקודמת נשמרה ברשימת הגרסאות של הזיכרון.`;
+  } catch (err) {
+    const msg = err.status === 409 ? "הזיכרון השתנה בינתיים. רענן ונסה שוב." : "ההסרה נכשלה. נסה שוב.";
+    where.textContent = msg;
+    $("words-status").textContent = msg;
+  }
 }
 
 function renderResearch(notes) {
@@ -380,6 +443,8 @@ async function loadAccount() {
     renderNotes(ov.notes);
     $("history").replaceChildren(p("נטען בפתיחה…", "muted"));
     if ($("sec-history").open) loadHistory();
+    $("next-prompt").replaceChildren(p("נטען בפתיחה…", "muted"));
+    if ($("sec-next-prompt").open) loadNextPrompt();
     const a = accounts.find((x) => x.email === account);
     $("account-summary").textContent = a ? `${a.sessions} שיחות · ${a.words} מילים` : "";
     $("content").hidden = false;
@@ -409,9 +474,23 @@ $("account").addEventListener("change", () => {
   $("reset-status").textContent = "";
   $("rebuild-status").textContent = "";
   $("memory-status").textContent = "";
+  $("words-status").textContent = "";
   loadAccount();
 });
 $("sec-history").addEventListener("toggle", () => { if ($("sec-history").open) loadHistory(); });
+
+async function loadNextPrompt() {
+  busy($("next-prompt"), "בונה את הפרומפט");
+  try {
+    const data = await api(acct("/next-prompt"));
+    $("next-prompt").replaceChildren(
+      p(`גרסת הנחיות ${data.prompt_version} · ${data.text.length.toLocaleString("he-IL")} תווים`, "muted kv"),
+      el("pre", { class: "plan prompt", dir: "auto", text: data.text }));
+  } catch {
+    $("next-prompt").replaceChildren(p("טעינת הפרומפט נכשלה.", "muted"));
+  }
+}
+$("sec-next-prompt").addEventListener("toggle", () => { if ($("sec-next-prompt").open) loadNextPrompt(); });
 
 // ---- rebuild the next lesson now (with the deployed code and prompts) ---------------------
 $("rebuild").addEventListener("click", async () => {

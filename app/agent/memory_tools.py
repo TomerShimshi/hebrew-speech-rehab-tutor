@@ -33,6 +33,9 @@ class MemoryDraft:
     probe_results: list[dict] = field(default_factory=list)
 
 
+# What report_tutor_issue may report (8.5). Saved as a low-severity "tutor_issue" flag.
+TUTOR_ISSUE_KINDS = ("invented_fact", "insisted", "wrong_language", "cut_off", "other")
+
 def _norm(text: str) -> str:
     return " ".join(text.split()).strip()
 
@@ -95,6 +98,16 @@ def build_memory_tools(draft: MemoryDraft) -> list[Tool]:
 
     def raise_flag(args: dict) -> dict:
         draft.flags.append(Flag(**args))
+        return {"ok": True}
+
+    def report_tutor_issue(args: dict) -> dict:
+        kind = args.get("kind") or "other"
+        if kind not in TUTOR_ISSUE_KINDS:
+            raise ValueError(f"kind must be one of {list(TUTOR_ISSUE_KINDS)}")
+        draft.flags.append(Flag(kind="tutor_issue", severity="low", issue=kind,
+                                evidence=str(args.get("what_went_wrong", ""))[:1000],
+                                tutor_said=str(args.get("tutor_said", ""))[:600],
+                                he_said=str(args.get("he_said", ""))[:600]))
         return {"ok": True}
 
     str_list = {"type": "array", "items": {"type": "string"}}
@@ -164,5 +177,21 @@ def build_memory_tools(draft: MemoryDraft) -> list[Tool]:
                 "required": ["kind", "severity", "evidence"],
             },
             raise_flag,
+        ),
+        Tool(
+            "report_tutor_issue",
+            "Report a mistake the TUTOR made in this session, for the family to review (e.g. she asked "
+            "about a person or place that isn't part of his life). Not for his own difficulties.",
+            {
+                "type": "object",
+                "properties": {
+                    "kind": {"type": "string", "enum": list(TUTOR_ISSUE_KINDS)},
+                    "tutor_said": {"type": "string", "description": "HEBREW: her words, quoted exactly (just the relevant part)."},
+                    "he_said": {"type": "string", "description": "HEBREW: his reply, quoted exactly (empty if none)."},
+                    "what_went_wrong": {"type": "string", "description": "ENGLISH: one short sentence, no Hebrew sentences."},
+                },
+                "required": ["kind", "tutor_said", "what_went_wrong"],
+            },
+            report_tutor_issue,
         ),
     ]

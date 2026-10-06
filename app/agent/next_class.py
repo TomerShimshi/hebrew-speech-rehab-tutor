@@ -11,6 +11,7 @@ failures are recorded as plan_status.
 """
 
 import datetime as dt
+import re
 import sys
 from functools import lru_cache
 
@@ -30,6 +31,12 @@ from app.store import PLAN_DONE, PLAN_FAILED, SessionStore
 PROMPT_PATH = REPO_ROOT / "prompts" / "next_class.yaml"
 TECHNIQUES_PATH = REPO_ROOT / "prompts" / "therapy_techniques.yaml"
 MIN_PROBE_ITEMS = 3
+GROUNDING_SESSIONS = 3  # his own lines in this many recent transcripts count as "his data"
+# The question addresses HIM personally ("your friend", "with you"...): then the answer is about
+# his own life and must be grounded, whatever the model's about_his_life says.
+PERSONAL = re.compile(r"(שלך|שלכם|איתך|אליך|אצלך|אותך|בשבילך|אשתך|בעלך|בנך|בתך|ילדיך|נכדיך|נכדך|"
+                      r"חברך|חבריך|אחיך|אחותך|הוריך|אביך|אמך)")
+NIQQUD = re.compile(r"[\u0591-\u05C7]")
 # Answers he gets right anyway: as NEW (untreated) check-in items they can't show progress.
 TOO_FAMOUS = {"ירושלים", "תל אביב", "תל אביב יפו", "תל-אביב", "חיפה", "אילת", "באר שבע", "ים המלח",
               "הכנרת", "כנרת", "הכותל", "הכותל המערבי", "ישראל"}
@@ -53,11 +60,55 @@ def _norm(word: str) -> str:
     return " ".join(word.split()).strip()
 
 
-def enforce_plan_rules(plan: ClassPlan, practiced: set[str]) -> ClassPlan:
+def _plain(text: str) -> str:
+    """For matching names: no vowel marks, no punctuation, single spaces."""
+    text = NIQQUD.sub("", text or "")
+    return " ".join(re.sub(r"[^\w\s]", " ", text).split())
+
+
+def grounding_text(store: SessionStore, pid: str, memory_raw: dict, profile_text: str, notes: str) -> str:
+    """Everything that is really known about his life: memory, profile, planner notes, and his
+    OWN lines in the last few transcripts (a name he said himself counts). NOT the word bank: a
+    word there only means the tutor practiced it -- and that may itself have been invented."""
+    parts = [profile_text, notes, memory_raw.get("memory_prompt", ""), *memory_raw.get("focus_next_session", [])]
+    for items in (memory_raw.get("sections") or {}).values():
+        parts += [str(i) for i in items or []]
+    for session in store.list_sessions(pid, GROUNDING_SESSIONS):
+        for turn in store.list_turns(pid, session["id"]):
+            if turn.get("speaker") == "patient":
+                parts += [turn.get("text", ""), turn.get("live_text", "")]
+    return f" {_plain(' '.join(p for p in parts if p))} "
+
+
+def _about_his_life(item) -> bool:
+    return bool(getattr(item, "about_his_life", False) or PERSONAL.search(f"{item.elicit} {getattr(item, 'bridge', '')}"))
+
+
+def _grounded(target: str, known: str) -> bool:
+    # Hebrew attaches prefixes to words: "ברמת גן", "והירקון", "מחיפה" all count for the name.
+    name = _plain(target)
+    return bool(name) and re.search(rf"(?<!\w)[בהולמשכ]{{0,2}}{re.escape(name)}(?!\w)", known) is not None
+
+
+def invented_items(plan: ClassPlan, known: str) -> list[str]:
+    return [i.target for i in [*plan.probe, *plan.practice] if _about_his_life(i) and not _grounded(i.target, known)]
+
+
+def enforce_plan_rules(plan: ClassPlan, practiced: set[str], known: str | None = None) -> ClassPlan:
     """Rules the model sometimes ignores (seen with the smallest fallback model), fixed by code:
     check-in items are classified treated/untreated from the word bank, too-famous NEW items are
     dropped, and practice never repeats a check-in item (it would spoil the untreated
-    comparison and thin out the session). Raises if what's left is too thin to use."""
+    comparison and thin out the session). Items about HIS OWN life whose answer isn't in his own
+    data (`known`, from grounding_text) are dropped: the plan must never invent his people
+    (8.5). Raises if what's left is too thin to use."""
+    if known is not None:
+        invented = [i for i in [*plan.probe, *plan.practice] if _about_his_life(i) and not _grounded(i.target, known)]
+        if invented:
+            _log(f"dropped {len(invented)} item(s) about his life not found in his data: {[i.target for i in invented]}")
+            plan = plan.model_copy(update={
+                "probe": [i for i in plan.probe if i not in invented],
+                "practice": [i for i in plan.practice if i not in invented],
+            })
     probe = []
     for p in plan.probe:
         treated = _norm(p.target) in practiced
@@ -214,23 +265,38 @@ def build_next_plan(
         if research and research.get("status") in ("ok", "cached") and research.get("techniques"):
             context += (f"\n\n# RESEARCH FOR THIS PLAN (you asked: {research['question']})\n"
                         f"{research.get('summary', '')}\n{_technique_lines(research['techniques'])}")
-        result = generate_fn(
-            client, _models(settings), context,
-            types.GenerateContentConfig(
-                system_instruction=load_prompt()["system"],
-                response_mime_type="application/json",
-                response_schema=ClassPlan,
-                temperature=0.4,
-            ),
-        )
-        plan = result.response.parsed
-        if not isinstance(plan, ClassPlan):
-            plan = ClassPlan.model_validate_json(result.response.text)
-        plan = plan.tidy().model_copy(update={"plan_type": "regular"})
         # treated/untreated drives the progress comparison, so it's decided by code, not the
         # model: an item is "treated" only if it's actually in his word bank.
         practiced = {_norm(w) for w in (memory_raw.get("word_bank") or {})}
-        plan = enforce_plan_rules(plan, practiced)
+        known = grounding_text(store, pid, memory_raw, profile_text, caregiver_notes)
+        for attempt in (1, 2):
+            result = generate_fn(
+                client, _models(settings), context,
+                types.GenerateContentConfig(
+                    system_instruction=load_prompt()["system"],
+                    response_mime_type="application/json",
+                    response_schema=ClassPlan,
+                    temperature=0.4,
+                ),
+            )
+            plan = result.response.parsed
+            if not isinstance(plan, ClassPlan):
+                plan = ClassPlan.model_validate_json(result.response.text)
+            plan = plan.tidy().model_copy(update={"plan_type": "regular"})
+            invented = invented_items(plan, known)
+            try:
+                plan = enforce_plan_rules(plan, practiced, known)
+                break
+            except ValueError:
+                if attempt == 2 or not invented:
+                    raise
+                # One more try, told exactly what was invented (8.5).
+                _log(f"{sid}: plan invented {invented}; retrying once")
+                context += (f"\n\n# YOUR PREVIOUS PLAN WAS REJECTED\nThese answers are not in his data -- you "
+                            f"invented them: {', '.join(invented)}. Never use them. Use only names that appear in "
+                            f"the memory, profile or notes, or well-known general items; if names of his people "
+                            f"are missing, make the activity COLLECT them by asking him, and fill the remaining check-ins "
+                            f"with known items of another kind (see PRIORITY).")
         # Games: keep only homework for games he actually has (no invented ids), with their
         # Hebrew names from the catalog; recommendations are saved separately (de-duplicated).
         known = {g.id: g for g in (games.games if games and not games.error else [])}
@@ -259,7 +325,8 @@ def build_next_plan(
     except Exception as exc:  # noqa: BLE001 -- recorded, retried by the sweep
         _log(f"{sid}: FAILED {type(exc).__name__}: {exc!s:.300}")
         try:
-            store.update_session(pid, sid, {"plan_status": PLAN_FAILED,
+            attempts = (store.get_session(pid, sid) or {}).get("plan_attempts", 0) + 1
+            store.update_session(pid, sid, {"plan_status": PLAN_FAILED, "plan_attempts": attempts,
                                             "plan_error": f"{type(exc).__name__}: {exc!s:.300}"})
         except Exception:  # noqa: BLE001
             pass

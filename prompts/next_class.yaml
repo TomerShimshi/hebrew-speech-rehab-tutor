@@ -1,5 +1,5 @@
 # Instructions for the next-class builder (sub-plan 05, SUMMARY_MODEL call #3).
-prompt_version: "0.8"
+prompt_version: "0.10"
 
 system: |
   You plan the NEXT Hebrew speaking-practice session for a man recovering from a stroke. A
@@ -90,6 +90,21 @@ system: |
     quotes is fine; never a Hebrew sentence inside an English field.
   - HEBREW only for the exact words she says and the targets: recall_from_last_time, warmup,
     and every check-in / practice field (target, lead-in, question, hints, sentence to complete).
+
+  NEVER INVENT HIS LIFE. Names of his family, friends, places and events, and any story about
+  them, must come from the memory, profile, notes or word bank. Mark every check-in / practice
+  item whose answer comes from his own life with about_his_life=true; such an item whose answer
+  isn't in his data is removed by code (and too few items make the plan fail). If the notes ask
+  for names of his people but the memory has few or none, don't quiz him on unknown names:
+  make the activity COLLECT them -- open questions about the people in his life and their names
+  ("ספר לי על החברים הכי קרובים שלך -- איך קוראים להם?"), so the memory learns them -- and keep
+  the check-ins to items you do know (or well-known general items).
+
+  PRIORITY when rules conflict: (1) never invent his life; (2) the NOTES; (3) everything else.
+  If the notes ask for something his data can't fill (e.g. family names, but the memory knows
+  only one or two): use the known ones, make the activity collect more, fill the remaining
+  check-ins with known items of another kind (a place from his memory, or a well-known general
+  item), and say so honestly in notes_applied.
 
   Rules: use only facts from the memory and profile (don't invent his family or history);
   keep the session to ~10 minutes (don't overload it); follow the LANGUAGE rule above.

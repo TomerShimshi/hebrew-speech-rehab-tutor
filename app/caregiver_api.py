@@ -19,7 +19,7 @@ from urllib.parse import urlencode
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 
-from app.agent.memory_edit import MemoryEditError, remove_item, restore_version
+from app.agent.memory_edit import MemoryEditError, remove_item, remove_word, restore_version
 from app.agent.next_class import build_next_plan
 from app.agent.research import personal_terms
 from app.auth import User, require_caregiver
@@ -31,6 +31,7 @@ from app.deps import (
     get_text_client,
 )
 from app.patient_profile import PatientProfileLoader
+from app.session_prompt import build_session_prompt
 from app.prompt_archive import PromptArchive
 from app.store import ENDED, PLAN_DONE, SessionStore
 
@@ -154,6 +155,26 @@ def session_detail(sid: str, pid: str = Depends(account), store: SessionStore = 
     return {"session": _session_row({"id": sid, **session}), "turns": turns}
 
 
+@router.get("/{email}/sessions/{sid}/prompt")
+def session_prompt(sid: str, pid: str = Depends(account), store: SessionStore = Depends(get_store)) -> dict:
+    """The exact system instruction the tutor got in that session (stored from 8.5 on)."""
+    if store.get_session(pid, sid) is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    saved = store.get_session_prompt(pid, sid)
+    return {"text": (saved or {}).get("text"), "prompt_version": (saved or {}).get("prompt_version")}
+
+
+@router.get("/{email}/next-prompt")
+def next_prompt(pid: str = Depends(account), settings: Settings = Depends(get_settings),
+                store: SessionStore = Depends(get_store),
+                profile: PatientProfileLoader = Depends(get_profile_loader),
+                games_reader=Depends(get_games_reader)) -> dict:
+    """What the tutor would get if this account started a session right now -- built by the
+    same function as /api/session/start."""
+    built = build_session_prompt(store, settings, pid, profile.get(), games_reader)
+    return {"text": built.prompt.text, "prompt_version": built.prompt.version}
+
+
 @router.get("/{email}/memory/history")
 def memory_history(pid: str = Depends(account), store: SessionStore = Depends(get_store)) -> dict:
     return {"versions": [{k: v.get(k) for k in ("version", "memory_prompt", "sections", "updated_at",
@@ -206,6 +227,23 @@ def memory_remove_item(
         raise HTTPException(status_code=503, detail="The model is busy; nothing was changed. Try again.") from exc
     print(f"[caregiver] {caregiver.email} removed a {section} item from {pid}'s memory; backup={backup}", flush=True)
     return {"ok": True, "memory_prompt": memory["memory_prompt"], "backup": backup}
+
+
+@router.post("/{email}/word-bank/remove")
+def word_bank_remove(
+    word: str = Body(..., embed=True, max_length=200),
+    pid: str = Depends(account),
+    caregiver: User = Depends(require_caregiver),
+    store: SessionStore = Depends(get_store),
+    archive: PromptArchive = Depends(get_prompt_archive),
+) -> dict:
+    backup = _backup(archive, pid, store.get_memory(pid), "remove-word")
+    try:
+        remove_word(store, pid, word)
+    except MemoryEditError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    print(f"[caregiver] {caregiver.email} removed a word from {pid}'s word bank; backup={backup}", flush=True)
+    return {"ok": True, "backup": backup}
 
 
 @router.post("/{email}/memory/restore")

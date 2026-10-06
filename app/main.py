@@ -12,14 +12,13 @@ from google import genai
 
 from app.agent.memory_update import run_memory_update
 from app.agent.next_class import build_next_plan
-from app.class_plan import plan_for_session, render_class_plan
-from app.games import game_link, profile_for, recent_games_line
+from app.games import game_link, profile_for
 from app.auth import User, verify_user, verify_sweeper
 from app.config import Settings, get_settings
 from app.live_token import create_live_token
 from app.patient_profile import PatientProfileLoader, extract_vocabulary
 from app.prompt_archive import PromptArchive
-from app.prompts import render_tutor_prompt
+from app.session_prompt import build_session_prompt
 from app.rate_limit import SlidingWindowLimiter
 from app.store import ACTIVE, MEM_DONE, SessionStore
 from app.deps import (  # noqa: F401 -- shared with the caregiver router (tests override these)
@@ -99,17 +98,6 @@ def me(user: User = Depends(verify_user), settings: Settings = Depends(get_setti
     return {"email": user.email, "is_caregiver": user.email in settings.caregiver_email_set}
 
 
-def memory_block(memory: dict | None) -> str:
-    """The tutor-facing part of this account's memory (written after each session, 04)."""
-    if not memory or not memory.get("memory_prompt"):
-        return ""
-    text = memory["memory_prompt"].strip()
-    focus = memory.get("focus_next_session") or []
-    if focus:
-        text += "\n\nFocus for this session:\n" + "\n".join(f"- {f}" for f in focus)
-    return text
-
-
 def patient_id_for(user: User) -> str:
     # Every account is its own record (sessions, transcripts, memory), keyed by login email,
     # so memories never mix -- e.g. Tomer's test sessions vs Dad's real ones.
@@ -145,16 +133,9 @@ def start_session(
     if session_id:
         _own_active_session(store, settings, user, session_id)  # reconnect: same session
     profile_text = profile.get()
-    # Today's lesson plan (05): the built plan, the intro plan for a new/reset account, or none.
-    plan = plan_for_session(store, patient_id_for(user))
-    # What he played in the Simon app lately -- fresh at every start, computed in code (06).
-    games = games_for(patient_id_for(user), settings, games_reader)
-    prompt = render_tutor_prompt(
-        patient_profile=profile_text,
-        memory_prompt=memory_block(store.get_memory(patient_id_for(user))),
-        class_plan=render_class_plan(plan),
-        games_recent=recent_games_line(games),
-    )
+    # The same function builds the caregiver page's "prompt for the next session" (8.5).
+    built = build_session_prompt(store, settings, patient_id_for(user), profile_text, games_reader)
+    prompt, plan = built.prompt, built.plan
     live = create_live_token(
         settings,
         prompt,
@@ -180,6 +161,8 @@ def start_session(
             label=f"{plan.plan_type}-{plan.primary_goal.type.value}" if plan and plan.plan_type == "regular"
             else (plan.plan_type if plan else "no-plan"),
         )
+        # ...and in Firestore, for the caregiver page's per-session "prompt" button (8.5).
+        store.save_session_prompt(patient_id_for(user), session_id, prompt.text, prompt.version)
         session_fields = {"prompt_uri": prompt_uri} if prompt_uri else {}
         if plan:
             # The memory update scores the check-in items against exactly this plan.

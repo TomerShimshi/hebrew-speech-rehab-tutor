@@ -72,6 +72,19 @@ def remove_item(store: SessionStore, client, settings: Settings, pid: str, secti
     return new
 
 
+def remove_word(store: SessionStore, pid: str, word: str) -> dict:
+    """Removes one word from the word bank (e.g. a name the plan invented). No model call."""
+    current = store.get_memory(pid)
+    bank = dict((current or {}).get("word_bank") or {})
+    if word not in bank:
+        raise MemoryEditError("word not found (the memory may have changed; reload)")
+    bank.pop(word)
+    new = {**_without_meta(current), "word_bank": bank}
+    store.save_memory(pid, f"edit-{_stamp()}", new, current)
+    _log(f"{pid}: removed a word from the word bank")
+    return new
+
+
 def restore_version(store: SessionStore, pid: str, version: str) -> dict:
     """Makes an earlier memory version current; the current one goes into the history."""
     old = store.get_memory_version(pid, version)

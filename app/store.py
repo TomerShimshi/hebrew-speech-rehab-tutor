@@ -12,6 +12,7 @@ Layout (see docs/plans/03 and 04):
   patients/{pid}/research_usage/{date}    research runs that day (07)
   usage/tavily-{YYYY-MM}                  app-wide Tavily searches that month (07)
   patients/{pid}/caregiver/notes          the caregiver's notes for the plan builder (08)
+  patients/{pid}/sessions/{sid}/prompt/live  the exact system instruction the tutor got (8.5)
 """
 
 import datetime as dt
@@ -37,6 +38,7 @@ STALE_PROCESSING = dt.timedelta(minutes=10)
 
 # plan_status of a session whose memory is done (sub-plan 05)
 PLAN_PENDING, PLAN_DONE, PLAN_FAILED = "pending", "done", "failed"  # a crashed update is retried after this
+MAX_PLAN_ATTEMPTS = 3  # automatic plan builds per session; then the sweep stops (quota) -- "rebuild" still works
 
 
 def _claimable(session: dict, now: dt.datetime) -> bool:
@@ -97,6 +99,8 @@ class SessionStore(Protocol):
     def set_recommendation_status(self, pid: str, rec_id: str, status: str) -> bool: ...
     def get_notes(self, pid: str) -> dict | None: ...
     def save_notes(self, pid: str, text: str, by: str) -> None: ...
+    def save_session_prompt(self, pid: str, sid: str, text: str, version: str) -> None: ...
+    def get_session_prompt(self, pid: str, sid: str) -> dict | None: ...
 
 
 def _turn_fields(turn: TurnIn) -> dict:
@@ -116,6 +120,7 @@ class InMemorySessionStore:
         self.research_runs: dict[tuple[str, str], int] = {}
         self.monthly_searches: dict[str, int] = {}
         self.notes: dict[str, dict] = {}
+        self.session_prompts: dict[tuple[str, str], dict] = {}
 
     def create_session(self, pid, *, user_email, model, prompt_version):
         sid = uuid.uuid4().hex
@@ -211,6 +216,8 @@ class InMemorySessionStore:
             for key in [k for k in store if k[0] == pid]:
                 store.pop(key)
         self.notes.pop(pid, None)
+        for key in [k for k in self.session_prompts if k[0] == pid]:
+            self.session_prompts.pop(key)
         return len(keys)
 
     def get_next_plan(self, pid):
@@ -284,6 +291,12 @@ class InMemorySessionStore:
     def save_notes(self, pid, text, by):
         self.notes[pid] = {"text": text, "updated_by": by, "updated_at": _now()}
 
+    def save_session_prompt(self, pid, sid, text, version):
+        self.session_prompts[(pid, sid)] = {"text": text, "prompt_version": version, "saved_at": _now()}
+
+    def get_session_prompt(self, pid, sid):
+        return self.session_prompts.get((pid, sid))
+
     def add_research_run(self, pid, day):
         self.research_runs[(pid, day)] = self.research_runs_on(pid, day) + 1
 
@@ -295,7 +308,8 @@ class InMemorySessionStore:
 
     def pending_plan_sessions(self, pid, limit=2):
         found = [v for k, v in self.sessions.items()
-                 if k[0] == pid and v.get("plan_status") in (PLAN_PENDING, PLAN_FAILED)]
+                 if k[0] == pid and v.get("plan_status") in (PLAN_PENDING, PLAN_FAILED)
+                 and v.get("plan_attempts", 0) < MAX_PLAN_ATTEMPTS]
         found.sort(key=lambda v: v["started_at"], reverse=True)
         return [v["id"] for v in found[:limit]]
 
@@ -454,6 +468,7 @@ class FirestoreSessionStore:
         query = self._patient(pid).collection("sessions").where(
             filter=self._fs.FieldFilter("plan_status", "in", [PLAN_PENDING, PLAN_FAILED]))
         found = [{"id": s.id, **s.to_dict()} for s in query.stream()]
+        found = [v for v in found if v.get("plan_attempts", 0) < MAX_PLAN_ATTEMPTS]
         found.sort(key=lambda v: v.get("started_at") or _now(), reverse=True)
         return [v["id"] for v in found[:limit]]
 
@@ -514,6 +529,14 @@ class FirestoreSessionStore:
     def save_notes(self, pid, text, by):
         self._patient(pid).collection("caregiver").document("notes").set(
             {"text": text, "updated_by": by, "updated_at": self._fs.SERVER_TIMESTAMP})
+
+    def save_session_prompt(self, pid, sid, text, version):
+        self._session(pid, sid).collection("prompt").document("live").set(
+            {"text": text, "prompt_version": version, "saved_at": self._fs.SERVER_TIMESTAMP})
+
+    def get_session_prompt(self, pid, sid):
+        snap = self._session(pid, sid).collection("prompt").document("live").get()
+        return snap.to_dict() if snap.exists else None
 
     def research_runs_on(self, pid, day):
         snap = self._patient(pid).collection("research_usage").document(day).get()

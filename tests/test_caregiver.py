@@ -251,3 +251,46 @@ def test_plan_records_which_notes_it_used(env):
     assert ov["next_plan"]["notes_used_at"] == ov["notes"]["updated_at"]
     assert ov["next_plan"]["notes_applied"] == "Check-ins use family names, per the notes."
     assert "per the notes" not in ov["next_plan"]["rendered"]  # the tutor never sees it
+
+
+
+# ---- 8.5: word bank cleanup -----------------------------------------------------------------------
+
+def test_remove_a_word_from_the_word_bank(env):
+    env.configure(prompt_archive_uri="gs://bucket/debug/prompts")
+    seed(env, DAD, words=("טבריה", "רונית"))
+    seed(env, TOMER, words=("רונית",))
+    r = post(env, f"/api/caregiver/{DAD}/word-bank/remove", {"word": "רונית"})
+    assert r.status_code == 200
+    assert list(env.store.get_memory(DAD)["word_bank"]) == ["טבריה"]
+    assert "רונית" in env.archived[r.json()["backup"]]  # backed up first
+    edit = next(v for v in env.store.list_memory_history(DAD) if v["version"].startswith("edit-"))
+    assert "רונית" in edit["word_bank"]  # undo via restore
+    assert "רונית" in env.store.get_memory(TOMER)["word_bank"]  # other account untouched
+    assert post(env, f"/api/caregiver/{DAD}/word-bank/remove", {"word": "רונית"}).status_code == 409
+    assert post(env, f"/api/caregiver/{DAD}/word-bank/remove", {"word": "טבריה"}, token="tok-dad").status_code == 403
+
+
+
+# ---- 8.5: prompt views ---------------------------------------------------------------------------
+
+def test_each_session_stores_its_prompt_and_the_page_shows_it(env):
+    from conftest import FakeAuthTokens
+    sid = env.client.post("/api/session/start", headers=auth("tok-dad")).json()["session_id"]
+    given = FakeAuthTokens.last_config.live_connect_constraints.config.system_instruction.parts[0].text
+    body = get(env, f"/api/caregiver/{DAD}/sessions/{sid}/prompt").json()
+    assert body["text"] == given and body["prompt_version"]
+    assert get(env, f"/api/caregiver/{TOMER}/sessions/{sid}/prompt").status_code == 404  # not Tomer's session
+    old = env.store.create_session(DAD, user_email=DAD, model="m", prompt_version="v")  # from before 8.5
+    assert get(env, f"/api/caregiver/{DAD}/sessions/{old}/prompt").json()["text"] is None
+
+
+def test_next_prompt_is_exactly_what_the_session_start_uses(env):
+    from conftest import FakeAuthTokens
+    seed(env, DAD)
+    shown = get(env, f"/api/caregiver/{DAD}/next-prompt").json()["text"]
+    assert f"memory of {DAD}" in shown and "TODAY'S PLAN" in shown
+    env.client.post("/api/session/start", headers=auth("tok-dad"))
+    given = FakeAuthTokens.last_config.live_connect_constraints.config.system_instruction.parts[0].text
+    assert shown == given
+    assert get(env, f"/api/caregiver/{DAD}/next-prompt", token="tok-dad").status_code == 403

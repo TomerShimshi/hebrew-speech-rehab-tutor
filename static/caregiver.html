@@ -74,6 +74,13 @@
         <p id="rebuild-status" class="kv" aria-live="polite"></p>
       </details>
 
+      <details class="cg-card" id="sec-next-prompt">
+        <summary>הפרומפט לשיחה הבאה</summary>
+        <p class="muted">הטקסט המלא שהמאמנת תקבל אם השיחה הבאה תתחיל עכשיו: ההנחיות, הפרופיל, הזיכרון, השיעור והמשחקים.
+          נבנה באותו קוד שמתחיל שיחה.</p>
+        <div id="next-prompt"><p class="muted">נטען בפתיחה…</p></div>
+      </details>
+
       <details class="cg-card" id="sec-notes">
         <summary>הערות לבונה השיעורים</summary>
         <p class="muted">מטרות מהקלינאית, דברים להתמקד בהם או להימנע מהם, תיקונים. בונה השיעורים מקבל אותן בכל פעם
@@ -100,6 +107,8 @@
 
       <details class="cg-card" id="sec-words">
         <summary>בנק המילים</summary>
+        <p class="muted">מילים ושמות שהמאמנת תרגלה איתו, ומתי לחזור עליהם. ✕ מסיר מילה שלא שייכת (למשל שם שהומצא). הזיכרון נשמר בגיבוי לפני כן.</p>
+        <p id="words-status" class="kv" aria-live="polite"></p>
         <div id="words"></div>
       </details>
 
