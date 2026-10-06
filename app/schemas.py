@@ -129,24 +129,29 @@ class GoalType(str, Enum):
     conversation = "conversation"  # an easier free-talk day
 
 
+# Field languages (08): English for every instruction/description (readable for the family,
+# followed reliably by the models); Hebrew ONLY for the exact words the tutor says and the
+# target names (correct Hebrew and genders, instead of the live model translating on the fly).
+
 class PrimaryGoal(BaseModel):
     type: GoalType
-    description: str
+    description: str = Field(description="ENGLISH: what this session works on, and why.")
 
 
 class ProbeItem(BaseModel):
-    target: str  # the word/name he should come up with
+    target: str = Field(description="HEBREW: the name/word he should come up with.")
     kind: str = Field(description="'treated' (practiced before, from the word bank) or 'untreated' (new, same kind)")
-    elicit: str  # how the tutor asks for it WITHOUT hints (e.g. a description)
-    bridge: str = Field(default="", description="A natural lead-in linking it to a topic he is likely to talk about")
+    elicit: str = Field(description="HEBREW: exactly how she asks for it, WITHOUT hints (a description).")
+    bridge: str = Field(default="", description="HEBREW: the natural lead-in she says, linking it to a topic he talks about.")
 
 
 class PracticeItem(BaseModel):
-    target: str
-    elicit: str
-    hint_meaning: str
-    hint_first_syllable: str  # as spoken, e.g. "טְבֶ..." -- never the letter's name
-    sentence_completion: str
+    target: str = Field(description="HEBREW: the name/word to practice.")
+    elicit: str = Field(description="HEBREW: exactly how she asks for it.")
+    hint_meaning: str = Field(description="HEBREW: hint 1, its meaning/context, as she says it.")
+    # as spoken, e.g. "טְבֶ..." -- never the letter's name
+    hint_first_syllable: str = Field(description="HEBREW: hint 2, the first syllable as spoken, with vowel marks (e.g. 'טְבֶ...').")
+    sentence_completion: str = Field(description="HEBREW: hint 3, a sentence for him to complete.")
 
 
 class GameHomework(BaseModel):
@@ -166,23 +171,27 @@ class GamesAppFeedback(BaseModel):
 class ClassPlan(BaseModel):
     plan_type: str = Field(description="'intro' or 'regular'")
     primary_goal: PrimaryGoal
-    recall_from_last_time: str = ""
-    warmup: str = ""
+    recall_from_last_time: str = Field(default="", description="HEBREW: one sentence she says in her greeting, recalling last time.")
+    warmup: str = Field(default="", description="HEBREW: the easy opener she says.")
     # 3-5 uncued check-in items every regular session: the progress measurement (05).
     probe: list[ProbeItem] = Field(default=[], min_length=0, json_schema_extra={"minItems": 3, "maxItems": 5})
     practice: list[PracticeItem] = []
-    activity: str = ""
-    conversation_topics: list[str] = []
-    homework: str = ""
-    fatigue_fallback: str = ""
-    avoid: list[str] = []
+    activity: str = Field(default="", description="ENGLISH: the main activity, as instructions to her (a quoted Hebrew word is fine).")
+    conversation_topics: list[str] = Field(default=[], description="ENGLISH: up to 3 topics.")
+    homework: str = Field(default="", description="ENGLISH: the small task for next time (she says it in Hebrew).")
+    fatigue_fallback: str = Field(default="", description="ENGLISH: an easy activity he will surely succeed at.")
+    avoid: list[str] = Field(default=[], description="ENGLISH: topics or approaches to avoid.")
     # games (sub-plan 06)
     game_homework: list[GameHomework] = []
-    games_note: str = ""  # one natural line the tutor may use about his recent games
+    games_note: str = Field(default="", description="ENGLISH: one fact about his recent games she may mention naturally.")
     # an in-session activity built on what he actually played (its category / words) -- turns
     # the game into talking practice, e.g. "tell me about a time you fixed something: which tools?"
-    games_link_activity: str = ""
+    games_link_activity: str = Field(default="", description="ENGLISH: a short talking activity built on what he played.")
     games_app_feedback: list[GamesAppFeedback] = []
+    # For the caregiver page only (never rendered for the tutor).
+    notes_applied: str = Field(default="", description=(
+        "ENGLISH, one sentence: how this plan applies the NOTES FROM THE FAMILY / THERAPIST; "
+        "empty if there are no notes."))
 
     def tidy(self) -> "ClassPlan":
         """Trim to sane sizes (the model occasionally over-delivers)."""
@@ -206,4 +215,5 @@ class ClassPlan(BaseModel):
             "games_note": cut(self.games_note, 300),
             "games_link_activity": cut(self.games_link_activity, 500),
             "games_app_feedback": self.games_app_feedback[:2],
+            "notes_applied": cut(self.notes_applied, 300),
         })

@@ -58,3 +58,16 @@ consolidation: |
   Only use the information given. Do not invent facts. Leave out anything marked uncertain.
 
   Also give 2-4 concrete focus points for the next session (focus_next_session).
+
+# Caregiver correction (sub-plan 08): one wrong item was removed from the memory; take it out
+# of the tutor's summary too.
+remove_fact: |
+  You edit the memory summary that a Hebrew voice tutor reads before each practice session
+  with a man recovering from a stroke. A family caregiver found that one FACT in it is wrong
+  (often a speech-recognition mistake, e.g. a misheard name) and removed it.
+
+  Return the CURRENT SUMMARY again with that fact removed: delete it, and anything that only
+  makes sense because of it. Change NOTHING else -- keep every other sentence, its wording,
+  its language (English with Hebrew words) and its order. If the fact isn't in the summary,
+  return the summary unchanged. Return only the summary text, no comments.
+

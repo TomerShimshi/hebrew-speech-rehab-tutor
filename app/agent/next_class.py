@@ -149,7 +149,8 @@ def run_research_phase(store, client, settings, pid, context, personal, now, gen
 
 
 def build_context(memory_raw: dict, recent_plans: list[dict], profile_text: str, today: dt.date,
-                  games_text: str = "(no games account linked)", notes_text: str = "(none yet)") -> str:
+                  games_text: str = "(no games account linked)", notes_text: str = "(none yet)",
+                  caregiver_notes: str = "") -> str:
     memory = MemoryDoc(**memory_raw)
     due = word_bank.due_words(memory.word_bank, today)
     bank = ", ".join(
@@ -161,6 +162,8 @@ def build_context(memory_raw: dict, recent_plans: list[dict], profile_text: str,
     return (
         f"# TODAY\n{today.isoformat()} ({today.strftime('%A')})\n\n"
         f"# PATIENT PROFILE\n{profile_text or '(none)'}\n\n"
+        f"# NOTES FROM THE FAMILY / THERAPIST (follow them; they override the memory)\n"
+        f"{caregiver_notes.strip() or '(none)'}\n\n"
         f"# MEMORY (what the tutor knows about him)\n{memory.memory_prompt}\n\n"
         f"# MEMORY SECTIONS\n{format_memory(memory)}\n\n"
         f"# FOCUS POINTS FROM THE LAST SESSION\n" + ("\n".join(f"- {f}" for f in memory.focus_next_session) or "(none)") + "\n\n"
@@ -196,12 +199,15 @@ def build_next_plan(
             # Nothing to build on: the next session will be the intro plan.
             store.update_session(pid, sid, {"plan_status": PLAN_DONE, "plan_model": None})
             return PLAN_DONE
+        notes_doc = store.get_notes(pid) or {}
+        caregiver_notes = notes_doc.get("text", "")
         context = build_context(memory_raw, store.recent_session_plans(pid, 5), profile_text, today,
                                 games_text=render_games_for_plan(games),
-                                notes_text=render_notes(store.recent_technique_notes(pid, 3)))
+                                notes_text=render_notes(store.recent_technique_notes(pid, 3)),
+                                caregiver_notes=caregiver_notes)
         research = None
         if research_available(store, settings, pid, now):
-            personal = personal_terms(memory_raw, profile_text,
+            personal = personal_terms(memory_raw, f"{profile_text}\n{caregiver_notes}",
                                       extra=(pid.split("@")[0], games.profile if games else ""))
             research = run_research_phase(store, client, settings, pid, context, personal, now,
                                           generate_fn, research_fn)
@@ -238,6 +244,8 @@ def build_next_plan(
         store.save_next_plan(pid, sid, {
             **plan.model_dump(mode="json"),
             "prompt_version": str(load_prompt().get("prompt_version")),
+            # which version of the caregiver notes this plan saw (the page warns when they changed since)
+            "notes_used_at": notes_doc.get("updated_at") if caregiver_notes.strip() else None,
             "research": ({"question": research.get("question"), "status": research.get("status"),
                           "reason": research.get("reason"),
                           "techniques": [t.get("name") for t in research.get("techniques", [])]}

@@ -12,14 +12,14 @@ def seed(env, pid=DAD):
 
 
 def reset(env, email, scope, confirm=None, token="tok-tomer"):
-    return env.client.post("/api/admin/reset", headers=auth(token),
-                           json={"email": email, "scope": scope, "confirm_email": confirm or email})
+    return env.client.post(f"/api/caregiver/{email}/reset", headers=auth(token),
+                           json={"scope": scope, "confirm_email": confirm or email})
 
 
 def test_only_caregivers_can_use_admin(env):
-    assert env.client.get("/api/admin/accounts", headers=auth("tok-dad")).status_code == 403
+    assert env.client.get("/api/caregiver/accounts", headers=auth("tok-dad")).status_code == 403
     assert reset(env, DAD, "memory", token="tok-dad").status_code == 403
-    assert env.client.get("/api/admin/accounts").status_code == 401
+    assert env.client.get("/api/caregiver/accounts").status_code == 401
 
 
 def test_me_tells_the_page_who_is_a_caregiver(env):
@@ -29,7 +29,7 @@ def test_me_tells_the_page_who_is_a_caregiver(env):
 
 def test_accounts_overview(env):
     seed(env, DAD)
-    accounts = {a["email"]: a for a in env.client.get("/api/admin/accounts", headers=auth("tok-tomer")).json()["accounts"]}
+    accounts = {a["email"]: a for a in env.client.get("/api/caregiver/accounts", headers=auth("tok-tomer")).json()["accounts"]}
     assert set(accounts) == {DAD, TOMER}
     assert accounts[DAD] == {"email": DAD, "sessions": 1, "has_memory": True, "sessions_processed": 1, "words": 1}
     assert accounts[TOMER]["has_memory"] is False

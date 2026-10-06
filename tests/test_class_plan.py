@@ -1,6 +1,7 @@
 """Lesson plans (sub-plan 05): intro, rendering, the builder, probes, and wiring."""
 
 import datetime as dt
+import re
 
 from app import llm
 from app.agent.memory_update import run_memory_update
@@ -55,7 +56,7 @@ def test_intro_plan_for_a_new_account_and_none_once_there_is_memory_but_no_plan(
 def test_render_lists_the_checkins_without_hints_and_the_practice_hints():
     out = render_class_plan(a_plan())
     assert "WITHOUT any hint first" in out
-    assert "(treated) ask: העיר על הכנרת -> answer: טבריה" in out
+    assert "  1. (treated)\n      ask: העיר על הכנרת\n      answer: טבריה" in out  # ask first, answer last
     assert "first syllable: כִּנֶּ..." in out
     assert "Homework to give at the end" in out and "Avoid: politics" in out
     assert render_class_plan(None) == ""
@@ -147,7 +148,7 @@ def test_next_session_follows_the_built_plan(env):
     env.store.save_next_plan(DAD, "s0", a_plan().model_dump(mode="json"))
     sid = env.client.post("/api/session/start", headers=auth()).json()["session_id"]
     instruction = system_instruction()
-    assert "Main goal (name_retrieval)" in instruction and "-> answer: טבריה" in instruction
+    assert "Main goal (name_retrieval)" in instruction and "answer: טבריה" in instruction
     assert "Never read the plan aloud" in " ".join(instruction.split())
     assert env.store.get_session(DAD, sid)["class_plan"]["probe"][0]["target"] == "טבריה"
 
@@ -162,8 +163,8 @@ def test_memory_but_no_plan_means_no_plan_section_at_all(env):
 def test_forget_memory_makes_the_next_session_an_intro_again(env):
     env.store.save_memory(DAD, "s0", {"memory_prompt": "He loves the Galilee."}, None)
     env.store.save_next_plan(DAD, "s0", a_plan().model_dump(mode="json"))
-    env.client.post("/api/admin/reset", headers=auth("tok-tomer"),
-                    json={"email": DAD, "scope": "memory", "confirm_email": DAD})
+    env.client.post(f"/api/caregiver/{DAD}/reset", headers=auth("tok-tomer"),
+                    json={"scope": "memory", "confirm_email": DAD})
     env.client.post("/api/session/start", headers=auth())
     assert "Plan type: intro" in system_instruction()
 
@@ -181,7 +182,8 @@ def test_treated_or_untreated_is_decided_by_the_word_bank_not_the_model():
 
 def test_checkin_lead_ins_are_rendered():
     plan = a_plan(probe=[dict(PROBES[0], bridge="מדברים על הכנרת...")] + PROBES[1:])
-    assert "lead-in: מדברים על הכנרת... | ask: העיר על הכנרת" in render_class_plan(plan)
+    assert ("      lead-in: מדברים על הכנרת...\n      ask: העיר על הכנרת\n"
+            "      answer: טבריה") in render_class_plan(plan)
 
 
 def practice_item(target):
@@ -210,3 +212,27 @@ def test_plan_rules_reject_thin_plans():
     same = [practice_item(p["target"]) for p in PROBES]
     with pytest.raises(ValueError, match="repeats a check-in item"):
         enforce_plan_rules(a_plan(practice=same), practiced=set())
+
+
+
+def test_hebrew_sentences_never_share_a_line_with_english():
+    from app.class_plan import HEBREW
+    plan = a_plan(recall_from_last_time="אני זוכרת שסיפרת לי על הטיול לכנרת.",
+                  activity="Ask him to describe the trip, using the word \"כנרת\".")
+    out = render_class_plan(plan)
+    assert "Recall from last time (one natural sentence in your greeting):\n      אני זוכרת" in out
+    assert 'Activity: Ask him to describe the trip, using the word "כנרת".' in out  # one quoted word is fine
+    for line in out.splitlines():
+        hebrew_words = sum(1 for w in line.split() if HEBREW.search(w))
+        english_words = sum(1 for w in line.split() if re.fullmatch(r"[A-Za-z]{3,}[:,.]?", w))
+        assert not (hebrew_words > 2 and english_words > 2), line
+
+
+def test_notes_applied_is_for_caregivers_only():
+    assert "per the notes" not in render_class_plan(a_plan(notes_applied="Family names only, per the notes."))
+
+
+def test_practice_items_show_the_answer_last():
+    out = render_class_plan(a_plan())
+    block = out[out.index("Practice items"):]
+    assert block.index("ask: האגם בצפון") < block.index("first syllable: כִּנֶּ...") < block.index("answer: כנרת")

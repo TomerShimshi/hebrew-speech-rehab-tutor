@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>דף מטפל · מדברים עברית</title>
+  <link rel="stylesheet" href="style.css?v=__ASSET_VERSION__">
+  <link rel="stylesheet" href="caregiver.css?v=__ASSET_VERSION__">
+</head>
+<body class="cg">
+  <header class="cg-header">
+    <h1>דף מטפל</h1>
+    <div class="cg-account" id="account-bar" hidden>
+      <label for="account">חשבון:</label>
+      <select id="account"></select>
+      <span id="account-summary" class="muted"></span>
+    </div>
+    <div class="cg-links">
+      <a href="./" class="link">חזרה לאפליקציה</a>
+      <button id="signout" class="link" type="button" hidden>התנתקות</button>
+    </div>
+  </header>
+
+  <main class="cg-main">
+    <section id="signin-box" class="cg-card" hidden>
+      <p>הדף הזה מיועד למטפלים בלבד. צריך להתחבר עם חשבון Google מורשה.</p>
+      <button id="signin" class="big primary" type="button">התחברות עם Google</button>
+    </section>
+    <p id="page-status" class="status" aria-live="polite"></p>
+
+    <div id="content" hidden>
+      <!-- Always visible -->
+      <section id="flags" class="cg-flags" aria-live="polite"></section>
+
+      <details class="cg-card cg-info">
+        <summary>מידע חשוב: חירום וטיפים למשפחה</summary>
+        <div class="cg-two">
+          <div>
+            <h3 class="danger-text">סימני אזהרה לשבץ (BE-FAST): מיד להתקשר למד״א 101</h3>
+            <ul>
+              <li><b>B</b>alance: איבוד שיווי משקל פתאומי</li>
+              <li><b>E</b>yes: שינוי פתאומי בראייה</li>
+              <li><b>F</b>ace: צניחה של צד אחד בפנים</li>
+              <li><b>A</b>rms: חולשה ביד או ברגל בצד אחד</li>
+              <li><b>S</b>peech: דיבור משובש או קושי פתאומי להבין</li>
+              <li><b>T</b>ime: לרשום את השעה ולהתקשר מיד</li>
+            </ul>
+          </div>
+          <div>
+            <h3>טיפים לשיחה איתו</h3>
+            <ul>
+              <li>לחכות בסבלנות, גם כמה שניות, עד שהוא מוצא את המילה.</li>
+              <li>לא להשלים לו את המשפט, אלא אם הוא מבקש.</li>
+              <li>כשקשה: לשאול שאלות של כן / לא.</li>
+              <li>לכתוב מילת מפתח על דף כשזה עוזר.</li>
+              <li>לדבר כרגיל, כמו עם מבוגר, בקצב רגוע.</li>
+            </ul>
+          </div>
+        </div>
+      </details>
+
+      <details class="cg-card" id="sec-sessions" open>
+        <summary>שיחות</summary>
+        <div id="sessions"></div>
+      </details>
+
+      <details class="cg-card" id="sec-plan">
+        <summary>השיעור הבא</summary>
+        <div id="plan"></div>
+        <div class="cg-actions">
+          <button id="rebuild" class="small" type="button">לבנות מחדש את השיעור הבא</button>
+          <span class="muted">בונה אותו עכשיו, עם הקוד וההנחיות העדכניים, מהזיכרון הנוכחי. לוקח עד כדקה-שתיים.</span>
+        </div>
+        <p id="rebuild-status" class="kv" aria-live="polite"></p>
+      </details>
+
+      <details class="cg-card" id="sec-notes">
+        <summary>הערות לבונה השיעורים</summary>
+        <p class="muted">מטרות מהקלינאית, דברים להתמקד בהם או להימנע מהם, תיקונים. בונה השיעורים מקבל אותן בכל פעם
+          ומעדיף אותן על פני הזיכרון. אחרי שמירה אפשר ללחוץ "לבנות מחדש" בשיעור הבא כדי להחיל אותן מיד.</p>
+        <textarea id="notes" rows="6" maxlength="1500" dir="auto"></textarea>
+        <div class="cg-actions">
+          <button id="notes-save" class="small" type="button">שמירה</button>
+          <span id="notes-count" class="muted"></span>
+          <span id="notes-status" aria-live="polite"></span>
+        </div>
+      </details>
+
+      <details class="cg-card" id="sec-memory">
+        <summary>הזיכרון של המאמנת</summary>
+        <p id="memory-status" class="kv" aria-live="polite"></p>
+        <div id="memory"></div>
+        <details class="cg-sub" id="sec-history">
+          <summary>גרסאות קודמות</summary>
+          <p class="muted">שחזור הופך גרסה ישנה לנוכחית. הגרסה הנוכחית נשמרת ברשימה (ובגיבוי), כך שאפשר לחזור אליה.
+            מה שנלמד בשיחות שאחרי הגרסה הישנה לא יחזור מעצמו.</p>
+          <div id="history"><p class="muted">נטען בפתיחה…</p></div>
+        </details>
+      </details>
+
+      <details class="cg-card" id="sec-words">
+        <summary>בנק המילים</summary>
+        <div id="words"></div>
+      </details>
+
+      <details class="cg-card" id="sec-research">
+        <summary>ממצאי מחקר</summary>
+        <div id="research"></div>
+      </details>
+
+      <details class="cg-card" id="sec-games">
+        <summary>הצעות לאפליקציית המשחקים</summary>
+        <div id="games"></div>
+      </details>
+
+      <details class="cg-card" id="sec-reset">
+        <summary>איפוס</summary>
+        <fieldset>
+          <legend>מה לעשות?</legend>
+          <label class="choice">
+            <input type="radio" name="reset-scope" value="memory" checked>
+            <span><b>שכחי את הזיכרון</b><br>
+            המאמנת תתחיל כמו בפגישה ראשונה. השיחות והתמלולים נשמרים.</span>
+          </label>
+          <label class="choice">
+            <input type="radio" name="reset-scope" value="everything">
+            <span><b>מחיקה מלאה</b><br>
+            מוחק את כל השיחות, התמלולים, הזיכרון וההתראות של החשבון הזה.</span>
+          </label>
+        </fieldset>
+        <label for="reset-confirm">לאישור, הקלד את כתובת המייל של החשבון:</label>
+        <input id="reset-confirm" type="email" dir="ltr" autocomplete="off" spellcheck="false">
+        <p class="muted">לפני המחיקה נשמר גיבוי של הזיכרון (ל־30 יום).</p>
+        <button id="reset-run" class="big danger" type="button" disabled>ביצוע</button>
+        <p id="reset-status" class="status" aria-live="polite"></p>
+      </details>
+    </div>
+  </main>
+
+  <script type="module" src="caregiver.js?v=__ASSET_VERSION__"></script>
+</body>
+</html>

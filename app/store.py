@@ -11,6 +11,7 @@ Layout (see docs/plans/03 and 04):
   patients/{pid}/technique_notes/{id}     research findings, keyed by the normalized question (07)
   patients/{pid}/research_usage/{date}    research runs that day (07)
   usage/tavily-{YYYY-MM}                  app-wide Tavily searches that month (07)
+  patients/{pid}/caregiver/notes          the caregiver's notes for the plan builder (08)
 """
 
 import datetime as dt
@@ -86,6 +87,16 @@ class SessionStore(Protocol):
     def add_research_run(self, pid: str, day: str) -> None: ...
     def searches_in_month(self, month: str) -> int: ...
     def add_search(self, month: str) -> None: ...
+    # caregiver page (sub-plan 08), newest first
+    def list_sessions(self, pid: str, n: int = 30) -> list[dict]: ...
+    def list_flags(self, pid: str, n: int = 50) -> list[dict]: ...
+    def list_recommendations(self, pid: str) -> list[dict]: ...
+    def list_memory_history(self, pid: str, n: int = 20) -> list[dict]: ...
+    def get_memory_version(self, pid: str, version: str) -> dict | None: ...
+    def resolve_flag(self, pid: str, flag_id: str, by: str) -> bool: ...
+    def set_recommendation_status(self, pid: str, rec_id: str, status: str) -> bool: ...
+    def get_notes(self, pid: str) -> dict | None: ...
+    def save_notes(self, pid: str, text: str, by: str) -> None: ...
 
 
 def _turn_fields(turn: TurnIn) -> dict:
@@ -104,6 +115,7 @@ class InMemorySessionStore:
         self.technique_notes: dict[tuple[str, str], dict] = {}
         self.research_runs: dict[tuple[str, str], int] = {}
         self.monthly_searches: dict[str, int] = {}
+        self.notes: dict[str, dict] = {}
 
     def create_session(self, pid, *, user_email, model, prompt_version):
         sid = uuid.uuid4().hex
@@ -166,7 +178,8 @@ class InMemorySessionStore:
         self.memory[pid] = {**memory, "updated_at": _now()}
 
     def add_flag(self, pid, sid, flag):
-        self.flags.append({**flag, "pid": pid, "session_id": sid, "created_at": _now(), "status": "open"})
+        self.flags.append({**flag, "id": uuid.uuid4().hex, "pid": pid, "session_id": sid,
+                           "created_at": _now(), "status": "open"})
 
     def list_patient_ids(self):
         return sorted({pid for pid, _ in self.sessions} | set(self.memory))
@@ -194,6 +207,10 @@ class InMemorySessionStore:
         for key in [k for k in self.memory_history if k[0] == pid]:
             self.memory_history.pop(key)
         self.flags = [f for f in self.flags if f.get("pid") != pid]
+        for store in (self.recommendations, self.technique_notes, self.research_runs):
+            for key in [k for k in store if k[0] == pid]:
+                store.pop(key)
+        self.notes.pop(pid, None)
         return len(keys)
 
     def get_next_plan(self, pid):
@@ -213,7 +230,7 @@ class InMemorySessionStore:
             r = self.recommendations[key]
             r.update(times_suggested=r["times_suggested"] + 1, last_session=sid, last_seen=_now())
         else:
-            self.recommendations[key] = {**rec, "status": "new", "times_suggested": 1,
+            self.recommendations[key] = {**rec, "id": key[1], "status": "new", "times_suggested": 1,
                                          "first_session": sid, "last_session": sid, "last_seen": _now()}
 
     def get_technique_note(self, pid, note_id):
@@ -228,6 +245,44 @@ class InMemorySessionStore:
 
     def research_runs_on(self, pid, day):
         return self.research_runs.get((pid, day), 0)
+
+    def list_sessions(self, pid, n=30):
+        found = [v for k, v in self.sessions.items() if k[0] == pid]
+        return sorted(found, key=lambda v: v["started_at"], reverse=True)[:n]
+
+    def list_flags(self, pid, n=50):
+        return sorted((f for f in self.flags if f.get("pid") == pid), key=lambda f: f["created_at"], reverse=True)[:n]
+
+    def list_recommendations(self, pid):
+        recs = [v for k, v in self.recommendations.items() if k[0] == pid]
+        return sorted(recs, key=lambda v: v["last_seen"], reverse=True)
+
+    def list_memory_history(self, pid, n=20):
+        versions = [{**v, "version": k[1]} for k, v in self.memory_history.items() if k[0] == pid]
+        return sorted(versions, key=lambda v: v.get("updated_at") or _now(), reverse=True)[:n]
+
+    def get_memory_version(self, pid, version):
+        return self.memory_history.get((pid, version))
+
+    def resolve_flag(self, pid, flag_id, by):
+        for f in self.flags:
+            if f.get("pid") == pid and f.get("id") == flag_id:
+                f.update(status="resolved", resolved_by=by, resolved_at=_now())
+                return True
+        return False
+
+    def set_recommendation_status(self, pid, rec_id, status):
+        rec = self.recommendations.get((pid, rec_id))
+        if rec is None:
+            return False
+        rec.update(status=status, status_updated_at=_now())
+        return True
+
+    def get_notes(self, pid):
+        return self.notes.get(pid)
+
+    def save_notes(self, pid, text, by):
+        self.notes[pid] = {"text": text, "updated_by": by, "updated_at": _now()}
 
     def add_research_run(self, pid, day):
         self.research_runs[(pid, day)] = self.research_runs_on(pid, day) + 1
@@ -414,6 +469,51 @@ class FirestoreSessionStore:
         query = (self._patient(pid).collection("technique_notes")
                  .order_by("created_at", direction=self._fs.Query.DESCENDING).limit(n))
         return [s.to_dict() for s in query.stream()]
+
+    def list_sessions(self, pid, n=30):
+        query = (self._patient(pid).collection("sessions")
+                 .order_by("started_at", direction=self._fs.Query.DESCENDING).limit(n))
+        return [{"id": s.id, **s.to_dict()} for s in query.stream()]
+
+    def list_flags(self, pid, n=50):
+        query = (self._patient(pid).collection("flags")
+                 .order_by("created_at", direction=self._fs.Query.DESCENDING).limit(n))
+        return [{"id": s.id, **s.to_dict()} for s in query.stream()]
+
+    def list_recommendations(self, pid):
+        recs = [{"id": s.id, **s.to_dict()} for s in self._patient(pid).collection("games_app_recommendations").stream()]
+        return sorted(recs, key=lambda v: v.get("last_seen") or _now(), reverse=True)
+
+    def list_memory_history(self, pid, n=20):
+        query = (self._patient(pid).collection("memory_history")
+                 .order_by("updated_at", direction=self._fs.Query.DESCENDING).limit(n))
+        return [{**s.to_dict(), "version": s.id} for s in query.stream()]
+
+    def get_memory_version(self, pid, version):
+        snap = self._patient(pid).collection("memory_history").document(version).get()
+        return snap.to_dict() if snap.exists else None
+
+    def resolve_flag(self, pid, flag_id, by):
+        ref = self._patient(pid).collection("flags").document(flag_id)
+        if not ref.get().exists:
+            return False
+        ref.update({"status": "resolved", "resolved_by": by, "resolved_at": self._fs.SERVER_TIMESTAMP})
+        return True
+
+    def set_recommendation_status(self, pid, rec_id, status):
+        ref = self._patient(pid).collection("games_app_recommendations").document(rec_id)
+        if not ref.get().exists:
+            return False
+        ref.update({"status": status, "status_updated_at": self._fs.SERVER_TIMESTAMP})
+        return True
+
+    def get_notes(self, pid):
+        snap = self._patient(pid).collection("caregiver").document("notes").get()
+        return snap.to_dict() if snap.exists else None
+
+    def save_notes(self, pid, text, by):
+        self._patient(pid).collection("caregiver").document("notes").set(
+            {"text": text, "updated_by": by, "updated_at": self._fs.SERVER_TIMESTAMP})
 
     def research_runs_on(self, pid, day):
         snap = self._patient(pid).collection("research_usage").document(day).get()

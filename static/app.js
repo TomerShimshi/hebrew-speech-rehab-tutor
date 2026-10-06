@@ -24,7 +24,6 @@ const ASSET_QUERY = new URL(import.meta.url).search;
 const { initAuth, signIn, signOut, idToken } = await import(`./auth.js${ASSET_QUERY}`);
 const screens = {
   signin: $("screen-signin"), start: $("screen-start"), session: $("screen-session"), ended: $("screen-ended"),
-  admin: $("screen-admin"),
 };
 const FLUSH_MS = 10 * 1000; // transcript lines are saved every ~10 s (and at the end)
 
@@ -670,57 +669,8 @@ $("signin").addEventListener("click", async () => {
 });
 $("signin-switch").addEventListener("click", () => signOut());
 
-// ---- caregiver tools: forget memory / delete everything -------------------------
-let adminAccounts = [];
-
-function adminDescribe() {
-  const a = adminAccounts.find((x) => x.email === $("admin-account").value);
-  $("admin-overview").textContent = a
-    ? `${a.sessions} שיחות · ${a.has_memory ? `זיכרון מ־${a.sessions_processed} שיחות, ${a.words} מילים בתרגול` : "אין זיכרון"}`
-    : "";
-  adminValidate();
-}
-
-function adminValidate() {
-  const ok = $("admin-confirm").value.trim().toLowerCase() === $("admin-account").value;
-  $("admin-run").disabled = !ok;
-}
-
-async function adminLoad() {
-  $("admin-status").textContent = "";
-  $("admin-confirm").value = "";
-  const res = await api("api/admin/accounts");
-  if (!res.ok) {
-    $("admin-status").textContent = "אין הרשאת ניהול.";
-    return;
-  }
-  adminAccounts = (await res.json()).accounts;
-  $("admin-account").replaceChildren(...adminAccounts.map((a) => new Option(a.email, a.email)));
-  adminDescribe();
-}
-
-$("admin-open").addEventListener("click", () => { show("admin"); adminLoad(); });
-$("admin-back").addEventListener("click", () => show("start"));
-$("admin-account").addEventListener("change", () => { $("admin-confirm").value = ""; adminDescribe(); });
-$("admin-confirm").addEventListener("input", adminValidate);
-$("admin-run").addEventListener("click", async () => {
-  const email = $("admin-account").value;
-  const scope = document.querySelector('input[name="admin-scope"]:checked').value;
-  $("admin-run").disabled = true;
-  $("admin-status").textContent = "מבצע…";
-  const res = await api("api/admin/reset", { email, scope, confirm_email: $("admin-confirm").value });
-  if (res.ok) {
-    const body = await res.json();
-    $("admin-status").textContent = scope === "memory"
-      ? "הזיכרון נמחק. השיחה הבאה תתחיל כמו פגישה ראשונה."
-      : `נמחקו ${body.deleted_sessions} שיחות וכל הזיכרון.`;
-    await adminLoad();
-    $("admin-status").textContent += body.backup ? " (נשמר גיבוי)" : "";
-  } else {
-    $("admin-status").textContent = "הפעולה נכשלה. נסה שוב.";
-    adminValidate();
-  }
-});
+// ---- caregiver page (08): its own page; the server only serves data to caregivers ----
+$("admin-open").addEventListener("click", () => { window.location.href = "caregiver"; });
 $("signout").addEventListener("click", () => signOut());
 
 try {

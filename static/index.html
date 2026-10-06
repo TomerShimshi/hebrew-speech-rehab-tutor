@@ -30,36 +30,6 @@
     </div>
   </main>
 
-  <!-- Caregiver tools (only for CAREGIVER_EMAILS; the server enforces it) -->
-  <main id="screen-admin" class="screen admin" hidden>
-    <h2>ניהול</h2>
-    <div class="admin-card">
-      <label for="admin-account">חשבון</label>
-      <select id="admin-account"></select>
-      <p id="admin-overview" class="admin-overview"></p>
-
-      <fieldset>
-        <legend>מה לעשות?</legend>
-        <label class="choice">
-          <input type="radio" name="admin-scope" value="memory" checked>
-          <span><b>שכחי את הזיכרון</b><br>
-          המאמנת תתחיל כמו בפגישה ראשונה. השיחות והתמלולים נשמרים.</span>
-        </label>
-        <label class="choice">
-          <input type="radio" name="admin-scope" value="everything">
-          <span><b>מחיקה מלאה</b><br>
-          מוחק את כל השיחות, התמלולים, הזיכרון וההתראות של החשבון הזה.</span>
-        </label>
-      </fieldset>
-
-      <label for="admin-confirm">לאישור, הקלד את כתובת המייל של החשבון:</label>
-      <input id="admin-confirm" type="email" dir="ltr" autocomplete="off" spellcheck="false">
-      <p class="admin-note">לפני המחיקה נשמר גיבוי של הזיכרון (ל־30 יום).</p>
-      <button id="admin-run" class="big danger" type="button" disabled>ביצוע</button>
-      <p id="admin-status" class="status" aria-live="polite"></p>
-    </div>
-    <button id="admin-back" class="link" type="button">חזרה</button>
-  </main>
 
   <!-- In-session screen -->
   <main id="screen-session" class="screen" hidden>

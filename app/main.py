@@ -2,9 +2,6 @@
 
 import datetime as dt
 import hashlib
-import json
-from typing import Literal
-import time
 from functools import lru_cache
 from pathlib import Path
 
@@ -16,16 +13,20 @@ from google import genai
 from app.agent.memory_update import run_memory_update
 from app.agent.next_class import build_next_plan
 from app.class_plan import plan_for_session, render_class_plan
-from app.games import UpstashReader, game_link, games_snapshot, profile_for, recent_games_line
-from app.auth import User, require_caregiver, verify_user, verify_sweeper
+from app.games import game_link, profile_for, recent_games_line
+from app.auth import User, verify_user, verify_sweeper
 from app.config import Settings, get_settings
 from app.live_token import create_live_token
-from app.llm import generate, text_client
 from app.patient_profile import PatientProfileLoader, extract_vocabulary
 from app.prompt_archive import PromptArchive
 from app.prompts import render_tutor_prompt
 from app.rate_limit import SlidingWindowLimiter
-from app.store import ACTIVE, MEM_DONE, FirestoreSessionStore, SessionStore
+from app.store import ACTIVE, MEM_DONE, SessionStore
+from app.deps import (  # noqa: F401 -- shared with the caregiver router (tests override these)
+    _bounded_generate, games_for, get_games_reader, get_profile_loader, get_prompt_archive, get_store,
+    get_text_client,
+)
+from app.caregiver_api import router as caregiver_router
 from app.transcripts import EndRequest, TurnsBatch
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
@@ -61,34 +62,8 @@ def _client_for(api_key: str) -> genai.Client:
 
 
 @lru_cache
-def get_profile_loader() -> PatientProfileLoader:
-    return PatientProfileLoader(get_settings())
-
-
-@lru_cache
 def get_token_limiter() -> SlidingWindowLimiter:
     return SlidingWindowLimiter(get_settings().token_rate_limit_per_hour, window_s=3600)
-
-
-@lru_cache
-def get_store() -> SessionStore:
-    return FirestoreSessionStore()
-
-
-@lru_cache
-def get_games_reader():
-    s = get_settings()
-    if not (s.upstash_redis_rest_url and s.upstash_redis_readonly_token):
-        return None  # games integration not configured: everything else works as before
-    return UpstashReader(s.upstash_redis_rest_url, s.upstash_redis_readonly_token)
-
-
-def games_for(pid: str, settings: Settings, reader):
-    """His Simon games snapshot (read-only), or None if this account has no games profile."""
-    profile_name = profile_for(pid, settings.simon_profiles)
-    if reader is None or not profile_name:
-        return None
-    return games_snapshot(reader, profile_name)
 
 
 def homework_buttons(plan, pid: str, settings: Settings) -> list[dict]:
@@ -103,27 +78,6 @@ def homework_buttons(plan, pid: str, settings: Settings) -> list[dict]:
          "url": game_link(settings.simon_app_url, routes[h.game_id], profile_name)}
         for h in plan.game_homework if routes.get(h.game_id)
     ]
-
-
-@lru_cache
-def get_prompt_archive() -> PromptArchive:
-    return PromptArchive(get_settings().prompt_archive_uri)
-
-
-def get_text_client(settings: Settings = Depends(get_settings)):
-    if not settings.gemini_api_key:
-        raise HTTPException(status_code=503, detail="Gemini API key is not configured")
-    return text_client(settings.gemini_api_key)
-
-
-def _bounded_generate(budget_s: float):
-    """generate() with one shared time budget across all calls of a memory update."""
-    deadline = time.monotonic() + budget_s
-
-    def bounded(client, models, contents, config=None):
-        return generate(client, models, contents, config, deadline=deadline)
-
-    return bounded
 
 
 @app.get("/api/config")
@@ -357,52 +311,18 @@ def index() -> str:
     return html.replace("__ASSET_VERSION__", asset_version())
 
 
-# ---- caregiver tools: forget memory / delete everything ---------------------------------
+# ---- caregiver page (08): every allowlisted account, caregivers only ------------------------
 
-@app.get("/api/admin/accounts")
-def admin_accounts(
-    _caregiver: User = Depends(require_caregiver),
-    settings: Settings = Depends(get_settings),
-    store: SessionStore = Depends(get_store),
-) -> dict:
-    # Only allowlisted accounts can be managed (their record id is the email).
-    return {"accounts": [
-        {"email": email, **store.account_overview(email)} for email in sorted(settings.allowed_email_set)
-    ]}
+@app.get("/caregiver", response_class=HTMLResponse)
+@app.get("/caregiver.html", response_class=HTMLResponse)
+def caregiver_page() -> str:
+    # The page itself is public (like index.html); all of its data comes from
+    # /api/caregiver/*, which requires a caregiver sign-in.
+    html = (STATIC_DIR / "caregiver.html").read_text(encoding="utf-8")
+    return html.replace("__ASSET_VERSION__", asset_version())
 
 
-@app.post("/api/admin/reset")
-def admin_reset(
-    email: str = Body(..., embed=True, max_length=320),
-    scope: Literal["memory", "everything"] = Body(..., embed=True),
-    confirm_email: str = Body(..., embed=True, max_length=320),
-    caregiver: User = Depends(require_caregiver),
-    settings: Settings = Depends(get_settings),
-    store: SessionStore = Depends(get_store),
-    archive: PromptArchive = Depends(get_prompt_archive),
-) -> dict:
-    """Forget an account's memory (transcripts kept) or delete all of its data -- e.g. to
-    demo the tutor from scratch. The previous memory is backed up to the private bucket."""
-    pid = email.strip().lower()
-    if pid not in settings.allowed_email_set:
-        raise HTTPException(status_code=404, detail="Unknown account")
-    if confirm_email.strip().lower() != pid:
-        raise HTTPException(status_code=400, detail="Type the account's email to confirm")
-    memory = store.get_memory(pid)
-    backup_uri = None
-    if memory:
-        stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        backup_uri = archive.save_backup(
-            pid=pid, name=f"{stamp}-{scope}.json",
-            content=json.dumps(memory, ensure_ascii=False, indent=2, default=str),
-        )
-    if scope == "memory":
-        store.forget_memory(pid)
-        deleted_sessions = 0
-    else:
-        deleted_sessions = store.delete_account(pid)
-    print(f"[admin] {caregiver.email} reset {pid} ({scope}); backup={backup_uri}", flush=True)
-    return {"email": pid, "scope": scope, "deleted_sessions": deleted_sessions, "backup": backup_uri}
+app.include_router(caregiver_router)
 
 
 # Mounted last so API routes take precedence over static files.

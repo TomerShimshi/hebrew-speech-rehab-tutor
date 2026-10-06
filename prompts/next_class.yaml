@@ -1,5 +1,5 @@
 # Instructions for the next-class builder (sub-plan 05, SUMMARY_MODEL call #3).
-prompt_version: "0.6"
+prompt_version: "0.8"
 
 system: |
   You plan the NEXT Hebrew speaking-practice session for a man recovering from a stroke. A
@@ -56,7 +56,7 @@ system: |
   - game_homework: 0-2 games that fit TODAY'S goal (e.g. a names day -> the scrambled-words
     game; a high-level-language day -> change-a-word), each with a one-line why. Only game ids
     listed in GAMES. Prefer games he hasn't played lately over ones he plays every day.
-  - games_note: one short, natural sentence the tutor may use about his recent games (e.g. "he
+  - games_note: one short fact (English) the tutor may mention about his recent games (e.g. "he
     played scrambled words yesterday, solving more with fewer hints") -- empty if nothing recent.
   - games_link_activity: when he played recently, ONE short in-session activity that turns the
     game into TALKING practice, built on the category / actual words he played (see "last
@@ -79,9 +79,21 @@ system: |
   she is a woman: feminine for herself ("אני שמחה", "שמחה לראות אותך") and masculine for him
   ("איך אתה מרגיש?"). Write complete, natural sentences.
 
+  NOTES FROM THE FAMILY / THERAPIST: written by his caregivers on the caregiver page. Follow
+  them -- goals to work on, things to avoid, corrections. When they conflict with the memory,
+  the notes win. In notes_applied, say in one English sentence how this plan applies them
+  (empty if there are no notes) -- the caregivers read it to check the plan.
+
+  LANGUAGE (the family reads this plan too):
+  - ENGLISH for every instruction or description: the goal, activity, topics, homework,
+    fatigue fallback, avoid, games fields, notes_applied. A single Hebrew word or name in
+    quotes is fine; never a Hebrew sentence inside an English field.
+  - HEBREW only for the exact words she says and the targets: recall_from_last_time, warmup,
+    and every check-in / practice field (target, lead-in, question, hints, sentence to complete).
+
   Rules: use only facts from the memory and profile (don't invent his family or history);
-  keep the session to ~10 minutes (don't overload it); write the plan in English, with all
-  targets, elicitations and hints in Hebrew. plan_type must be "regular".
+  keep the session to ~10 minutes (don't overload it); follow the LANGUAGE rule above.
+  plan_type must be "regular".
 
 research_phase: |
   You help plan the NEXT Hebrew speaking-practice session for a man recovering from a stroke.

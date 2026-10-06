@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     upstash_redis_readonly_token: str = ""
     simon_app_url: str = ""
     simon_profiles: str = ""  # "dad@x.com=efraim,me@x.com=tomer" (from .env, never the repo)
+    simon_repo: str = "TomerShimshi/simon"  # the caregiver page's "open a GitHub issue" button (08)
 
     # Debug archive of each session's full tutor prompt (private bucket); empty = off.
     prompt_archive_uri: str = ""  # e.g. gs://heb-practice-private/debug/prompts
