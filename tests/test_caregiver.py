@@ -294,3 +294,14 @@ def test_next_prompt_is_exactly_what_the_session_start_uses(env):
     given = FakeAuthTokens.last_config.live_connect_constraints.config.system_instruction.parts[0].text
     assert shown == given
     assert get(env, f"/api/caregiver/{DAD}/next-prompt", token="tok-dad").status_code == 403
+
+
+
+# ---- 09: model visibility -----------------------------------------------------------------------
+
+def test_models_are_shown_per_session_and_for_the_next_plan(env):
+    sid = seed(env, DAD)
+    env.store.update_session(DAD, sid, {"memory_model": "gemini-3.8-flash", "plan_model": "gemini-3.5-flash-lite"})
+    row = get(env, f"/api/caregiver/{DAD}/sessions").json()["sessions"][0]
+    assert (row["memory_model"], row["plan_model"]) == ("gemini-3.8-flash", "gemini-3.5-flash-lite")
+    assert get(env, f"/api/caregiver/{DAD}/overview").json()["next_plan"]["model"] == "gemini-3.5-flash-lite"

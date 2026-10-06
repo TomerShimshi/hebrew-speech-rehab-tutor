@@ -3,7 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>דף מטפל · מדברים עברית</title>
+  <link rel="icon" type="image/png" href="favicon-48.png">
+  <title>דף מטפל · דברו איתי</title>
   <link rel="stylesheet" href="style.css?v=__ASSET_VERSION__">
   <link rel="stylesheet" href="caregiver.css?v=__ASSET_VERSION__">
 </head>
@@ -56,6 +57,17 @@
               <li>לדבר כרגיל, כמו עם מבוגר, בקצב רגוע.</li>
             </ul>
           </div>
+        </div>
+      </details>
+
+      <details class="cg-card" id="sec-export">
+        <summary>ייצוא לקלינאית</summary>
+        <p class="muted">סיכום מסודר להדפסה או לשמירה כ־PDF: מטרות, מגמת הבדיקות, סיכומי השיחות, תצפיות והמילים הקשות.
+          במסך ההדפסה אפשר לבחור "שמירה כ־PDF".</p>
+        <div class="cg-actions">
+          <label for="export-n">שיחות אחרונות:</label>
+          <select id="export-n"><option>5</option><option selected>10</option><option>20</option><option>30</option></select>
+          <button id="export-run" class="small" type="button">הדפסה / שמירה כ־PDF</button>
         </div>
       </details>
 
@@ -144,7 +156,12 @@
         <p id="reset-status" class="status" aria-live="polite"></p>
       </details>
     </div>
+
+    <!-- Built on demand and shown only when printing (09) -->
+    <div id="export" class="export" hidden></div>
   </main>
+
+  <footer class="cg-footer"><p class="credit" dir="ltr">Made by Tomer Shimshi</p></footer>
 
   <script type="module" src="caregiver.js?v=__ASSET_VERSION__"></script>
 </body>

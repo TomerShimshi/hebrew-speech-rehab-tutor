@@ -3,7 +3,15 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>מדברים עברית</title>
+  <link rel="icon" type="image/png" href="favicon-48.png">
+  <title>דברו איתי</title>
+  <!-- Home-screen app (09): an icon on the tablet that opens the app full screen -->
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#2f6fdf">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="דברו איתי">
   <link rel="stylesheet" href="style.css?v=__ASSET_VERSION__">
 </head>
 <body>
@@ -15,6 +23,7 @@
     <button id="signin" class="big primary" type="button">התחברות עם Google</button>
     <p id="signin-status" class="status" aria-live="polite"></p>
     <button id="signin-switch" class="link" type="button" hidden>התחברות עם חשבון אחר</button>
+    <p class="credit" dir="ltr">Made by Tomer Shimshi</p>
   </main>
 
   <!-- Start screen -->
@@ -28,6 +37,7 @@
       <button id="admin-open" class="link" type="button" hidden>ניהול</button>
       <button id="signout" class="link" type="button">התנתקות</button>
     </div>
+    <p class="credit" dir="ltr">Made by Tomer Shimshi</p>
   </main>
 
 

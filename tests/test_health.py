@@ -44,3 +44,14 @@ def test_index_links_versioned_assets():
     assert "__ASSET_VERSION__" not in html
     assert 'href="style.css?v=' in html
     assert 'src="app.js?v=' in html
+
+
+def test_home_screen_app_manifest(env):
+    html = env.client.get("/").text
+    assert '<link rel="manifest" href="manifest.json">' in html
+    manifest = env.client.get("/manifest.json").json()
+    assert manifest["display"] == "standalone" and manifest["lang"] == "he"
+    assert manifest["name"] == "דברו איתי" and "<title>דברו איתי</title>" in html
+    assert "Made by Tomer Shimshi" in html and "Made by Tomer Shimshi" in env.client.get("/caregiver").text
+    for icon in manifest["icons"]:
+        assert env.client.get(f"/{icon['src']}").status_code == 200

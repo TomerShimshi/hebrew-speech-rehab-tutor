@@ -41,7 +41,8 @@ NOTES_MAX_CHARS = 1500
 
 SESSION_FIELDS = ("id", "status", "started_at", "ended_at", "end_reason", "turn_count", "prompt_version",
                   "summary", "topics", "mood", "highlights", "difficulties", "probe_results",
-                  "memory_status", "memory_error", "plan_status", "plan_error")
+                  "memory_status", "memory_error", "plan_status", "plan_error",
+                  "memory_model", "plan_model")  # which model did the work (09)
 
 
 def account(email: str, settings: Settings = Depends(get_settings)) -> str:
@@ -115,6 +116,8 @@ def overview(pid: str = Depends(account), settings: Settings = Depends(get_setti
     terms = personal_terms(memory, f"{profile.get()}\n{notes.get('text', '')}",
                            extra=(pid.split("@")[0], games_profile or ""))
     stored_plan = store.get_next_plan(pid) or {}
+    built_after = stored_plan.get("built_after_session")
+    plan_model = (store.get_session(pid, built_after) or {}).get("plan_model") if built_after else None
     plan = plan_for_session(store, pid)  # what the next session will really get (built or intro)
     return {
         "email": pid,
@@ -132,6 +135,7 @@ def overview(pid: str = Depends(account), settings: Settings = Depends(get_setti
             "prompt_version": stored_plan.get("prompt_version"),
             "research": stored_plan.get("research"),
             "notes_used_at": stored_plan.get("notes_used_at"),
+            "model": plan_model,
             "notes_applied": stored_plan.get("notes_applied", ""),
         },
         "research_notes": store.recent_technique_notes(pid, 20),

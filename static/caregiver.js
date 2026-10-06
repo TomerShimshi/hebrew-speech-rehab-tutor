@@ -23,6 +23,8 @@ const STATUS = { new: "חדש", accepted: "התקבל", rejected: "נדחה", do
 
 let account = "";
 let accounts = [];
+let lastOverview = null; // kept for the therapist export (09)
+let lastSessions = [];
 
 // ---- small DOM helpers (text only) ----------------------------------------------
 function el(tag, props = {}, ...children) {
@@ -72,6 +74,17 @@ function when(iso, withTime = true) {
   const opts = { timeZone: "Asia/Jerusalem", day: "numeric", month: "numeric", year: "2-digit" };
   if (withTime) Object.assign(opts, { hour: "2-digit", minute: "2-digit" });
   return new Date(iso).toLocaleString("he-IL", opts);
+}
+
+// "gemini-3.8-flash" -> "3.8-flash"; the smallest fallback gets a warning (it ignores rules
+// more easily -- the invented-names problem in 8.5 came from it).
+const shortModel = (m) => (m || "").replace(/^gemini-/, "");
+const weakModel = (m) => /lite/i.test(m || "");
+function modelChip(label, model) {
+  if (!model) return null;
+  return el("span", { class: `chip${weakModel(model) ? " warn" : ""}`, dir: "ltr",
+                      title: weakModel(model) ? "המודל החלש (גיבוי, כשהמכסה החינמית של החזקים נגמרה)" : "",
+                      text: `${label}: ${shortModel(model)}${weakModel(model) ? " ⚠️" : ""}` });
 }
 
 function minutes(start, end) {
@@ -214,6 +227,7 @@ function renderSessions(sessions) {
         s.plan_goal ? el("span", { class: "chip", text: GOAL[s.plan_goal] || s.plan_goal }) : null,
         s.plan_type === "intro" ? el("span", { class: "chip", text: "היכרות" }) : null,
         MOOD[s.mood] ? el("span", { class: "chip", text: MOOD[s.mood] }) : null,
+        modelChip("memory", s.memory_model), modelChip("plan", s.plan_model),
         ...problems.map((t) => el("span", { class: "chip warn", text: t })),
       ),
       s.summary ? p(s.summary) : p(s.memory_status === "done" ? "" : "עדיין אין סיכום לשיחה הזו.", "muted"),
@@ -236,6 +250,9 @@ function renderPlan(plan, notes) {
       ? el("pre", { class: "plan", dir: "auto", text: plan.rendered })
       : p("אין תוכנית שמורה: המאמנת תעקוב אחרי המבנה הכללי.", "muted"),
     plan.built_at ? p(`נבנה: ${when(plan.built_at)} · גרסת הנחיות ${plan.prompt_version || "?"}`, "muted kv") : null,
+    plan.model ? el("p", { class: "kv" }, "נבנה על ידי: ", modelChip("model", plan.model),
+                    weakModel(plan.model) ? " המודל החלש. כדאי לבנות מחדש כשהמכסה מתחדשת (או אחרי המעבר לגרסה בתשלום)." : "")
+               : null,
     p(`מחקר: ${research}`, "kv"),
     notesLine(plan, notes),
   );
@@ -428,11 +445,91 @@ $("notes-save").addEventListener("click", async () => {
   }
 });
 
+// ---- export for the therapist (09): a print view built from the data already loaded ------
+function probeStats(results) {
+  const by = (kind) => (results || []).filter((r) => r.kind === kind);
+  const ownShare = (rs) => rs.length ? `${Math.round(100 * rs.filter((r) => r.result === "uncued").length / rs.length)}%` : "–";
+  const count = (res) => (results || []).filter((r) => r.result === res).length;
+  return { uncued: count("uncued"), cued: count("cued"), failed: count("failed"),
+           treated: ownShare(by("treated")), untreated: ownShare(by("untreated")) };
+}
+
+function buildExport(n) {
+  const ov = lastOverview;
+  const sessions = lastSessions.filter((s) => s.status !== "active").slice(0, n);
+  const oldest = sessions.at(-1)?.started_at;
+  const newest = sessions[0]?.started_at;
+  const list = (items) => el("ul", {}, items.map((i) => el("li", { dir: "auto", text: i })));
+  const out = [
+    el("h1", { text: "דברו איתי · סיכום לקלינאית" }),
+    p(`${ov.email} · ${sessions.length} שיחות${oldest ? ` · ${when(oldest, false)} – ${when(newest, false)}` : ""} · הופק ${when(new Date().toISOString(), false)}`, "meta"),
+    p("סיכומי השיחות נכתבים על ידי המערכת באנגלית; המילים והשמות שלו מופיעים בעברית. הבדיקות: ✓ שלף לבד · ~ עם רמז · ✗ לא שלף.", "meta"),
+    el("h2", { text: "מטרות ודגשים" }),
+    ov.next_plan?.rendered ? p(`השיעור הבא: ${(ov.next_plan.rendered.split("\n")[1] || "").replace(/^Main goal /, "")}`) : null,
+    ov.notes?.text ? el("div", {}, el("h3", { text: "הערות המשפחה / הקלינאית" }), el("p", { dir: "auto", text: ov.notes.text })) : null,
+    ov.memory?.focus_next_session?.length ? el("div", {}, el("h3", { text: "דגשים לשיחה הבאה" }), list(ov.memory.focus_next_session)) : null,
+  ];
+
+  const withProbes = sessions.filter((s) => s.probe_results?.length);
+  if (withProbes.length) {
+    out.push(el("h2", { text: "בדיקת שליפה לאורך זמן" }), el("table", {},
+      el("thead", {}, el("tr", {}, ["תאריך", "✓", "~", "✗", "✓ במילים שתורגלו", "✓ במילים חדשות"].map((h) => el("th", { text: h })))),
+      el("tbody", {}, withProbes.slice().reverse().map((s) => {
+        const st = probeStats(s.probe_results);
+        return el("tr", {}, [when(s.started_at, false), st.uncued, st.cued, st.failed, st.treated, st.untreated]
+          .map((v) => el("td", { text: String(v) })));
+      }))));
+  }
+
+  out.push(el("h2", { text: "השיחות" }));
+  for (const s of sessions) {
+    const st = probeStats(s.probe_results);
+    out.push(el("div", { class: "ex-session" },
+      el("h3", { text: [when(s.started_at), minutes(s.started_at, s.ended_at), MOOD[s.mood], GOAL[s.plan_goal]].filter(Boolean).join(" · ") }),
+      s.summary ? el("p", { dir: "auto", text: s.summary }) : p("(אין סיכום)", "meta"),
+      s.highlights?.length ? el("p", { dir: "auto", text: `הצלחות: ${s.highlights.join(" · ")}` }) : null,
+      s.difficulties?.length ? el("p", { dir: "auto", text: `קשיים: ${s.difficulties.join(" · ")}` }) : null,
+      s.probe_results?.length
+        ? el("p", { dir: "auto", text: `בדיקה: ${s.probe_results.map((r) => `${RESULT[r.result] || "?"} ${r.word}`).join("  ")}  (✓${st.uncued} ~${st.cued} ✗${st.failed})` })
+        : null,
+    ));
+  }
+
+  const sections = ov.memory?.sections || {};
+  const obs = [["language_observations", "תצפיות על הדיבור"], ["what_works", "מה עובד"], ["what_to_avoid", "ממה להימנע"]]
+    .filter(([k]) => sections[k]?.length);
+  if (obs.length) {
+    out.push(el("h2", { text: "תצפיות" }), ...obs.map(([k, title]) => el("div", {}, el("h3", { text: title }), list(sections[k]))));
+  }
+
+  const hard = (ov.word_bank || []).filter((w) => (w.failed || 0) + (w.cued || 0) > 0)
+    .sort((a, b) => ((b.failed || 0) * 2 + (b.cued || 0)) - ((a.failed || 0) * 2 + (a.cued || 0))).slice(0, 15);
+  if (hard.length) {
+    out.push(el("h2", { text: "המילים הקשות" }), el("table", {},
+      el("thead", {}, el("tr", {}, ["מילה", "ניסיונות", "✓", "~", "✗", "תוצאה אחרונה"].map((h) => el("th", { text: h })))),
+      el("tbody", {}, hard.map((w) => el("tr", {},
+        [w.word, w.attempts ?? 0, w.uncued ?? 0, w.cued ?? 0, w.failed ?? 0, RESULT_TEXT[w.last_result] || ""]
+          .map((v) => el("td", { dir: "auto", text: String(v) })))))));
+  }
+  out.push(el("p", { class: "ex-footer", dir: "ltr", text: "דברו איתי · Made by Tomer Shimshi" }));
+  $("export").replaceChildren(...out.filter(Boolean));
+}
+
+$("export-run").addEventListener("click", () => {
+  if (!lastOverview) return;
+  buildExport(Number($("export-n").value));
+  document.body.classList.add("printing");
+  window.print();
+});
+window.addEventListener("afterprint", () => document.body.classList.remove("printing"));
+
 // ---- loading ----------------------------------------------------------------------------
 async function loadAccount() {
   status("טוען…");
   try {
     const [ov, ss] = await Promise.all([api(acct("/overview")), api(acct("/sessions"))]);
+    lastOverview = ov;
+    lastSessions = ss.sessions;
     renderFlags(ov.flags);
     renderSessions(ss.sessions);
     renderPlan(ov.next_plan, ov.notes);
