@@ -20,19 +20,41 @@ def test_first_try_success():
     assert (result.model, result.attempts) == ("primary", 1)
 
 
-def test_retries_503_then_falls_back_to_next_model():
-    client = FakeClient(server_error(), server_error(), server_error(), text("ok"))
-    result = gen(client, MODELS, "x")
-    assert result.model == "fallback"
-    assert result.attempts == 4
-    assert [r["model"] for r in client.requests] == ["primary"] * 3 + ["fallback"]
+def test_overloaded_503_or_504_goes_to_the_next_model_at_once():
+    """7.10.26: an overloaded model retried 3x (each try hanging) ate the budget; flash-lite never ran."""
+    for code in (503, 504):
+        llm.reset_cooldowns()
+        client = FakeClient(server_error(code), text("ok"))
+        result = gen(client, MODELS, "x")
+        assert (result.model, result.attempts) == ("fallback", 2)
+        assert [r["model"] for r in client.requests] == ["primary", "fallback"]
 
 
-def test_backoff_between_attempts():
+def test_a_client_timeout_also_goes_to_the_next_model():
+    client = FakeClient(TimeoutError("read timed out"), text("ok"))
+    assert gen(client, MODELS, "x").model == "fallback"
+
+
+def test_backoff_between_attempts_for_transient_500s():
     slept = []
-    client = FakeClient(server_error(500), server_error(), text("ok"))
+    client = FakeClient(server_error(500), server_error(502), text("ok"))
     llm.generate(client, ["m"], "x", sleep=slept.append)
     assert slept == [2, 6]
+
+
+def test_one_more_pass_over_the_chain_when_every_model_failed():
+    slept = []
+    client = FakeClient(server_error(503), server_error(503), text("ok"))
+    result = llm.generate(client, MODELS, "x", sleep=slept.append)
+    assert (result.model, result.attempts) == ("primary", 3) and slept == [llm.PASS_PAUSE_S]
+
+
+def test_no_second_pass_without_time_left():
+    import time
+    client = FakeClient(server_error(503), server_error(503), text("never"))
+    with pytest.raises(llm.LLMUnavailable):
+        llm.generate(client, MODELS, "x", sleep=no_sleep, deadline=time.monotonic() + 1)
+    assert len(client.requests) == 2
 
 
 def test_quota_429_skips_straight_to_the_next_model():
@@ -58,6 +80,7 @@ def test_all_models_failing_raises_unavailable():
     client = FakeClient(*[server_error() for _ in range(6)])
     with pytest.raises(llm.LLMUnavailable):
         gen(client, MODELS, "x")
+    assert len(client.requests) == 4  # 2 models x 2 passes
 
 
 # ---- runner: the tool loop ------------------------------------------------------------
@@ -117,3 +140,19 @@ def test_loop_survives_a_503_mid_run():
     result = run(client, make_tools(log))
     assert result.final_text == "done"
     assert result.attempts == 3
+
+
+
+def test_an_overloaded_model_is_skipped_for_a_while():
+    """7.10.26: each tool round waited 45 s on the same hung model; now it's skipped."""
+    client = FakeClient(server_error(504), text("one"), text("two"))
+    assert gen(client, MODELS, "x").model == "fallback"
+    assert gen(client, MODELS, "y").model == "fallback"  # primary is cooling down: not even tried
+    assert [r["model"] for r in client.requests] == ["primary", "fallback", "fallback"]
+
+
+def test_when_every_model_is_cooling_down_all_are_tried_anyway():
+    client = FakeClient(server_error(503), server_error(503), server_error(503), server_error(503), text("ok"))
+    with pytest.raises(llm.LLMUnavailable):
+        gen(client, MODELS, "x")  # both now cooling down
+    assert gen(client, MODELS, "y").model == "primary"  # last resort: tried anyway

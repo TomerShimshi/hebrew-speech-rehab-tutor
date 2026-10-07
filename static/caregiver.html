@@ -33,6 +33,40 @@
       <!-- Always visible -->
       <section id="flags" class="cg-flags" aria-live="polite"></section>
 
+      <!-- The account's current voice settings, always visible, editable here (09) -->
+      <section class="cg-card" id="sec-voice">
+        <div class="voice-head">
+          <h2>הגדרות קול לחשבון הזה</h2>
+          <button id="voice-edit" class="small" type="button">שינוי</button>
+        </div>
+        <div id="voice-summary"></div>
+        <div id="voice-form" hidden>
+          <p class="muted">חלות מהשיחה הבאה. "אוטומטי" = המערכת מכווננת אחרי כל שיחה לפי מה שנמדד בה.</p>
+          <div class="voice-row">
+            <b>שקט לפני שהמטפלת עונה</b>
+            <select id="silence-mode"><option value="auto">אוטומטי</option><option value="fixed">קבוע</option></select>
+            <input id="silence" type="range" min="2" max="8" step="0.5" dir="ltr">
+            <span><b id="silence-value"></b> שניות</span>
+          </div>
+          <p class="muted">יותר זמן = פחות סיכוי שתקטע אותו באמצע מחשבה, אבל תשובות איטיות יותר.</p>
+          <div class="voice-row">
+            <b>מסנן רעשים (רק בזמן שהיא מדברת)</b>
+            <select id="noise-mode"><option value="auto">אוטומטי</option><option value="fixed">קבוע</option></select>
+            <select id="noise-level"><option value="0">0 · כבוי</option><option value="1">1 · עדין</option>
+              <option value="2">2 · בינוני</option><option value="3">3 · חזק</option></select>
+          </div>
+          <p class="muted">רמה גבוהה = רעשים כמו טלוויזיה פחות יקטעו אותה, אבל כדי לקטוע אותה הוא צריך לדבר ברור יותר.</p>
+          <label class="choice"><input id="tap-to-talk" type="checkbox">
+            <span><b>לחיצה לדיבור</b>: הוא לוחץ "לדבר" כשהוא מתחיל ו"סיימתי" כשהוא מסיים, במקום זיהוי אוטומטי.
+            מתאים לחדר רועש מאוד. (במצב הזה השקט והמסנן לא משנים.)</span></label>
+          <div class="cg-actions">
+            <button id="voice-save" class="small on" type="button">שמירה</button>
+            <button id="voice-cancel" class="small" type="button">ביטול</button>
+            <span id="voice-status" aria-live="polite"></span>
+          </div>
+        </div>
+      </section>
+
       <details class="cg-card cg-info">
         <summary>מידע חשוב: חירום וטיפים למשפחה</summary>
         <div class="cg-two">

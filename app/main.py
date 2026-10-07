@@ -18,6 +18,8 @@ from app.config import Settings, get_settings
 from app.live_token import create_live_token
 from app.patient_profile import PatientProfileLoader, extract_vocabulary
 from app.prompt_archive import PromptArchive
+from app.schemas import VoiceSettings
+from app.voice_tuning import adjust_after_session, current_settings
 from app.session_prompt import build_session_prompt
 from app.rate_limit import SlidingWindowLimiter
 from app.store import ACTIVE, MEM_DONE, SessionStore
@@ -98,6 +100,10 @@ def me(user: User = Depends(verify_user), settings: Settings = Depends(get_setti
     return {"email": user.email, "is_caregiver": user.email in settings.caregiver_email_set}
 
 
+def voice_settings(store: SessionStore, settings: Settings, pid: str) -> VoiceSettings:
+    return current_settings(store, settings, pid)[0]
+
+
 def patient_id_for(user: User) -> str:
     # Every account is its own record (sessions, transcripts, memory), keyed by login email,
     # so memories never mix -- e.g. Tomer's test sessions vs Dad's real ones.
@@ -136,12 +142,15 @@ def start_session(
     # The same function builds the caregiver page's "prompt for the next session" (8.5).
     built = build_session_prompt(store, settings, patient_id_for(user), profile_text, games_reader)
     prompt, plan = built.prompt, built.plan
+    # Per-account voice settings from the caregiver page (09): silence length, tap-to-talk.
+    voice = voice_settings(store, settings, patient_id_for(user))
     live = create_live_token(
         settings,
         prompt,
         client,
         resume_handle=resume_handle,
         vocabulary=extract_vocabulary(profile_text),
+        voice=voice,
     )
     if not session_id:
         # A session still "active" means its tab was closed without ending: close it out.
@@ -164,6 +173,7 @@ def start_session(
         # ...and in Firestore, for the caregiver page's per-session "prompt" button (8.5).
         store.save_session_prompt(patient_id_for(user), session_id, prompt.text, prompt.version)
         session_fields = {"prompt_uri": prompt_uri} if prompt_uri else {}
+        session_fields["voice_used"] = voice.model_dump()  # what this session ran with (09)
         if plan:
             # The memory update scores the check-in items against exactly this plan.
             session_fields.update(class_plan=plan.model_dump(mode="json"), plan_type=plan.plan_type)
@@ -178,6 +188,7 @@ def start_session(
         "prompt_version": prompt.version,
         # buttons for the end screen: the game homework the tutor will suggest
         "game_homework": homework_buttons(plan, patient_id_for(user), settings),
+        "voice": {"tap_to_talk": voice.tap_to_talk, "noise_level": voice.noise_level},
     }
 
 
@@ -217,6 +228,8 @@ def end_session(
     memory_status = run_memory_update(
         store, llm_client, settings, pid, session_id, profile_text=profile_text, generate_fn=bounded,
     )
+    # Voice settings for next time, from this session's interruptions (09; code, no model).
+    adjust_after_session(store, settings, pid, session_id)
     plan_status = None
     if memory_status == MEM_DONE:
         # The next session's lesson plan, built from the memory we just updated (05).
@@ -248,6 +261,7 @@ def memory_sweep(
                 store, llm_client, settings, pid, sid,
                 profile_text=profile_text, generate_fn=_bounded_generate(240),
             )
+            adjust_after_session(store, settings, pid, sid)  # once per session (09)
         # Plans that are missing (memory done, plan failed or never built): newest only --
         # a plan always reflects the latest memory, so one per account is enough.
         games = games_for(pid, settings, games_reader)

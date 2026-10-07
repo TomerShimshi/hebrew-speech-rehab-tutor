@@ -76,6 +76,16 @@ table.words th { color: var(--muted); font-weight: normal; }
 #sec-reset .choice { display: flex; gap: .6rem; align-items: flex-start; margin: .4rem 0; cursor: pointer; }
 #sec-reset input[type="email"] { font-size: 1rem; padding: .45rem .6rem; border: 1px solid #cfd6e3; border-radius: .5rem; width: min(100%, 24rem); display: block; margin: .3rem 0; }
 #sec-reset .big { font-size: 1.3rem; padding: .6rem 1.6rem; margin-top: .3rem; }
+#sec-voice .voice-head { display: flex; align-items: center; gap: .8rem; justify-content: space-between; }
+#sec-voice h2 { font-size: 1.2rem; margin: 0; }
+#sec-voice .voice-row { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .8rem; margin: .7rem 0 .1rem; }
+#sec-voice input[type="range"] { width: min(100%, 16rem); }
+#sec-voice select { font-size: 1rem; padding: .25rem .4rem; border-radius: .5rem; border: 1px solid #cfd6e3; }
+#sec-voice .choice { display: flex; gap: .6rem; align-items: flex-start; margin: .8rem 0 .4rem; cursor: pointer; }
+.voice-facts { display: flex; flex-wrap: wrap; gap: .4rem 1.4rem; margin: .5rem 0 .2rem; font-size: 1.05rem; }
+.voice-facts .mode { color: var(--muted); font-size: .9rem; }
+.suggest { background: #fff7e6; border: 1px solid #f6c768; border-radius: .6rem; padding: .4rem .7rem; margin: .4rem 0; }
+.session .voice-line { font-size: .9rem; color: var(--muted); margin: .2rem 0; }
 #sec-notes textarea { width: 100%; font: inherit; padding: .5rem .7rem; border: 1px solid #cfd6e3; border-radius: .6rem; resize: vertical; }
 .mem-item { display: flex; gap: .4rem; align-items: baseline; }
 .mem-item .x { border: none; background: none; color: var(--muted); cursor: pointer; font-size: .95rem; padding: 0 .3rem; }

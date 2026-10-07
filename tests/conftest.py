@@ -22,6 +22,15 @@ from app.rate_limit import SlidingWindowLimiter
 from app.store import InMemorySessionStore
 from fake_llm import FakeClient
 
+@pytest.fixture(autouse=True)
+def no_model_cooldowns():
+    """app.llm remembers overloaded models for 10 minutes; tests must not leak that."""
+    from app import llm
+    llm.reset_cooldowns()
+    yield
+    llm.reset_cooldowns()
+
+
 DAD = "dad@example.com"
 TOMER = "tomer@example.com"
 STRANGER = "stranger@example.com"

@@ -17,7 +17,7 @@
 <body>
   <!-- Sign-in screen -->
   <main id="screen-signin" class="screen">
-    <img class="avatar" src="tutor-512.jpg" alt="המאמנת" onerror="this.onerror=null; this.src='tutor.svg'">
+    <img class="avatar" src="tutor-512.jpg" alt="המטפלת" onerror="this.onerror=null; this.src='tutor.svg'">
     <h1>שלום! 👋</h1>
     <p class="lead">כדי להתחיל, צריך להתחבר פעם אחת</p>
     <button id="signin" class="big primary" type="button">התחברות עם Google</button>
@@ -28,7 +28,7 @@
 
   <!-- Start screen -->
   <main id="screen-start" class="screen" hidden>
-    <img class="avatar" src="tutor-512.jpg" onerror="this.onerror=null; this.src='tutor.svg'" alt="המאמנת">
+    <img class="avatar" src="tutor-512.jpg" onerror="this.onerror=null; this.src='tutor.svg'" alt="המטפלת">
     <h1>שלום! 👋</h1>
     <p class="lead">האימון היומי שלנו מחכה</p>
     <button id="talk" class="big primary" type="button">שנתחיל?</button>
@@ -43,13 +43,14 @@
 
   <!-- In-session screen -->
   <main id="screen-session" class="screen" hidden>
-    <img id="session-avatar" class="avatar small" src="tutor-512.jpg" onerror="this.onerror=null; this.src='tutor.svg'" alt="המאמנת" data-state="connecting">
+    <img id="session-avatar" class="avatar small" src="tutor-512.jpg" onerror="this.onerror=null; this.src='tutor.svg'" alt="המטפלת" data-state="connecting">
     <div id="indicator" class="indicator" data-state="connecting">
       <span class="dot"></span><span id="indicator-text">מתחברת…</span>
     </div>
     <div class="mic" aria-hidden="true">🎤<div class="mic-bar"><div id="mic-level"></div></div></div>
     <div id="captions" class="captions" aria-live="polite"></div>
     <div class="controls">
+      <button id="talk-toggle" class="big primary" type="button" hidden>🎙️ לדבר</button>
       <button id="mute" class="big secondary" type="button" aria-pressed="false">🔇 השתקה</button>
       <button id="thinking" class="big secondary" type="button">אני חושב…</button>
       <button id="end" class="big end" type="button">סיום</button>

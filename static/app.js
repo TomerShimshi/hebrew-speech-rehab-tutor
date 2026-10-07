@@ -50,6 +50,7 @@ function setIndicator(state) {
       if (!speaking) s.echoUntil = performance.now() + 800;
     }
     s.tutorAudio = speaking;
+    if (!speaking) s.gateOpen = false; // the noise filter re-arms for her next turn
   }
 }
 
@@ -88,7 +89,7 @@ function log(kind, detail) {
 function newLine(speaker) {
   const line = document.createElement("div");
   line.className = `line ${speaker}`;
-  line.innerHTML = `<span class="who">${speaker === "tutor" ? "המאמנת" : "אתה"}</span><span class="text"></span>`;
+  line.innerHTML = `<span class="who">${speaker === "tutor" ? "המטפלת" : "אתה"}</span><span class="text"></span>`;
   const box = $("captions");
   box.appendChild(line);
   box.scrollTop = box.scrollHeight;
@@ -237,11 +238,14 @@ async function startAudio() {
   capNode.connect(mute).connect(capCtx.destination);
   capNode.port.onmessage = (e) => {
     if (s?.hangingUp) return; // she's hanging up: don't send his audio anymore
+    // Tap-to-talk (09): his mic is sent only between "לדבר" and "סיימתי".
+    if (s?.tapToTalk && !s.speaking) return;
     // Muted = the MIC is muted, nothing else: we keep streaming, but pure silence. Background
     // noise can't interrupt her, and Gemini still sees the silence after his last words, so it
     // answers him normally (stopping the stream instead could leave it waiting).
     const chunk = s?.muted ? new ArrayBuffer(e.data.byteLength) : e.data;
     if (!s?.muted) showMicLevel(e.data);
+    if (!s?.muted && noiseGate(e.data)) return; // held or replaced by silence (09)
     sendJson({ realtimeInput: { audio: { data: b64FromBuffer(chunk), mimeType: MIC_MIME } } });
   };
 
@@ -263,11 +267,15 @@ async function startAudio() {
 
 // Mic meter: visible proof that the app hears him (and a quick diagnostic for us).
 let micLevel = 0;
-function showMicLevel(buf) {
+function micRms(buf) {
   const pcm = new Int16Array(buf);
   let sum = 0;
   for (let i = 0; i < pcm.length; i++) sum += pcm[i] * pcm[i];
-  const rms = Math.sqrt(sum / pcm.length) / 0x8000;
+  return Math.sqrt(sum / pcm.length) / 0x8000;
+}
+
+function showMicLevel(buf) {
+  const rms = micRms(buf);
   micLevel = Math.max(rms, micLevel * 0.85); // fast attack, slow decay
   $("mic-level").style.width = `${Math.min(100, micLevel * 400)}%`;
 }
@@ -312,6 +320,8 @@ async function fetchToken(resumeHandle) {
   const t = await res.json();
   s.sessionId = t.session_id;
   if (t.game_homework) s.gameHomework = t.game_homework; // buttons for the end screen (06)
+  setTapToTalk(!!t.voice?.tap_to_talk); // per-account setting (09)
+  s.noiseLevel = t.voice?.noise_level || 0; // the noise filter level (09), adjusted after each session
   return t;
 }
 
@@ -503,6 +513,7 @@ async function startSession() {
     rec: null, recBase: 0, recCount: 0, tutorAudio: false, echoUntil: 0,
     lastAudioAt: 0, hangingUp: false, lastUserAt: performance.now(), nudged: false,
     lastUserText: "", sessionId: null, nextSeq: 0, dirty: new Set(), flushing: false, muted: false,
+    tapToTalk: false, speaking: false, noiseLevel: 0, gateOpen: false, loudSince: 0, gateBuffer: [],
   };
   try {
     s.audio = await startAudio(); // inside the click handler: required to unlock audio on tablets
@@ -535,6 +546,7 @@ async function startSession() {
   // tell her once; she decides whether to hang up or check on him.
   s.silenceTimer = setInterval(() => {
     if (!s || s.hangingUp || s.modelActive || s.tutorAudio) return;
+    if (s.speaking) { s.lastUserAt = performance.now(); return; } // tap-to-talk: he holds the turn
     if (s.wrapDue && performance.now() - Math.max(s.lastUserAt, s.lastAudioAt) > 2000) {
       s.wrapDue = false;
       log("ui", "wrap-up note sent");
@@ -620,6 +632,61 @@ function setMuted(muted) {
 }
 
 $("mute").addEventListener("click", () => setMuted(!s?.muted));
+
+// ---- noise filter (09): only while SHE is speaking, his mic passes only if the sound is loud
+// and long enough to be speech (~0.3 s); a short bang or a far-away TV becomes silence, so it
+// can't interrupt her. The held audio is sent as soon as it qualifies, so no word is lost.
+// When she's quiet, everything passes (his own turns are never filtered).
+const NOISE_GATE_RMS = { 1: 0.015, 2: 0.03, 3: 0.05 };
+const NOISE_GATE_HOLD_MS = 300;
+function sendSilence(buf) {
+  sendJson({ realtimeInput: { audio: { data: b64FromBuffer(new ArrayBuffer(buf.byteLength)), mimeType: MIC_MIME } } });
+}
+function noiseGate(buf) {
+  if (!s?.noiseLevel || s.tapToTalk || !s.tutorAudio || s.gateOpen) return false; // pass through
+  const now = performance.now();
+  if (micRms(buf) >= NOISE_GATE_RMS[s.noiseLevel]) {
+    if (!s.loudSince) s.loudSince = now;
+    s.gateBuffer.push(buf);
+    if (now - s.loudSince >= NOISE_GATE_HOLD_MS) { // sustained: that's him -- let it through
+      s.gateOpen = true;
+      log("audio", `noise filter opened (level ${s.noiseLevel})`);
+      for (const held of s.gateBuffer) sendJson({ realtimeInput: { audio: { data: b64FromBuffer(held), mimeType: MIC_MIME } } });
+      s.gateBuffer = [];
+      s.loudSince = 0;
+    }
+    return true; // held for now
+  }
+  for (const held of s.gateBuffer) sendSilence(held); // it was a short noise: send silence instead
+  s.gateBuffer = [];
+  s.loudSince = 0;
+  sendSilence(buf);
+  return true;
+}
+
+// ---- tap-to-talk (09): he marks his own turn; automatic detection is off for this account --
+function setTapToTalk(on) {
+  s.tapToTalk = on;
+  s.speaking = false; // a new connection starts between turns
+  $("talk-toggle").hidden = !on;
+  $("mute").hidden = on; // nothing to mute: the mic is only sent while he holds the turn
+  showSpeaking();
+}
+function showSpeaking() {
+  const btn = $("talk-toggle");
+  btn.textContent = s?.speaking ? "✅ סיימתי" : "🎙️ לדבר";
+  btn.classList.toggle("active", !!s?.speaking);
+  btn.setAttribute("aria-pressed", String(!!s?.speaking));
+}
+$("talk-toggle").addEventListener("click", () => {
+  if (!s || s.hangingUp) return;
+  s.speaking = !s.speaking;
+  // activityStart also interrupts her if she's talking -- like him starting to speak.
+  sendJson({ realtimeInput: s.speaking ? { activityStart: {} } : { activityEnd: {} } });
+  log("ui", s.speaking ? "tap: speaking" : "tap: done");
+  if (s.speaking) s.lastUserAt = performance.now();
+  showSpeaking();
+});
 
 $("thinking").addEventListener("click", () => {
   sendNote(NOTE_THINKING);

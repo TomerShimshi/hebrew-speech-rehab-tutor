@@ -13,6 +13,7 @@ from google.genai import types
 
 from app.config import Settings
 from app.prompts import TutorPrompt
+from app.schemas import VoiceSettings
 
 LIVE_WS_URL = (
     "wss://generativelanguage.googleapis.com/ws/"
@@ -46,7 +47,9 @@ def build_live_config(
     prompt: TutorPrompt,
     resume_handle: str | None = None,
     vocabulary: list[str] | None = None,
+    voice: VoiceSettings | None = None,
 ) -> types.LiveConnectConfig:
+    voice = voice or VoiceSettings(silence_ms=settings.vad_silence_ms)
     # No language_code here: native-audio models ignore it ("they automatically choose the
     # language"); Hebrew is enforced by the system instruction's LANGUAGE rule instead.
     speech = types.SpeechConfig()
@@ -67,12 +70,18 @@ def build_live_config(
         input_audio_transcription=transcription,
         output_audio_transcription=transcription,
         realtime_input_config=types.RealtimeInputConfig(
-            automatic_activity_detection=types.AutomaticActivityDetection(
-                # Catch the start of even quiet speech, but be slow to decide he's done:
-                # low end sensitivity + a long silence window so he isn't cut off mid-thought.
-                start_of_speech_sensitivity=types.StartSensitivity.START_SENSITIVITY_HIGH,
-                end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_LOW,
-                silence_duration_ms=settings.vad_silence_ms,
+            automatic_activity_detection=(
+                # Tap-to-talk (09): the browser marks his turn (activityStart / activityEnd).
+                types.AutomaticActivityDetection(disabled=True) if voice.tap_to_talk else
+                types.AutomaticActivityDetection(
+                    # Catch the start of even quiet speech, but be slow to decide he's done:
+                    # low end sensitivity + a long silence window so he isn't cut off mid-thought.
+                    # ...unless the noise filter is at its strictest (09): then noise matters more.
+                    start_of_speech_sensitivity=(types.StartSensitivity.START_SENSITIVITY_LOW if voice.noise_level >= 3
+                                                 else types.StartSensitivity.START_SENSITIVITY_HIGH),
+                    end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_LOW,
+                    silence_duration_ms=voice.silence_ms,  # per account, from the caregiver page
+                )
             )
         ),
         # The handle must be baked into the token: the token's locked config overrides
@@ -94,6 +103,7 @@ def create_live_token(
     now: dt.datetime | None = None,
     resume_handle: str | None = None,
     vocabulary: list[str] | None = None,
+    voice: VoiceSettings | None = None,
 ) -> LiveToken:
     now = now or dt.datetime.now(dt.timezone.utc)
     expires_at = now + dt.timedelta(minutes=settings.token_ttl_minutes)
@@ -104,7 +114,7 @@ def create_live_token(
             new_session_expire_time=now + dt.timedelta(minutes=1),
             live_connect_constraints=types.LiveConnectConstraints(
                 model=settings.live_model,
-                config=build_live_config(settings, prompt, resume_handle, vocabulary),
+                config=build_live_config(settings, prompt, resume_handle, vocabulary, voice),
             ),
         )
     )

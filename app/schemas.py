@@ -102,6 +102,16 @@ class MemoryDoc(BaseModel):
     prompt_version: str | None = None
 
 
+# ---- per-account session settings (sub-plan 09), set on the caregiver page ----------------------
+
+class VoiceSettings(BaseModel):
+    silence_ms: int = Field(default=3000, ge=2000, le=8000)  # silence before she answers (automatic mode)
+    silence_auto: bool = True  # adjusted after each session (app/voice_tuning.py) unless the family fixed it
+    noise_level: int = Field(default=0, ge=0, le=3)  # browser noise filter while she speaks (0 = off)
+    noise_auto: bool = True
+    tap_to_talk: bool = False  # he taps to start / end his turn instead of automatic detection
+
+
 # ---- research findings (sub-plan 07) -------------------------------------------------------
 
 class Confidence(str, Enum):

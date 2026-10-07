@@ -12,6 +12,7 @@ Layout (see docs/plans/03 and 04):
   patients/{pid}/research_usage/{date}    research runs that day (07)
   usage/tavily-{YYYY-MM}                  app-wide Tavily searches that month (07)
   patients/{pid}/caregiver/notes          the caregiver's notes for the plan builder (08)
+  patients/{pid}/caregiver/settings       per-account session settings: voice, tap-to-talk (09)
   patients/{pid}/sessions/{sid}/prompt/live  the exact system instruction the tutor got (8.5)
 """
 
@@ -100,6 +101,8 @@ class SessionStore(Protocol):
     def get_notes(self, pid: str) -> dict | None: ...
     def save_notes(self, pid: str, text: str, by: str) -> None: ...
     def save_session_prompt(self, pid: str, sid: str, text: str, version: str) -> None: ...
+    def get_settings(self, pid: str) -> dict | None: ...
+    def save_settings(self, pid: str, settings: dict, by: str) -> None: ...
     def get_session_prompt(self, pid: str, sid: str) -> dict | None: ...
 
 
@@ -121,6 +124,7 @@ class InMemorySessionStore:
         self.monthly_searches: dict[str, int] = {}
         self.notes: dict[str, dict] = {}
         self.session_prompts: dict[tuple[str, str], dict] = {}
+        self.settings: dict[str, dict] = {}
 
     def create_session(self, pid, *, user_email, model, prompt_version):
         sid = uuid.uuid4().hex
@@ -216,6 +220,7 @@ class InMemorySessionStore:
             for key in [k for k in store if k[0] == pid]:
                 store.pop(key)
         self.notes.pop(pid, None)
+        self.settings.pop(pid, None)
         for key in [k for k in self.session_prompts if k[0] == pid]:
             self.session_prompts.pop(key)
         return len(keys)
@@ -296,6 +301,12 @@ class InMemorySessionStore:
 
     def get_session_prompt(self, pid, sid):
         return self.session_prompts.get((pid, sid))
+
+    def get_settings(self, pid):
+        return self.settings.get(pid)
+
+    def save_settings(self, pid, settings, by):
+        self.settings[pid] = {**settings, "updated_by": by, "updated_at": _now()}
 
     def add_research_run(self, pid, day):
         self.research_runs[(pid, day)] = self.research_runs_on(pid, day) + 1
@@ -537,6 +548,14 @@ class FirestoreSessionStore:
     def get_session_prompt(self, pid, sid):
         snap = self._session(pid, sid).collection("prompt").document("live").get()
         return snap.to_dict() if snap.exists else None
+
+    def get_settings(self, pid):
+        snap = self._patient(pid).collection("caregiver").document("settings").get()
+        return snap.to_dict() if snap.exists else None
+
+    def save_settings(self, pid, settings, by):
+        self._patient(pid).collection("caregiver").document("settings").set(
+            {**settings, "updated_by": by, "updated_at": self._fs.SERVER_TIMESTAMP})
 
     def research_runs_on(self, pid, day):
         snap = self._patient(pid).collection("research_usage").document(day).get()

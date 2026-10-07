@@ -23,6 +23,7 @@ from google.genai import types
 from pydantic import BaseModel
 
 from app.agent.memory_edit import MemoryEditError, remove_item, remove_word, restore_version
+from app.agent.memory_update import run_memory_update
 from app.agent.next_class import _models, build_next_plan
 from app.agent.research import personal_terms
 from app.auth import User, require_caregiver
@@ -36,7 +37,10 @@ from app.deps import (
 from app.patient_profile import PatientProfileLoader
 from app.session_prompt import build_session_prompt
 from app.prompt_archive import PromptArchive
-from app.store import ENDED, PLAN_DONE, SessionStore
+from app.schemas import VoiceSettings
+from app.voice_tuning import adjust_after_session, current_settings
+from app.store import ACTIVE, ENDED, MEM_DONE, MEM_SKIPPED, PLAN_DONE, SessionStore
+from app.transcripts import EndReason
 
 router = APIRouter(prefix="/api/caregiver", dependencies=[Depends(require_caregiver)])
 
@@ -51,7 +55,8 @@ class Translations(BaseModel):
 SESSION_FIELDS = ("id", "status", "started_at", "ended_at", "end_reason", "turn_count", "prompt_version",
                   "summary", "topics", "mood", "highlights", "difficulties", "probe_results",
                   "memory_status", "memory_error", "plan_status", "plan_error",
-                  "memory_model", "plan_model")  # which model did the work (09)
+                  "memory_model", "plan_model",  # which model did the work (09)
+                  "voice_used", "voice_decision")  # the settings it ran with, and the automatic decision after it
 
 
 def account(email: str, settings: Settings = Depends(get_settings)) -> str:
@@ -181,6 +186,8 @@ def overview(pid: str = Depends(account), settings: Settings = Depends(get_setti
         "email": pid,
         "games_profile": games_profile,
         "notes": notes,
+        "settings": {**current_settings(store, settings, pid)[0].model_dump(),
+                     "auto_state": (store.get_settings(pid) or {}).get("auto_state") or {}},
         "flags": store.list_flags(pid),
         "memory": {k: memory.get(k) for k in ("memory_prompt", "sections", "focus_next_session",
                                                "sessions_processed", "updated_at", "last_session_id")},
@@ -249,6 +256,16 @@ def save_notes(text: str = Body(..., embed=True, max_length=NOTES_MAX_CHARS), pi
                caregiver: User = Depends(require_caregiver), store: SessionStore = Depends(get_store)) -> dict:
     store.save_notes(pid, text.strip(), caregiver.email)
     print(f"[caregiver] {caregiver.email} saved planner notes for {pid} ({len(text.strip())} chars)", flush=True)
+    return {"ok": True}
+
+
+@router.put("/{email}/settings")
+def save_settings(voice: VoiceSettings = Body(..., embed=True), pid: str = Depends(account),
+                  caregiver: User = Depends(require_caregiver), store: SessionStore = Depends(get_store)) -> dict:
+    """Per-account session settings (09); they apply from the account's next session."""
+    saved = store.get_settings(pid) or {}  # keep the automatic state (streaks, last decision)
+    store.save_settings(pid, {**voice.model_dump(), "auto_state": saved.get("auto_state") or {}}, caregiver.email)
+    print(f"[caregiver] {caregiver.email} set {pid}'s voice settings: {voice.model_dump()}", flush=True)
     return {"ok": True}
 
 
@@ -353,6 +370,49 @@ def translate_export(
         raise HTTPException(status_code=502, detail="Translation came back incomplete")
     print(f"[caregiver] translated an export for {pid}: {len(texts)} texts, model {result.model}", flush=True)
     return {"translations": out.translations, "model": result.model}
+
+
+STUCK_ACTIVE_AFTER = dt.timedelta(minutes=20)  # sessions last ~10-15 min: still "active" = tab closed
+
+
+@router.post("/{email}/sessions/{sid}/process")
+def process_session(
+    sid: str,
+    pid: str = Depends(account),
+    caregiver: User = Depends(require_caregiver),
+    settings: Settings = Depends(get_settings),
+    store: SessionStore = Depends(get_store),
+    llm_client=Depends(get_text_client),
+    profile: PatientProfileLoader = Depends(get_profile_loader),
+    games_reader=Depends(get_games_reader),
+) -> dict:
+    """Process a session now instead of waiting for the hourly sweep: the same steps as the
+    end of a session (memory update, voice decision, next lesson) -- picking up where it
+    stopped: a step that already finished is not run again (e.g. memory done, plan failed ->
+    only the plan). Safe to press twice: the memory update claims the session."""
+    session = store.get_session(pid, sid)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.get("status") == ACTIVE:
+        started = session.get("started_at")
+        if started and dt.datetime.now(dt.timezone.utc) - started < STUCK_ACTIVE_AFTER:
+            raise HTTPException(status_code=409, detail="The session may still be running")
+        store.end_session(pid, sid, EndReason.abandoned)  # its tab was closed without ending
+    bounded = _bounded_generate(settings.memory_end_deadline_s)
+    profile_text = profile.get()
+    memory_status = session.get("memory_status")
+    if memory_status not in (MEM_DONE, MEM_SKIPPED):
+        memory_status = run_memory_update(store, llm_client, settings, pid, sid,
+                                          profile_text=profile_text, generate_fn=bounded)
+    adjust_after_session(store, settings, pid, sid)
+    plan_status = (store.get_session(pid, sid) or {}).get("plan_status")
+    if memory_status == MEM_DONE and plan_status != PLAN_DONE:
+        plan_status = build_next_plan(store, llm_client, settings, pid, sid, profile_text=profile_text,
+                                      generate_fn=bounded, games=games_for(pid, settings, games_reader))
+    after = store.get_session(pid, sid) or {}
+    print(f"[caregiver] {caregiver.email} processed {pid}/{sid}: memory {memory_status}, plan {plan_status}", flush=True)
+    return {"memory_status": memory_status, "plan_status": plan_status,
+            "error": after.get("memory_error") or after.get("plan_error")}
 
 
 @router.post("/{email}/plan/rebuild")

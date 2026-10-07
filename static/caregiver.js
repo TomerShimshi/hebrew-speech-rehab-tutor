@@ -216,6 +216,30 @@ function renderSessions(sessions) {
         promptBox.replaceChildren(p("טעינת הפרומפט נכשלה.", "muted"));
       }
     });
+    // Not processed yet (memory update or next lesson missing/failed, or a tab closed mid-session):
+    // process it now instead of waiting for the hourly sweep.
+    const unprocessed = (s.status === "active" && s.started_at && Date.now() - new Date(s.started_at) > 20 * 60000)
+      || (s.status === "ended" && ["pending", "failed", "processing"].includes(s.memory_status))
+      || (s.memory_status === "done" && ["pending", "failed"].includes(s.plan_status));
+    // Picks up where it stopped: if only the next lesson is missing, only that runs.
+    const onlyPlan = s.memory_status === "done";
+    const processButton = unprocessed ? confirmButton(
+      onlyPlan ? "⚙️ בניית השיעור הבא עכשיו" : "⚙️ עיבוד השיחה עכשיו",
+      onlyPlan ? "הזיכרון כבר עודכן. לבנות עכשיו רק את השיעור הבא?" : "לעבד עכשיו (זיכרון, הגדרות קול ושיעור הבא)?",
+      async (where) => {
+        busy(where, "מעבד את השיחה: זיכרון, הגדרות קול והשיעור הבא. זה עשוי לקחת עד 2–3 דקות");
+        try {
+          const r = await api(acct(`/sessions/${encodeURIComponent(s.id)}/process`), {});
+          await loadAccount();
+          status(r.memory_status === "not_claimed"
+            ? "השיחה כבר בעיבוד (או שעובדה בינתיים). רענן בעוד דקה."
+            : r.memory_status === "failed" || r.plan_status === "failed"
+              ? `העיבוד לא הצליח (המודלים עמוסים?). אפשר לנסות שוב בעוד כמה דקות. ${r.error ? `(${r.error.slice(0, 120)})` : ""}`
+              : "✓ השיחה עובדה: הזיכרון עודכן והשיעור הבא נבנה.");
+        } catch (err) {
+          where.textContent = err.status === 409 ? "נראה שהשיחה עוד פעילה." : "העיבוד נכשל. נסה שוב.";
+        }
+      }) : null;
     const problems = [s.memory_status === "failed" && "עדכון הזיכרון נכשל", s.plan_status === "failed" && "בניית השיעור נכשלה"]
       .filter(Boolean);
     return el("div", { class: "session" },
@@ -234,7 +258,8 @@ function renderSessions(sessions) {
       s.highlights?.length ? p(`הצלחות: ${s.highlights.join(" · ")}`) : null,
       s.difficulties?.length ? p(`קשיים: ${s.difficulties.join(" · ")}`) : null,
       probeChips(s.probe_results),
-      el("div", { class: "cg-actions" }, button, promptButton),
+      voiceLine(s),
+      el("div", { class: "cg-actions" }, button, promptButton, processButton),
       box, promptBox,
     );
   }));
@@ -423,6 +448,82 @@ function renderGames(recs, profile) {
         : null,
     ),
   )));
+}
+
+// ---- the account's voice settings (09): summary at the top, editable in place ------------
+const NOISE_NAME = { 0: "כבוי", 1: "עדין", 2: "בינוני", 3: "חזק" };
+let voiceSaved = null;
+
+// "noise filter 0 -> 1 (2 noise interruptions)" -> Hebrew, for the page
+function changeText(c) {
+  return c.replace(/^silence (\S+)s -> (\S+)s/, "שקט $1 → $2 שניות").replace(/^noise filter (\d) -> (\d)/, "מסנן רעשים $1 → $2")
+    .replace(/\((\d+) cut-offs\)/, "($1 קטיעות)").replace(/\((\d+) noise interruptions\)/, "($1 הפרעות רעש)")
+    .replace(/\(3 sessions without cut-offs\)/, "(3 שיחות בלי קטיעות)")
+    .replace(/\(3 sessions without noise interruptions\)/, "(3 שיחות בלי הפרעות רעש)");
+}
+
+function renderVoice(v) {
+  voiceSaved = v;
+  const last = v.auto_state?.last;
+  const fact = (label, value, auto) => el("span", {}, `${label}: `, el("b", { text: value }),
+                                          el("span", { class: "mode", text: auto ? " (אוטומטי)" : " (קבוע)" }));
+  $("voice-summary").replaceChildren(
+    el("div", { class: "voice-facts" },
+      v.tap_to_talk ? el("span", {}, el("b", { text: "לחיצה לדיבור פעילה" }), el("span", { class: "mode", text: " (השקט והמסנן לא חלים)" }))
+                    : null,
+      fact("שקט לפני שהיא עונה", `${v.silence_ms / 1000} שניות`, v.silence_auto),
+      fact("מסנן רעשים", `${v.noise_level} · ${NOISE_NAME[v.noise_level]}`, v.noise_auto),
+      v.tap_to_talk ? null : el("span", {}, "לחיצה לדיבור: ", el("b", { text: "כבויה" }))),
+    last ? p(`החלטה אוטומטית אחרונה (${when(last.at)}): ${last.changes?.length ? last.changes.map(changeText).join(" · ") : "ללא שינוי"}` +
+             ` · נמדדו ${last.measured?.cut_offs ?? 0} קטיעות, ${last.measured?.noise_interruptions ?? 0} הפרעות רעש`, "muted kv")
+         : p("עדיין אין החלטות אוטומטיות (הן מתחילות אחרי השיחה הבאה).", "muted kv"),
+    v.auto_state?.suggest_tap_to_talk
+      ? p("💡 הפרעות רעש נמשכות גם במסנן החזק ביותר. כדאי לשקול להפעיל \"לחיצה לדיבור\".", "suggest") : null,
+  );
+  fillVoiceForm(v);
+}
+
+function fillVoiceForm(v) {
+  $("silence-mode").value = v.silence_auto ? "auto" : "fixed";
+  $("silence").value = v.silence_ms / 1000;
+  $("silence-value").textContent = $("silence").value;
+  $("noise-mode").value = v.noise_auto ? "auto" : "fixed";
+  $("noise-level").value = String(v.noise_level);
+  $("tap-to-talk").checked = !!v.tap_to_talk;
+  $("voice-status").textContent = "";
+}
+
+$("voice-edit").addEventListener("click", () => { $("voice-form").hidden = !$("voice-form").hidden; });
+$("voice-cancel").addEventListener("click", () => { fillVoiceForm(voiceSaved); $("voice-form").hidden = true; });
+$("silence").addEventListener("input", () => { $("silence-value").textContent = $("silence").value; });
+$("voice-save").addEventListener("click", async () => {
+  $("voice-save").disabled = true;
+  try {
+    await api(acct("/settings"), { voice: {
+      silence_ms: Math.round(Number($("silence").value) * 1000), silence_auto: $("silence-mode").value === "auto",
+      noise_level: Number($("noise-level").value), noise_auto: $("noise-mode").value === "auto",
+      tap_to_talk: $("tap-to-talk").checked } }, "PUT");
+    await loadAccount();
+    $("voice-form").hidden = true;
+    $("voice-status").textContent = "";
+    $("voice-summary").prepend(p("✓ נשמר. יחול מהשיחה הבאה.", "kv"));
+  } catch {
+    $("voice-status").textContent = "השמירה נכשלה.";
+  } finally {
+    $("voice-save").disabled = false;
+  }
+});
+
+// One line per session: what it ran with, what was measured, what changed after it.
+function voiceLine(s) {
+  const u = s.voice_used, d = s.voice_decision;
+  if (!u && !d) return null;
+  const parts = [];
+  if (u) parts.push(u.tap_to_talk ? "לחיצה לדיבור" : `שקט ${u.silence_ms / 1000} ש׳ · מסנן ${u.noise_level}`);
+  if (d?.measured) parts.push(`קטיעות ${d.measured.cut_offs} · הפרעות רעש ${d.measured.noise_interruptions}`);
+  if (d?.changes?.length) parts.push(`→ ${d.changes.map(changeText).join(" · ")}`);
+  else if (d?.measured) parts.push("→ ללא שינוי");
+  return el("p", { class: "voice-line", text: `🎚️ ${parts.join(" · ")}` });
 }
 
 function renderNotes(notes) {
@@ -652,6 +753,7 @@ async function loadAccount() {
     renderResearch(ov.research_notes);
     renderGames(ov.recommendations, ov.games_profile);
     renderNotes(ov.notes);
+    renderVoice(ov.settings);
     $("history").replaceChildren(p("נטען בפתיחה…", "muted"));
     if ($("sec-history").open) loadHistory();
     $("next-prompt").replaceChildren(p("נטען בפתיחה…", "muted"));
@@ -684,6 +786,7 @@ $("account").addEventListener("change", () => {
   validateReset();
   $("reset-status").textContent = "";
   $("rebuild-status").textContent = "";
+  $("voice-form").hidden = true;
   $("memory-status").textContent = "";
   $("words-status").textContent = "";
   loadAccount();

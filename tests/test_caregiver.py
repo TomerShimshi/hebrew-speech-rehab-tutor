@@ -374,3 +374,85 @@ def test_progress_route_is_per_account_and_caregiver_only(env):
     assert data["points"][0]["untreated"] == 0 and data["words"]["total"] == 1
     assert get(env, f"/api/caregiver/{TOMER}/progress").json()["points"] == []
     assert get(env, f"/api/caregiver/{DAD}/progress", token="tok-dad").status_code == 403
+
+
+
+# ---- 09: per-account voice settings -------------------------------------------------------------------
+
+def _vad():
+    from conftest import FakeAuthTokens
+    return FakeAuthTokens.last_config.live_connect_constraints.config.realtime_input_config.automatic_activity_detection
+
+
+def test_voice_settings_reach_the_session_token(env):
+    put = lambda body, token="tok-tomer": env.client.put(f"/api/caregiver/{DAD}/settings", headers=auth(token), json=body)  # noqa: E731
+    # defaults
+    assert env.client.post("/api/session/start", headers=auth("tok-dad")).json()["voice"] == {"tap_to_talk": False, "noise_level": 0}
+    assert _vad().silence_duration_ms == 3000 and not _vad().disabled
+    # a longer silence for Dad
+    assert put({"voice": {"silence_ms": 5500, "tap_to_talk": False}}).status_code == 200
+    env.client.post("/api/session/start", headers=auth("tok-dad"))
+    assert _vad().silence_duration_ms == 5500
+    assert get(env, f"/api/caregiver/{DAD}/overview").json()["settings"]["silence_ms"] == 5500
+    # tap-to-talk: automatic detection off, and the page is told to show the button
+    put({"voice": {"silence_ms": 5500, "tap_to_talk": True}})
+    assert env.client.post("/api/session/start", headers=auth("tok-dad")).json()["voice"] == {"tap_to_talk": True, "noise_level": 0}
+    assert _vad().disabled is True
+    # per account: Tomer's sessions keep the defaults
+    env.client.post("/api/session/start", headers=auth("tok-tomer"))
+    assert _vad().silence_duration_ms == 3000 and not _vad().disabled
+    # validated, and caregivers only
+    assert put({"voice": {"silence_ms": 500, "tap_to_talk": False}}).status_code == 422
+    assert put({"voice": {"silence_ms": 9000, "tap_to_talk": False}}).status_code == 422
+    assert put({"voice": {"silence_ms": 4000, "tap_to_talk": False}}, token="tok-dad").status_code == 403
+
+
+
+# ---- process a session now (instead of waiting for the hourly sweep) ------------------------------
+
+def test_process_an_unprocessed_session_now(env):
+    from fake_llm import FakeClient, server_error, text
+    from test_memory_wiring import consolidated, plan_reply, talk
+    sid = talk(env)
+    env.llm = FakeClient(*[server_error() for _ in range(12)])  # models down at the end of the session
+    env.client.post(f"/api/session/{sid}/end", headers=auth("tok-dad"), json={"reason": "end_button"})
+    assert env.store.get_session(DAD, sid)["memory_status"] == "failed"
+    env.llm = FakeClient(text("done"), consolidated("He talked about his grandchildren."), plan_reply())
+    body = post(env, f"/api/caregiver/{DAD}/sessions/{sid}/process").json()
+    assert (body["memory_status"], body["plan_status"]) == ("done", "done")
+    assert env.store.get_memory(DAD)["memory_prompt"] == "He talked about his grandchildren."
+    assert env.store.get_session(DAD, sid)["voice_decision"] is not None
+    # done now: pressing it again changes nothing and calls no model
+    env.llm = FakeClient()
+    assert post(env, f"/api/caregiver/{DAD}/sessions/{sid}/process").json()["memory_status"] == "done"
+
+
+def test_process_refuses_a_session_that_may_still_be_running_but_ends_a_stuck_one(env):
+    import datetime as dt
+    from fake_llm import FakeClient, text
+    from test_memory_wiring import consolidated, plan_reply, talk
+    sid = talk(env)
+    assert post(env, f"/api/caregiver/{DAD}/sessions/{sid}/process").status_code == 409  # started just now
+    env.store.update_session(DAD, sid, {"started_at": dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=45)})
+    env.llm = FakeClient(text("done"), consolidated("m"), plan_reply())
+    assert post(env, f"/api/caregiver/{DAD}/sessions/{sid}/process").json()["memory_status"] == "done"
+    assert env.store.get_session(DAD, sid)["end_reason"] == "abandoned"
+    assert post(env, f"/api/caregiver/{DAD}/sessions/{sid}/process", token="tok-dad").status_code == 403
+    assert post(env, f"/api/caregiver/{TOMER}/sessions/{sid}/process").status_code == 404
+
+
+
+def test_process_picks_up_where_it_stopped_memory_done_plan_failed(env):
+    from fake_llm import FakeClient, text
+    from test_memory_wiring import consolidated, plan_reply, talk
+    sid = talk(env)
+    env.llm = FakeClient(text("done"), consolidated("Memory from the session."), text("{}"))  # plan reply invalid
+    env.client.post(f"/api/session/{sid}/end", headers=auth("tok-dad"), json={"reason": "end_button"})
+    session = env.store.get_session(DAD, sid)
+    assert (session["memory_status"], session["plan_status"]) == ("done", "failed")
+    memory_before = env.store.get_memory(DAD)
+    env.llm = FakeClient(plan_reply())  # ONE reply: a memory-update call would run out of script
+    body = post(env, f"/api/caregiver/{DAD}/sessions/{sid}/process").json()
+    assert (body["memory_status"], body["plan_status"]) == ("done", "done")
+    assert len(env.llm.requests) == 1  # only the plan builder ran
+    assert env.store.get_memory(DAD) == memory_before  # the memory wasn't updated twice
