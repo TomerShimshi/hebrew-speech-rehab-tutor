@@ -445,6 +445,85 @@ $("notes-save").addEventListener("click", async () => {
   }
 });
 
+// ---- progress graphs (09): plain SVG, drawn here, no libraries ----------------------------
+const SVG = "http://www.w3.org/2000/svg";
+const COLORS = { treated: "#2f6fdf", untreated: "#e08a1e", own: "#38a169", hint: "#ecc94b", not_yet: "#e53e3e" };
+function svg(tag, attrs = {}, ...children) {
+  const node = document.createElementNS(SVG, tag);
+  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+  for (const c of children) node.append(c instanceof Node ? c : document.createTextNode(String(c)));
+  return node;
+}
+const shortDate = (iso) => new Date(iso).toLocaleDateString("he-IL", { timeZone: "Asia/Jerusalem", day: "numeric", month: "numeric" });
+
+// A line chart: x = sessions (oldest left), y = 0..yMax; series = [{key, color, values}]
+function lineChart(points, series, { yMax = 100, yTicks = [0, 50, 100], yLabel = (v) => `${v}%`, height = 180 } = {}) {
+  const W = 640, H = height, L = 40, R = 12, T = 10, B = 26;
+  const x = (i) => L + (points.length === 1 ? (W - L - R) / 2 : (i * (W - L - R)) / (points.length - 1));
+  const y = (v) => T + (H - T - B) * (1 - v / yMax);
+  const chart = svg("svg", { viewBox: `0 0 ${W} ${H}`, class: "chart", role: "img" });
+  for (const t of yTicks) {
+    chart.append(svg("line", { x1: L, x2: W - R, y1: y(t), y2: y(t), stroke: "#e3e7f0" }),
+                 svg("text", { x: L - 6, y: y(t) + 4, "text-anchor": "end" }, yLabel(t)));
+  }
+  const step = Math.max(1, Math.ceil(points.length / 8)); // at most ~8 date labels
+  points.forEach((pt, i) => {
+    if (i % step === 0 || i === points.length - 1) chart.append(svg("text", { x: x(i), y: H - 8, "text-anchor": "middle" }, shortDate(pt.date)));
+  });
+  for (const s of series) {
+    const pts = points.map((pt, i) => [i, pt[s.key]]).filter(([, v]) => v !== null && v !== undefined);
+    if (pts.length > 1) {
+      chart.append(svg("polyline", { points: pts.map(([i, v]) => `${x(i)},${y(v)}`).join(" "), fill: "none",
+                                     stroke: s.color, "stroke-width": 2, "stroke-linejoin": "round" }));
+    }
+    for (const [i, v] of pts) {
+      chart.append(svg("circle", { cx: x(i), cy: y(v), r: 4, fill: s.color },
+        svg("title", {}, `${shortDate(points[i].date)}: ${yLabel(v)}`)));
+    }
+  }
+  return chart;
+}
+
+function legend(items) {
+  return el("div", { class: "legend" }, items.map(([color, text]) => el("span", {}, el("i", { style: `background:${color}` }), text)));
+}
+
+function renderProgress(data) {
+  const box = $("progress");
+  const withChecks = data.points.filter((pt) => pt.items);
+  const withMood = data.points.filter((pt) => pt.mood);
+  const out = [];
+  if (withChecks.length) {
+    const c = data.compare;
+    const fmt = (v) => (v === null || v === undefined ? "–" : `${v}%`);
+    out.push(el("h3", { text: "בדיקת השליפה: כמה הוא שלף לבד, בלי רמז" }),
+      legend([[COLORS.treated, "מילים ושמות שתורגלו"], [COLORS.untreated, "מילים חדשות (להשוואה)"]]),
+      lineChart(withChecks, [{ key: "treated", color: COLORS.treated }, { key: "untreated", color: COLORS.untreated }]),
+      c.before.sessions
+        ? p(`ממוצע ${c.recent.sessions} השיחות האחרונות: תורגלו ${fmt(c.recent.treated)}, חדשות ${fmt(c.recent.untreated)} · ` +
+            `${c.before.sessions} השיחות שלפני כן: תורגלו ${fmt(c.before.treated)}, חדשות ${fmt(c.before.untreated)}`, "kv")
+        : null,
+      p("בכל שיחה יש רק 3–5 פריטי בדיקה, ולכן כל נקודה קופצת. מה שחשוב הוא המגמה לאורך זמן. " +
+        "אם \"תורגלו\" עולה יותר מ\"חדשות\", התרגול עצמו עוזר; אם שתיהן עולות, השליפה משתפרת בכלל.", "muted kv"));
+  }
+  if (withMood.length) {
+    out.push(el("h3", { text: "מצב רוח" }),
+      lineChart(withMood, [{ key: "mood", color: COLORS.own }],
+                { yMax: 3, yTicks: [1, 2, 3], yLabel: (v) => ({ 1: "ירוד", 2: "בסדר", 3: "טוב" }[v] || ""), height: 130 }));
+  }
+  const w = data.words;
+  if (w.total) {
+    const pct = (n) => `${(100 * n) / w.total}%`;
+    out.push(el("h3", { text: `בנק המילים: ${w.total} מילים ושמות` }),
+      el("div", { class: "wordbar", role: "img", "aria-label": `${w.own} לבד, ${w.hint} עם רמז, ${w.not_yet} עוד לא` },
+        el("span", { style: `width:${pct(w.own)};background:${COLORS.own}` }),
+        el("span", { style: `width:${pct(w.hint)};background:${COLORS.hint}` }),
+        el("span", { style: `width:${pct(w.not_yet)};background:${COLORS.not_yet}` })),
+      legend([[COLORS.own, `לבד בפעם האחרונה: ${w.own}`], [COLORS.hint, `עם רמז: ${w.hint}`], [COLORS.not_yet, `עוד לא: ${w.not_yet}`]]));
+  }
+  box.replaceChildren(...(out.length ? out : [p("עדיין אין מספיק נתונים לגרפים. הם יופיעו אחרי השיחות הראשונות.", "muted")]));
+}
+
 // ---- export for the therapist (09): a print view built from the data already loaded ------
 function probeStats(results) {
   const by = (kind) => (results || []).filter((r) => r.kind === kind);
@@ -561,7 +640,8 @@ window.addEventListener("afterprint", () => document.body.classList.remove("prin
 async function loadAccount() {
   status("טוען…");
   try {
-    const [ov, ss] = await Promise.all([api(acct("/overview")), api(acct("/sessions"))]);
+    const [ov, ss, pr] = await Promise.all([api(acct("/overview")), api(acct("/sessions")), api(acct("/progress"))]);
+    renderProgress(pr);
     lastOverview = ov;
     lastSessions = ss.sessions;
     renderFlags(ov.flags);

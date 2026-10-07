@@ -336,3 +336,41 @@ def test_export_translation_failures(env):
     assert post(env, path, {"texts": ["one"]}).status_code == 503
     assert post(env, path, {"texts": ["x"] * 401}).status_code == 413
     assert post(env, path, {"texts": ["one"]}, token="tok-dad").status_code == 403
+
+
+
+# ---- 09: progress graphs (the numbers; drawing is the browser's job) ------------------------------
+
+def test_progress_numbers():
+    import datetime as dt
+    from app.caregiver_api import progress_series
+
+    def session(day, results, mood="ok"):
+        return {"started_at": dt.datetime(2026, 10, day), "mood": mood,
+                "probe_results": [{"word": w, "kind": k, "result": r} for w, k, r in results]}
+
+    sessions = [  # newest first, as stored
+        session(12, [("a", "treated", "uncued"), ("b", "treated", "uncued"), ("c", "untreated", "failed")], "good"),
+        session(11, [("a", "treated", "cued"), ("b", "treated", "uncued"), ("c", "untreated", "uncued")]),
+        session(10, [], "low"),  # no check-ins, but a mood
+        {"started_at": dt.datetime(2026, 10, 9)},  # nothing to show: skipped
+    ] + [session(d, [("x", "treated", "failed"), ("y", "untreated", "failed")]) for d in (8, 7, 6, 5, 4)]
+    data = progress_series(sessions, {"a": {"last_result": "uncued"}, "b": {"last_result": "cued"},
+                                      "c": {"last_result": "failed"}, "d": {"last_result": "uncued"}})
+    pts = data["points"]
+    assert [pt["date"].day for pt in pts] == [4, 5, 6, 7, 8, 10, 11, 12]  # oldest first, empty one skipped
+    assert (pts[-1]["treated"], pts[-1]["untreated"], pts[-1]["mood"]) == (100, 0, 3)
+    assert (pts[-2]["treated"], pts[-2]["untreated"]) == (50, 100)
+    assert pts[-3] == {"date": dt.datetime(2026, 10, 10), "treated": None, "untreated": None, "items": 0, "mood": 1}
+    # last 5 sessions with check-ins (12, 11, 8, 7, 6) vs the ones before (5, 4)
+    assert data["compare"]["recent"] == {"treated": 30, "untreated": 20, "sessions": 5}
+    assert data["compare"]["before"] == {"treated": 0, "untreated": 0, "sessions": 2}
+    assert data["words"] == {"total": 4, "own": 2, "hint": 1, "not_yet": 1}
+
+
+def test_progress_route_is_per_account_and_caregiver_only(env):
+    seed(env, DAD)
+    data = get(env, f"/api/caregiver/{DAD}/progress").json()
+    assert data["points"][0]["untreated"] == 0 and data["words"]["total"] == 1
+    assert get(env, f"/api/caregiver/{TOMER}/progress").json()["points"] == []
+    assert get(env, f"/api/caregiver/{DAD}/progress", token="tok-dad").status_code == 403

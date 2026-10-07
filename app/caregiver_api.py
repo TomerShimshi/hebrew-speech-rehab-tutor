@@ -107,6 +107,55 @@ def github_issue_url(rec: dict, repo: str, terms: set[str]) -> str:
                                                                    "body": body})
 
 
+MOOD_SCORE = {"low": 1, "ok": 2, "good": 3}
+
+
+def _own_share(results: list[dict], kind: str) -> float | None:
+    """Share of check-in items of this kind he answered on his own (no hint), 0-100."""
+    items = [r for r in results if r.get("kind") == kind]
+    if not items:
+        return None
+    return round(100 * sum(r.get("result") == "uncued" for r in items) / len(items))
+
+
+def _mean(values: list[float]) -> float | None:
+    values = [v for v in values if v is not None]
+    return round(sum(values) / len(values)) if values else None
+
+
+def progress_series(sessions: list[dict], word_bank: dict) -> dict:
+    """Numbers for the caregiver page's graphs (09). `sessions` newest first, as stored."""
+    points = []
+    for s in reversed(sessions):  # oldest first, for the x-axis
+        results = s.get("probe_results") or []
+        mood = MOOD_SCORE.get(s.get("mood") or "")
+        if not results and mood is None:
+            continue
+        points.append({"date": s.get("started_at"), "treated": _own_share(results, "treated"),
+                       "untreated": _own_share(results, "untreated"), "items": len(results), "mood": mood})
+    with_checkins = [p for p in points if p["items"]]
+    recent, before = with_checkins[-5:], with_checkins[-10:-5]
+    words = list((word_bank or {}).values())
+    return {
+        "points": points,
+        "compare": {  # last 5 sessions with check-ins vs the 5 before them
+            "recent": {"treated": _mean([p["treated"] for p in recent]), "untreated": _mean([p["untreated"] for p in recent]),
+                       "sessions": len(recent)},
+            "before": {"treated": _mean([p["treated"] for p in before]), "untreated": _mean([p["untreated"] for p in before]),
+                       "sessions": len(before)},
+        },
+        "words": {"total": len(words),
+                  "own": sum((w or {}).get("last_result") == "uncued" for w in words),
+                  "hint": sum((w or {}).get("last_result") == "cued" for w in words),
+                  "not_yet": sum((w or {}).get("last_result") == "failed" for w in words)},
+    }
+
+
+@router.get("/{email}/progress")
+def progress(pid: str = Depends(account), store: SessionStore = Depends(get_store)) -> dict:
+    return progress_series(store.list_sessions(pid, 30), (store.get_memory(pid) or {}).get("word_bank") or {})
+
+
 @router.get("/accounts")
 def accounts(caregiver: User = Depends(require_caregiver), settings: Settings = Depends(get_settings),
              store: SessionStore = Depends(get_store)) -> dict:
