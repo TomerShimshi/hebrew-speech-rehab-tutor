@@ -85,6 +85,7 @@ table.words th { color: var(--muted); font-weight: normal; }
 .voice-facts { display: flex; flex-wrap: wrap; gap: .4rem 1.4rem; margin: .5rem 0 .2rem; font-size: 1.05rem; }
 .voice-facts .mode { color: var(--muted); font-size: .9rem; }
 .suggest { background: #fff7e6; border: 1px solid #f6c768; border-radius: .6rem; padding: .4rem .7rem; margin: .4rem 0; }
+.player { height: 2.2rem; max-width: 100%; vertical-align: middle; }
 .session .voice-line { font-size: .9rem; color: var(--muted); margin: .2rem 0; }
 #sec-notes textarea { width: 100%; font: inherit; padding: .5rem .7rem; border: 1px solid #cfd6e3; border-radius: .6rem; resize: vertical; }
 .mem-item { display: flex; gap: .4rem; align-items: baseline; }

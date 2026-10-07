@@ -110,6 +110,7 @@ class VoiceSettings(BaseModel):
     noise_level: int = Field(default=0, ge=0, le=3)  # browser noise filter while she speaks (0 = off)
     noise_auto: bool = True
     tap_to_talk: bool = False  # he taps to start / end his turn instead of automatic detection
+    record_audio: bool = True  # record the session (both voices) for the caregiver page (09)
 
 
 # ---- research findings (sub-plan 07) -------------------------------------------------------

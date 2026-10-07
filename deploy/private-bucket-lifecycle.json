@@ -1,5 +1,6 @@
 {
   "rule": [
-    {"action": {"type": "Delete"}, "condition": {"age": 30, "matchesPrefix": ["debug/"]}}
+    {"action": {"type": "Delete"}, "condition": {"age": 30, "matchesPrefix": ["debug/"]}},
+    {"action": {"type": "Delete"}, "condition": {"age": 90, "matchesPrefix": ["audio/"]}}
   ]
 }

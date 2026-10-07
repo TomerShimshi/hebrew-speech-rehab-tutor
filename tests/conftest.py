@@ -12,8 +12,9 @@ from fastapi.testclient import TestClient
 
 from app.auth import get_oidc_verifier, get_token_verifier
 from app.config import Settings, get_settings
+from app.audio_store import InMemoryAudioStore
 from app.main import (
-    app, get_games_reader, get_genai_client, get_profile_loader, get_prompt_archive, get_store,
+    app, get_audio_store, get_games_reader, get_genai_client, get_profile_loader, get_prompt_archive, get_store,
     get_text_client, get_token_limiter,
 )
 from app.prompt_archive import PromptArchive
@@ -85,7 +86,7 @@ def env(tmp_path, monkeypatch):
     # archived: uri -> text the prompt archive "uploaded"
     # games_reader: a fake Upstash (None = games not configured); tests NEVER reach the real one
     state = SimpleNamespace(store=InMemorySessionStore(), limit=5, key=SECRET, llm=FakeClient(), archived={},
-                            games_reader=None)
+                            games_reader=None, audio=InMemoryAudioStore())
 
     def configure(**overrides):
         fields = {
@@ -109,6 +110,7 @@ def env(tmp_path, monkeypatch):
         app.dependency_overrides[get_oidc_verifier] = lambda: fake_oidc_verifier
         app.dependency_overrides[get_text_client] = lambda: state.llm
         app.dependency_overrides[get_games_reader] = lambda: state.games_reader
+        app.dependency_overrides[get_audio_store] = lambda: state.audio  # never the real bucket
         app.dependency_overrides[get_prompt_archive] = lambda: PromptArchive(
             settings.prompt_archive_uri, upload=lambda uri, text: state.archived.__setitem__(uri, text))
         if state.key:

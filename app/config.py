@@ -49,6 +49,7 @@ class Settings(BaseSettings):
 
     # Debug archive of each session's full tutor prompt (private bucket); empty = off.
     prompt_archive_uri: str = ""  # e.g. gs://heb-practice-private/debug/prompts
+    audio_uri_prefix: str = ""  # session recordings (09), e.g. gs://heb-practice-private/audio; empty = off
 
     # Hourly memory sweep (Cloud Scheduler -> POST /internal/memory/sweep with an OIDC token).
     sweeper_sa_email: str = ""  # the only caller allowed

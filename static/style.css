@@ -38,6 +38,7 @@ h1 { font-size: clamp(2.2rem, 7vw, 3.5rem); margin: 0; }
 .secondary.active { color: #fff; background: var(--accent); }
 .end { color: #fff; background: var(--end); }
 .links { display: flex; gap: 1.2rem; justify-content: center; }
+.recording-note { margin: 0; font-size: 1.05rem; color: var(--muted); }
 /* "Made by" credit: small and quiet, at the bottom of the screen */
 .credit { margin: 0; font-size: .85rem; color: #8a93a3; letter-spacing: .02em; }
 /* Game homework on the end screen (06): opens the Simon game on his profile */

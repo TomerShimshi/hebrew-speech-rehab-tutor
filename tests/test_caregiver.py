@@ -387,7 +387,7 @@ def _vad():
 def test_voice_settings_reach_the_session_token(env):
     put = lambda body, token="tok-tomer": env.client.put(f"/api/caregiver/{DAD}/settings", headers=auth(token), json=body)  # noqa: E731
     # defaults
-    assert env.client.post("/api/session/start", headers=auth("tok-dad")).json()["voice"] == {"tap_to_talk": False, "noise_level": 0}
+    assert env.client.post("/api/session/start", headers=auth("tok-dad")).json()["voice"] == {"tap_to_talk": False, "noise_level": 0, "record_audio": True}
     assert _vad().silence_duration_ms == 3000 and not _vad().disabled
     # a longer silence for Dad
     assert put({"voice": {"silence_ms": 5500, "tap_to_talk": False}}).status_code == 200
@@ -396,7 +396,7 @@ def test_voice_settings_reach_the_session_token(env):
     assert get(env, f"/api/caregiver/{DAD}/overview").json()["settings"]["silence_ms"] == 5500
     # tap-to-talk: automatic detection off, and the page is told to show the button
     put({"voice": {"silence_ms": 5500, "tap_to_talk": True}})
-    assert env.client.post("/api/session/start", headers=auth("tok-dad")).json()["voice"] == {"tap_to_talk": True, "noise_level": 0}
+    assert env.client.post("/api/session/start", headers=auth("tok-dad")).json()["voice"] == {"tap_to_talk": True, "noise_level": 0, "record_audio": True}
     assert _vad().disabled is True
     # per account: Tomer's sessions keep the defaults
     env.client.post("/api/session/start", headers=auth("tok-tomer"))

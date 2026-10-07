@@ -13,6 +13,7 @@ from app.config import Settings, get_settings
 from app.games import UpstashReader, games_snapshot, profile_for
 from app.llm import generate, text_client
 from app.patient_profile import PatientProfileLoader
+from app.audio_store import GcsAudioStore
 from app.prompt_archive import PromptArchive
 from app.store import FirestoreSessionStore, SessionStore
 
@@ -25,6 +26,11 @@ def get_store() -> SessionStore:
 @lru_cache
 def get_prompt_archive() -> PromptArchive:
     return PromptArchive(get_settings().prompt_archive_uri)
+
+
+@lru_cache
+def get_audio_store():
+    return GcsAudioStore(get_settings().audio_uri_prefix)
 
 
 @lru_cache

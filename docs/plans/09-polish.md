@@ -49,6 +49,7 @@ Finishing touches that make the app better for Dad and for the people helping hi
    - **IAM:** the app's service account needs read access to `audio/` in the private bucket. Today it can only create objects there.
 
 ## Not chosen (kept for later)
+- **The target word on screen**: tried and dropped (see task 7).
 - **Mood check-in** before each session (the memory update already estimates mood from the conversation).
 
 ## Tasks
@@ -58,15 +59,20 @@ Finishing touches that make the app better for Dad and for the people helping hi
 4. [x] **README update** (Tomer's request): what the app is, how it's built (architecture, the three agent calls, research, caregiver page), how to run it locally, deploy and set up GCP, the manual steps, costs and privacy, and links to the plan docs. No secrets or emails.
 4.5. [x] **Hebrew translation of the export** (Tomer's request): pressing export asks (an inline window, "לתרגם את הסיכום לעברית?") yes / no. Yes sends the export's English texts to one model call (`prompts/translate_export.yaml`: translate only, keep his Hebrew words and names, glossary: the tutor = "המטפלת" (Tomer's choice), feminine; the patient = "המטופל"), shows the progress dots, then prints in Hebrew. On any failure it prints in English and says so.
 5. [x] Progress graphs → deploy. (`GET /{email}/progress`: the numbers are computed and tested on the server, drawn as SVG on the page.)
-6. [~] Voice settings, automatic (silence + noise filter, measured per session; manual override; tap-to-talk as a family setting; every decision recorded on the session and logged) → deploy → sessions on Tomer's account.
-7. [ ] Target word on screen → deploy → a session.
-8. [ ] Audio recordings (after Tomer's choice on telling Dad) → deploy → a session, then play it on the caregiver page.
-9. [ ] Commit and push (per item or together, when Tomer says).
+6. [x] Voice settings, automatic (silence + noise filter, measured per session; manual override; tap-to-talk as a family setting; every decision recorded on the session and logged) → deploy → sessions on Tomer's account.
+7. [-] ~~Target word on screen~~: **dropped** (Tomer, 7.10.26). It was built and tried in a session, but it looked bad and disrupted the flow of the conversation. The code was removed (never committed).
+8. [x] Audio recordings → deployed; Tomer recorded a session and played it back (7.10.26).
+   - Browser: both voices mixed in the playback audio context (his mic, silent while muted, + her speech) → `MediaRecorder` (Opus/WebM at 24 kbps; MP4 on Safari). The recording is finished before the audio shuts down, then uploaded once (`POST /api/session/{id}/audio`, ≤ 15 MB, the account's own session, only while recording is on).
+   - Storage: `gs://heb-practice-private/audio/<email>/<YYYY-MM-DD_HH-MM>_<session id start>.<ext>` (the session's start in Israel time, Tomer's request; e.g. `2026-10-07_10-37_t9OAQMT1.webm`), created once (the app can't overwrite or delete); lifecycle rule: deleted after 90 days (applied 7.10.26).
+   - Caregiver page: "🔊 הקלטה" per session (fetched with sign-in, played in the page); the on/off switch and the storage used in the settings card. His start screen: "🎙️ השיחות נשמרות כדי לעקוב אחרי ההתקדמות" while recording is on.
+   - The player keeps the browser's download option (Tomer: he is the only caregiver and has bucket access anyway).
+   - Known limit: "delete everything" (reset) doesn't delete recordings from the bucket (create-only access); they expire after 90 days.
+9. [x] Commit and push (per item or together, when Tomer says).
 
 ## Notes from building it
-- **Step 6 is built and deployed; Tomer still has to try it in sessions** ([~] above):
-  - tap-to-talk in a real session (does she react to the "quiet for a while" / "wrap up" notes with automatic detection off?)
-  - the noise-filter thresholds (RMS 0.015 / 0.03 / 0.05 per level, 0.3 s hold) with a TV on and `?debug=1`
+- **Step 6 was tried in real sessions:**
+  - ✓ tap-to-talk works in a real session (Tomer, 7.10.26), and she still checks on him when he stays quiet (the silence note works with automatic detection off)
+  - ✓ the noise filter at level 2 with background noise (Tomer, 7.10.26): the noise no longer interrupted her, and he could still interrupt her by speaking normally. The thresholds (RMS 0.015 / 0.03 / 0.05 per level, 0.3 s hold) stay as they are.
 - **The caregiver page shows the account's voice settings at the top** (Tomer's request): each value, automatic or fixed, the last automatic decision with its reason, and the tap-to-talk suggestion, editable in place. A manual save keeps the automatic history (streaks, last decision).
 - **The tutor is "המטפלת" everywhere:** the caregiver page, his captions and the image description (Tomer's choice).
 - **A failed memory update on 7.10.26 exposed a retry bug** (`app/llm.py`). `3.8-flash` was overloaded (504 after hanging ~90 s, then 503). Retrying it 3× per call spent the 5-minute budget, so the working fallback (`flash-lite`) was never tried. Fixed in two steps:
@@ -78,9 +84,9 @@ Finishing touches that make the app better for Dad and for the people helping hi
 - **Logs:** Cloud console → Logging → Logs Explorer, `resource.labels.service_name="hebrew-tutor"`. Useful filters: `textPayload:"[llm]"`, `textPayload:"[memory]"`, `jsonPayload.event="voice_adjust"`. Kept 30 days.
 
 ## Done when
-- [ ] Each chosen item works on the tablet / the caregiver page.
-- [ ] `pytest` passes (tests for every API route and setting; the graphs' data, not their drawing).
-- [ ] Recordings play only for caregivers, and older ones are deleted after 90 days (lifecycle rule).
+- [x] Each chosen item works on the tablet / the caregiver page (the on-screen target word was dropped).
+- [x] `pytest` passes (tests for every API route and setting; the graphs' data, not their drawing).
+- [x] Recordings play only for caregivers, and older ones are deleted after 90 days (lifecycle rule).
 
 ## Commit
 Per item or together, e.g. `Sub-plan 09: progress graphs on the caregiver page`

@@ -259,7 +259,7 @@ function renderSessions(sessions) {
       s.difficulties?.length ? p(`קשיים: ${s.difficulties.join(" · ")}`) : null,
       probeChips(s.probe_results),
       voiceLine(s),
-      el("div", { class: "cg-actions" }, button, promptButton, processButton),
+      el("div", { class: "cg-actions" }, button, promptButton, recordingButton(s), processButton),
       box, promptBox,
     );
   }));
@@ -453,6 +453,7 @@ function renderGames(recs, profile) {
 // ---- the account's voice settings (09): summary at the top, editable in place ------------
 const NOISE_NAME = { 0: "כבוי", 1: "עדין", 2: "בינוני", 3: "חזק" };
 let voiceSaved = null;
+let audioUsage = ""; // "34 קבצים, 68MB" -- this account's stored recordings
 
 // "noise filter 0 -> 1 (2 noise interruptions)" -> Hebrew, for the page
 function changeText(c) {
@@ -473,7 +474,9 @@ function renderVoice(v) {
                     : null,
       fact("שקט לפני שהיא עונה", `${v.silence_ms / 1000} שניות`, v.silence_auto),
       fact("מסנן רעשים", `${v.noise_level} · ${NOISE_NAME[v.noise_level]}`, v.noise_auto),
-      v.tap_to_talk ? null : el("span", {}, "לחיצה לדיבור: ", el("b", { text: "כבויה" }))),
+      v.tap_to_talk ? null : el("span", {}, "לחיצה לדיבור: ", el("b", { text: "כבויה" })),
+      el("span", {}, "הקלטה: ", el("b", { text: v.record_audio === false ? "כבויה" : "פועלת" }),
+         audioUsage ? el("span", { class: "mode", text: ` (${audioUsage})` }) : null)),
     last ? p(`החלטה אוטומטית אחרונה (${when(last.at)}): ${last.changes?.length ? last.changes.map(changeText).join(" · ") : "ללא שינוי"}` +
              ` · נמדדו ${last.measured?.cut_offs ?? 0} קטיעות, ${last.measured?.noise_interruptions ?? 0} הפרעות רעש`, "muted kv")
          : p("עדיין אין החלטות אוטומטיות (הן מתחילות אחרי השיחה הבאה).", "muted kv"),
@@ -490,6 +493,7 @@ function fillVoiceForm(v) {
   $("noise-mode").value = v.noise_auto ? "auto" : "fixed";
   $("noise-level").value = String(v.noise_level);
   $("tap-to-talk").checked = !!v.tap_to_talk;
+  $("record-audio").checked = v.record_audio !== false;
   $("voice-status").textContent = "";
 }
 
@@ -502,7 +506,7 @@ $("voice-save").addEventListener("click", async () => {
     await api(acct("/settings"), { voice: {
       silence_ms: Math.round(Number($("silence").value) * 1000), silence_auto: $("silence-mode").value === "auto",
       noise_level: Number($("noise-level").value), noise_auto: $("noise-mode").value === "auto",
-      tap_to_talk: $("tap-to-talk").checked } }, "PUT");
+      tap_to_talk: $("tap-to-talk").checked, record_audio: $("record-audio").checked } }, "PUT");
     await loadAccount();
     $("voice-form").hidden = true;
     $("voice-status").textContent = "";
@@ -513,6 +517,30 @@ $("voice-save").addEventListener("click", async () => {
     $("voice-save").disabled = false;
   }
 });
+
+// The session's recording (09): fetched with sign-in, then played here. Caregivers only.
+function recordingButton(s) {
+  if (!s.audio_bytes) return null;
+  const wrap = el("span", {});
+  const button = el("button", { class: "small", type: "button",
+                                text: `🔊 הקלטה (${Math.max(1, Math.round(s.audio_bytes / 1024))}KB)` });
+  button.addEventListener("click", async () => {
+    busy(wrap, "טוען את ההקלטה");
+    try {
+      const res = await fetch(acct(`/sessions/${encodeURIComponent(s.id)}/audio`),
+                              { headers: { Authorization: `Bearer ${await idToken()}` } });
+      if (!res.ok) throw new Error(res.status === 404 ? "ההקלטה כבר לא שמורה (נמחקת אחרי 90 יום)." : `HTTP ${res.status}`);
+      const player = el("audio", { controls: true, preload: "auto", class: "player" });
+      player.src = URL.createObjectURL(await res.blob());
+      wrap.replaceChildren(player);
+      player.play().catch(() => {});
+    } catch (err) {
+      wrap.replaceChildren(el("span", { class: "muted", text: err.message.startsWith("HTTP") ? "טעינת ההקלטה נכשלה." : err.message }));
+    }
+  });
+  wrap.append(button);
+  return wrap;
+}
 
 // One line per session: what it ran with, what was measured, what changed after it.
 function voiceLine(s) {
@@ -753,6 +781,9 @@ async function loadAccount() {
     renderResearch(ov.research_notes);
     renderGames(ov.recommendations, ov.games_profile);
     renderNotes(ov.notes);
+    const au = ov.audio || {};
+    audioUsage = au.enabled && au.files !== null && au.files !== undefined
+      ? `${au.files} קבצים, ${(au.bytes / 1048576).toFixed(1)}MB` : "";
     renderVoice(ov.settings);
     $("history").replaceChildren(p("נטען בפתיחה…", "muted"));
     if ($("sec-history").open) loadHistory();

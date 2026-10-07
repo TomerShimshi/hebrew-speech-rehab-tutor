@@ -24,9 +24,10 @@ from app.session_prompt import build_session_prompt
 from app.rate_limit import SlidingWindowLimiter
 from app.store import ACTIVE, MEM_DONE, SessionStore
 from app.deps import (  # noqa: F401 -- shared with the caregiver router (tests override these)
-    _bounded_generate, games_for, get_games_reader, get_profile_loader, get_prompt_archive, get_store,
-    get_text_client,
+    _bounded_generate, games_for, get_audio_store, get_games_reader, get_profile_loader, get_prompt_archive,
+    get_store, get_text_client,
 )
+from app.audio_store import AUDIO_TYPES, MAX_AUDIO_BYTES
 from app.caregiver_api import router as caregiver_router
 from app.transcripts import EndRequest, TurnsBatch
 
@@ -95,9 +96,13 @@ def public_config(settings: Settings = Depends(get_settings)) -> dict:
 
 
 @app.get("/api/me")
-def me(user: User = Depends(verify_user), settings: Settings = Depends(get_settings)) -> dict:
-    # Lets the page tell right after sign-in whether this account is allowed (and a caregiver).
-    return {"email": user.email, "is_caregiver": user.email in settings.caregiver_email_set}
+def me(user: User = Depends(verify_user), settings: Settings = Depends(get_settings),
+       store: SessionStore = Depends(get_store), audio=Depends(get_audio_store)) -> dict:
+    # Lets the page tell right after sign-in whether this account is allowed (and a caregiver),
+    # and whether its sessions are recorded (the start screen says so -- 09).
+    recording = audio.enabled and voice_settings(store, settings, user.email).record_audio
+    return {"email": user.email, "is_caregiver": user.email in settings.caregiver_email_set,
+            "recording": recording}
 
 
 def voice_settings(store: SessionStore, settings: Settings, pid: str) -> VoiceSettings:
@@ -133,6 +138,7 @@ def start_session(
     store: SessionStore = Depends(get_store),
     archive: PromptArchive = Depends(get_prompt_archive),
     games_reader=Depends(get_games_reader),
+    audio=Depends(get_audio_store),
 ) -> dict:
     if not limiter.allow():
         raise HTTPException(status_code=429, detail="Too many sessions, try again later")
@@ -188,7 +194,8 @@ def start_session(
         "prompt_version": prompt.version,
         # buttons for the end screen: the game homework the tutor will suggest
         "game_homework": homework_buttons(plan, patient_id_for(user), settings),
-        "voice": {"tap_to_talk": voice.tap_to_talk, "noise_level": voice.noise_level},
+        "voice": {"tap_to_talk": voice.tap_to_talk, "noise_level": voice.noise_level,
+                  "record_audio": audio.enabled and voice.record_audio},
     }
 
 
@@ -204,6 +211,37 @@ def save_turns(
     _own_active_session(store, settings, user, session_id)
     store.upsert_turns(patient_id_for(user), session_id, batch.turns)
     return {"saved": len(batch.turns)}
+
+
+@app.post("/api/session/{session_id}/audio")
+async def upload_audio(
+    session_id: str,
+    request: Request,
+    user: User = Depends(verify_user),
+    settings: Settings = Depends(get_settings),
+    store: SessionStore = Depends(get_store),
+    audio=Depends(get_audio_store),
+) -> dict:
+    """The session's recording (both voices), uploaded by the browser when it ends (09). Only
+    for the account's own session, only while recording is on, at most once per session."""
+    pid = patient_id_for(user)
+    session = store.get_session(pid, session_id)
+    if session is None or session.get("user_email") != user.email:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not (audio.enabled and voice_settings(store, settings, pid).record_audio):
+        raise HTTPException(status_code=409, detail="Recording is off for this account")
+    if session.get("audio_uri"):
+        raise HTTPException(status_code=409, detail="This session already has a recording")
+    content_type = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
+    if content_type not in AUDIO_TYPES:
+        raise HTTPException(status_code=415, detail="Unsupported audio type")
+    data = await request.body()
+    if not data or len(data) > MAX_AUDIO_BYTES:
+        raise HTTPException(status_code=413, detail="Recording is empty or too large")
+    uri = audio.save(pid, session_id, data, content_type, started_at=session.get("started_at"))
+    store.update_session(pid, session_id, {"audio_uri": uri, "audio_bytes": len(data), "audio_type": content_type})
+    print(f"[audio] saved {pid}/{session_id}: {len(data) // 1024} KB {content_type}", flush=True)
+    return {"ok": True, "bytes": len(data)}
 
 
 @app.post("/api/session/{session_id}/end")

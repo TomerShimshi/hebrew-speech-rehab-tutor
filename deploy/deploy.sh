@@ -57,6 +57,8 @@ if gcloud secrets describe tavily-api-key >/dev/null 2>&1; then
 fi
 # Debug archive of each session's full tutor prompt, in the private bucket.
 ENV_VARS+="|PROMPT_ARCHIVE_URI=gs://${PROJECT_ID}-private/debug/prompts"
+# Session recordings (09), caregiver page only; deleted after 90 days (bucket lifecycle rule).
+ENV_VARS+="|AUDIO_URI_PREFIX=gs://${PROJECT_ID}-private/audio"
 
 gcloud run deploy "$SERVICE" \
   --source . \

@@ -322,6 +322,7 @@ async function fetchToken(resumeHandle) {
   if (t.game_homework) s.gameHomework = t.game_homework; // buttons for the end screen (06)
   setTapToTalk(!!t.voice?.tap_to_talk); // per-account setting (09)
   s.noiseLevel = t.voice?.noise_level || 0; // the noise filter level (09), adjusted after each session
+  if (t.voice?.record_audio && !s.recorder) startRecording(); // once per session, across reconnects
   return t;
 }
 
@@ -514,6 +515,7 @@ async function startSession() {
     lastAudioAt: 0, hangingUp: false, lastUserAt: performance.now(), nudged: false,
     lastUserText: "", sessionId: null, nextSeq: 0, dirty: new Set(), flushing: false, muted: false,
     tapToTalk: false, speaking: false, noiseLevel: 0, gateOpen: false, loudSince: 0, gateBuffer: [],
+    recorder: null, recChunks: [], recMicGain: null,
   };
   try {
     s.audio = await startAudio(); // inside the click handler: required to unlock audio on tablets
@@ -594,7 +596,12 @@ function endSession(errorMessage, reason = errorMessage ? "error" : "end_button"
   finishRemote(s, reason); // final transcript flush + mark the session ended (async)
   s.rec?.abort();
   s.ws?.close();
-  stopAudio(s.audio);
+  // The recording must be finished before the audio shuts down; then it's uploaded (09).
+  const audio = s.audio;
+  stopRecording(sess).then((blob) => {
+    stopAudio(audio);
+    uploadRecording(sess.sessionId, blob);
+  });
   s.wakeLock?.release?.();
   s = null;
   $("talk").disabled = false;
@@ -617,6 +624,7 @@ $("again").addEventListener("click", () => show("start"));
 function setMuted(muted) {
   if (!s) return;
   s.muted = muted;
+  if (s.recMicGain) s.recMicGain.gain.value = muted ? 0 : 1; // muted = not recorded either
   if (muted) {
     $("mic-level").style.width = "0%";
   } else {
@@ -662,6 +670,56 @@ function noiseGate(buf) {
   s.loudSince = 0;
   sendSilence(buf);
   return true;
+}
+
+// ---- session recording (09): both voices, for the caregiver page only --------------------------
+// Mixed in the playback context: his mic (silent while muted) + her speech, recorded by the
+// browser (Opus in WebM; MP4 on Safari) and uploaded once when the session ends.
+function startRecording() {
+  if (!window.MediaRecorder || !s?.audio) return;
+  try {
+    const { stream, playCtx, playNode } = s.audio;
+    const dest = playCtx.createMediaStreamDestination();
+    s.recMicGain = playCtx.createGain();
+    s.recMicGain.gain.value = s.muted ? 0 : 1;
+    playCtx.createMediaStreamSource(stream).connect(s.recMicGain).connect(dest);
+    playNode.connect(dest);
+    const type = ["audio/webm;codecs=opus", "audio/ogg;codecs=opus", "audio/mp4"].find((t) => MediaRecorder.isTypeSupported(t));
+    s.recorder = new MediaRecorder(dest.stream, { ...(type ? { mimeType: type } : {}), audioBitsPerSecond: 24000 });
+    s.recChunks = [];
+    s.recorder.ondataavailable = (e) => { if (e.data.size) s?.recChunks.push(e.data); };
+    s.recorder.start(10000); // a chunk every 10 s
+    log("audio", `recording (${s.recorder.mimeType})`);
+  } catch (err) {
+    log("audio", `recording unavailable: ${err.message}`); // the session goes on without it
+    s.recorder = null;
+  }
+}
+
+// Stops the recorder; resolves with the finished file (or null).
+function stopRecording(sess) {
+  const rec = sess.recorder;
+  if (!rec || rec.state === "inactive") return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const chunks = sess.recChunks;
+    rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+    rec.onstop = () => resolve(chunks.length ? new Blob(chunks, { type: rec.mimeType.split(";")[0] }) : null);
+    setTimeout(() => resolve(chunks.length ? new Blob(chunks, { type: rec.mimeType.split(";")[0] }) : null), 3000);
+    rec.stop();
+  });
+}
+
+async function uploadRecording(sessionId, blob) {
+  if (!sessionId || !blob) return;
+  try {
+    const res = await fetch(`api/session/${encodeURIComponent(sessionId)}/audio`, {
+      method: "POST", body: blob,
+      headers: { "Content-Type": blob.type || "audio/webm", Authorization: `Bearer ${await idToken()}` },
+    });
+    log("audio", `recording uploaded: ${res.status} (${Math.round(blob.size / 1024)} KB)`);
+  } catch (err) {
+    log("audio", `recording upload failed: ${err.message}`);
+  }
 }
 
 // ---- tap-to-talk (09): he marks his own turn; automatic detection is off for this account --
@@ -714,6 +772,7 @@ async function onUserChanged(user) {
   if (res?.ok) {
     const me = await res.json();
     $("admin-open").hidden = !me.is_caregiver; // Dad never sees it; the server enforces it too
+    $("recording-note").hidden = !me.recording; // he's told when sessions are recorded (09)
     signinMessage("");
     show("start");
   } else if (res?.status === 403) {

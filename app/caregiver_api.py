@@ -31,9 +31,10 @@ from app.class_plan import plan_for_session, render_class_plan
 from app.config import REPO_ROOT, Settings, get_settings
 from app.games import profile_for
 from app.deps import (
-    _bounded_generate, games_for, get_games_reader, get_profile_loader, get_prompt_archive, get_store,
-    get_text_client,
+    _bounded_generate, games_for, get_audio_store, get_games_reader, get_profile_loader, get_prompt_archive,
+    get_store, get_text_client,
 )
+from fastapi.responses import Response
 from app.patient_profile import PatientProfileLoader
 from app.session_prompt import build_session_prompt
 from app.prompt_archive import PromptArchive
@@ -56,7 +57,8 @@ SESSION_FIELDS = ("id", "status", "started_at", "ended_at", "end_reason", "turn_
                   "summary", "topics", "mood", "highlights", "difficulties", "probe_results",
                   "memory_status", "memory_error", "plan_status", "plan_error",
                   "memory_model", "plan_model",  # which model did the work (09)
-                  "voice_used", "voice_decision")  # the settings it ran with, and the automatic decision after it
+                  "voice_used", "voice_decision",  # the settings it ran with, and the automatic decision after it
+                  "audio_bytes", "audio_type")  # its recording, if any (09)
 
 
 def account(email: str, settings: Settings = Depends(get_settings)) -> str:
@@ -72,6 +74,16 @@ def _session_row(session: dict) -> dict:
     row["plan_goal"] = (plan.get("primary_goal") or {}).get("type")
     row["plan_type"] = plan.get("plan_type")
     return row
+
+
+def _audio_usage(audio, pid: str) -> dict:
+    if not audio.enabled:
+        return {"enabled": False}
+    try:
+        return {"enabled": True, **audio.usage(pid)}
+    except Exception as exc:  # noqa: BLE001 -- the page still works without the number
+        print(f"[audio] usage for {pid} failed: {exc!r:.150}", flush=True)
+        return {"enabled": True, "files": None, "bytes": None}
 
 
 def _word_rows(word_bank: dict) -> list[dict]:
@@ -172,7 +184,8 @@ def accounts(caregiver: User = Depends(require_caregiver), settings: Settings = 
 @router.get("/{email}/overview")
 def overview(pid: str = Depends(account), settings: Settings = Depends(get_settings),
              store: SessionStore = Depends(get_store),
-             profile: PatientProfileLoader = Depends(get_profile_loader)) -> dict:
+             profile: PatientProfileLoader = Depends(get_profile_loader),
+             audio=Depends(get_audio_store)) -> dict:
     memory = store.get_memory(pid) or {}
     notes = store.get_notes(pid) or {}
     games_profile = profile_for(pid, settings.simon_profiles)
@@ -186,6 +199,7 @@ def overview(pid: str = Depends(account), settings: Settings = Depends(get_setti
         "email": pid,
         "games_profile": games_profile,
         "notes": notes,
+        "audio": _audio_usage(audio, pid),
         "settings": {**current_settings(store, settings, pid)[0].model_dump(),
                      "auto_state": (store.get_settings(pid) or {}).get("auto_state") or {}},
         "flags": store.list_flags(pid),
@@ -242,6 +256,21 @@ def next_prompt(pid: str = Depends(account), settings: Settings = Depends(get_se
     same function as /api/session/start."""
     built = build_session_prompt(store, settings, pid, profile.get(), games_reader)
     return {"text": built.prompt.text, "prompt_version": built.prompt.version}
+
+
+@router.get("/{email}/sessions/{sid}/audio")
+def session_audio(sid: str, pid: str = Depends(account), store: SessionStore = Depends(get_store),
+                  audio=Depends(get_audio_store)) -> Response:
+    """The session's recording, for the caregiver page's player (caregivers only)."""
+    session = store.get_session(pid, sid)
+    if session is None or not session.get("audio_uri"):
+        raise HTTPException(status_code=404, detail="No recording for this session")
+    try:
+        data = audio.load(session["audio_uri"])
+    except Exception as exc:  # noqa: BLE001 -- e.g. deleted after 90 days
+        raise HTTPException(status_code=404, detail="The recording is no longer stored (90-day limit)") from exc
+    return Response(content=data, media_type=session.get("audio_type") or "audio/webm",
+                    headers={"Cache-Control": "private, no-store"})
 
 
 @router.get("/{email}/memory/history")
