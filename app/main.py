@@ -28,8 +28,9 @@ from app.rate_limit import SlidingWindowLimiter
 from app.store import ACTIVE, MEM_DONE, SessionStore
 from app.deps import (  # noqa: F401 -- shared with the caregiver router (tests override these)
     _bounded_generate, games_for, get_audio_store, get_games_reader, get_profile_loader, get_prompt_archive,
-    get_store, get_text_client,
+    get_push_sender, get_store, get_text_client,
 )
+from app.reminders import ReminderSettings, run_reminders, subscription_id
 from app.audio_store import AUDIO_TYPES, MAX_AUDIO_BYTES
 from app.caregiver_api import router as caregiver_router
 from app.transcripts import EndRequest, TurnsBatch
@@ -105,7 +106,8 @@ def me(user: User = Depends(verify_user), settings: Settings = Depends(get_setti
     # and whether its sessions are recorded (the start screen says so -- 09).
     recording = audio.enabled and voice_settings(store, settings, user.email).record_audio
     return {"email": user.email, "is_caregiver": user.email in settings.caregiver_email_set,
-            "recording": recording, "paused": billing_guard.is_paused(store)}
+            "recording": recording, "paused": billing_guard.is_paused(store),
+            "reminder": ReminderSettings(**(store.get_reminder_settings(user.email) or {})).model_dump()}
 
 
 def voice_settings(store: SessionStore, settings: Settings, pid: str) -> VoiceSettings:
@@ -312,6 +314,42 @@ def end_session(
     return {"status": "ended", "memory_status": memory_status, "plan_status": plan_status}
 
 
+@app.get("/api/push/public-key")
+def push_public_key(_user: User = Depends(verify_user), settings: Settings = Depends(get_settings)) -> dict:
+    """The (public) key the browser needs to turn the daily reminder on (11)."""
+    return {"key": settings.vapid_public_key}
+
+
+@app.put("/api/reminder")
+def set_my_reminder(
+    enabled: bool = Body(..., embed=True),
+    hour: int | None = Body(default=None, embed=True, ge=0, le=23),
+    user: User = Depends(verify_user),
+    store: SessionStore = Depends(get_store),
+) -> dict:
+    """From his own start screen (11): turn the daily reminder on/off and pick the hour. The
+    chosen days stay as the caregiver set them."""
+    current = ReminderSettings(**(store.get_reminder_settings(user.email) or {}))
+    updated = current.model_copy(update={"enabled": enabled, **({"hour": hour} if hour is not None else {})})
+    store.save_reminder_settings(user.email, updated.model_dump())
+    return updated.model_dump()
+
+
+@app.post("/api/push/subscribe")
+def push_subscribe(
+    subscription: dict = Body(..., embed=True),
+    user: User = Depends(verify_user),
+    store: SessionStore = Depends(get_store),
+) -> dict:
+    """This device wants the daily reminder: store its push subscription under the account (11)."""
+    endpoint, keys = subscription.get("endpoint"), subscription.get("keys") or {}
+    if not (isinstance(endpoint, str) and endpoint.startswith("https://") and keys.get("p256dh") and keys.get("auth")):
+        raise HTTPException(status_code=422, detail="Not a push subscription")
+    sub = {"endpoint": endpoint, "keys": {"p256dh": str(keys["p256dh"]), "auth": str(keys["auth"])}}
+    store.add_push_subscription(patient_id_for(user), subscription_id(sub), sub)
+    return {"ok": True}
+
+
 @app.post("/internal/budget")
 async def budget_alert(
     request: Request,
@@ -334,6 +372,7 @@ async def budget_alert(
 @app.post("/internal/memory/sweep")
 def memory_sweep(
     _caller: str = Depends(verify_sweeper),
+    push_sender=Depends(get_push_sender),
     settings: Settings = Depends(get_settings),
     store: SessionStore = Depends(get_store),
     profile: PatientProfileLoader = Depends(get_profile_loader),
@@ -343,8 +382,10 @@ def memory_sweep(
     """Hourly (Cloud Scheduler): update memory for sessions still waiting -- tabs closed
     mid-session, or updates that failed because the models were overloaded -- and rebuild
     next plans that are stale because he played the games after they were built (06)."""
+    # The daily reminder (11) first: it runs even when paused (and then records "skipped").
+    reminders = run_reminders(store, sorted(settings.allowed_email_set), push_sender) if push_sender else {}
     if billing_guard.is_paused(store):
-        return {"processed": {}, "paused": True}  # soft stop (10): nothing calls a model
+        return {"processed": {}, "paused": True, "reminders": reminders}  # soft stop (10): nothing calls a model
     results: dict[str, str] = {}
     budget = settings.memory_sweep_batch
     profile_text = profile.get()
@@ -379,7 +420,7 @@ def memory_sweep(
             )
         if len(results) >= budget:
             break
-    return {"processed": results}
+    return {"processed": results, "reminders": reminders}
 
 
 @lru_cache

@@ -51,6 +51,10 @@ SECRETS="GEMINI_API_KEY=gemini-api-key:latest"
 if gcloud secrets describe upstash-readonly-token >/dev/null 2>&1; then
   SECRETS+=",UPSTASH_REDIS_REST_URL=upstash-url:latest,UPSTASH_REDIS_READONLY_TOKEN=upstash-readonly-token:latest"
 fi
+# Daily reminder notifications (11): the private Web Push key; the public one is an env var.
+if gcloud secrets describe vapid-private-key >/dev/null 2>&1; then
+  SECRETS+=",VAPID_PRIVATE_KEY=vapid-private-key:latest"
+fi
 # Research sub-agent (07): without the secret, research is simply skipped.
 if gcloud secrets describe tavily-api-key >/dev/null 2>&1; then
   SECRETS+=",TAVILY_API_KEY=tavily-api-key:latest"
@@ -59,6 +63,7 @@ fi
 ENV_VARS+="|PROMPT_ARCHIVE_URI=gs://${PROJECT_ID}-private/debug/prompts"
 # Session recordings (09), caregiver page only; deleted after 90 days (bucket lifecycle rule).
 ENV_VARS+="|AUDIO_URI_PREFIX=gs://${PROJECT_ID}-private/audio"
+ENV_VARS+="|VAPID_PUBLIC_KEY=$(dotenv VAPID_PUBLIC_KEY)"
 
 gcloud run deploy "$SERVICE" \
   --source . \

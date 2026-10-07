@@ -86,6 +86,8 @@ table.words th { color: var(--muted); font-weight: normal; }
 #sec-voice input[type="range"] { width: min(100%, 16rem); }
 #sec-voice select { font-size: 1rem; padding: .25rem .4rem; border-radius: .5rem; border: 1px solid #cfd6e3; }
 #sec-voice .choice { display: flex; gap: .6rem; align-items: flex-start; margin: .8rem 0 .4rem; cursor: pointer; }
+.reminder-box { border: 1px solid #e3e7f0; border-radius: .8rem; padding: .4rem .9rem .6rem; margin: .8rem 0; }
+.reminder-box label.day { margin-inline-end: .5rem; white-space: nowrap; }
 .voice-facts { display: flex; flex-wrap: wrap; gap: .4rem 1.4rem; margin: .5rem 0 .2rem; font-size: 1.05rem; }
 .voice-facts .mode { color: var(--muted); font-size: .9rem; }
 .suggest { background: #fff7e6; border: 1px solid #f6c768; border-radius: .6rem; padding: .4rem .7rem; margin: .4rem 0; }

@@ -12,6 +12,9 @@ Layout (see docs/plans/03 and 04):
   patients/{pid}/research_usage/{date}    research runs that day (07)
   usage/{provider}-{YYYY-MM}              app-wide searches that month: tavily (07), gemini (10)
   usage/billing                           the month's spend and the soft stop (10)
+  patients/{pid}/push_subscriptions/{id}  devices that turned the daily reminder on (11)
+  patients/{pid}/reminders/{date}         that day's reminder: sent / skipped and why (11)
+  patients/{pid}/caregiver/reminder       reminder settings: on/off, hour, days (11)
   patients/{pid}/caregiver/notes          the caregiver's notes for the plan builder (08)
   patients/{pid}/caregiver/settings       per-account session settings: voice, tap-to-talk (09)
   patients/{pid}/sessions/{sid}/prompt/live  the exact system instruction the tutor got (8.5)
@@ -104,6 +107,14 @@ class SessionStore(Protocol):
     def save_session_prompt(self, pid: str, sid: str, text: str, version: str) -> None: ...
     def get_settings(self, pid: str) -> dict | None: ...
     def get_billing_state(self) -> dict | None: ...
+    def add_push_subscription(self, pid: str, sub_id: str, sub: dict) -> None: ...
+    def list_push_subscriptions(self, pid: str) -> list[dict]: ...
+    def remove_push_subscription(self, pid: str, sub_id: str) -> None: ...
+    def get_reminder_settings(self, pid: str) -> dict | None: ...
+    def save_reminder_settings(self, pid: str, settings: dict) -> None: ...
+    def get_reminder(self, pid: str, doc_id: str) -> dict | None: ...
+    def save_reminder(self, pid: str, doc_id: str, record: dict) -> None: ...
+    def list_reminders(self, pid: str, n: int = 10) -> list[dict]: ...
     def set_billing_state(self, state: dict) -> None: ...
     def save_settings(self, pid: str, settings: dict, by: str) -> None: ...
     def get_session_prompt(self, pid: str, sid: str) -> dict | None: ...
@@ -129,6 +140,9 @@ class InMemorySessionStore:
         self.session_prompts: dict[tuple[str, str], dict] = {}
         self.settings: dict[str, dict] = {}
         self.billing: dict | None = None
+        self.push_subs: dict[tuple[str, str], dict] = {}
+        self.reminder_settings: dict[str, dict] = {}
+        self.reminders: dict[tuple[str, str], dict] = {}
 
     def create_session(self, pid, *, user_email, model, prompt_version):
         sid = uuid.uuid4().hex
@@ -225,6 +239,10 @@ class InMemorySessionStore:
                 store.pop(key)
         self.notes.pop(pid, None)
         self.settings.pop(pid, None)
+        self.reminder_settings.pop(pid, None)
+        for store in (self.push_subs, self.reminders):
+            for key in [k for k in store if k[0] == pid]:
+                store.pop(key)
         for key in [k for k in self.session_prompts if k[0] == pid]:
             self.session_prompts.pop(key)
         return len(keys)
@@ -314,6 +332,31 @@ class InMemorySessionStore:
 
     def set_billing_state(self, state):
         self.billing = dict(state)
+
+    def add_push_subscription(self, pid, sub_id, sub):
+        self.push_subs[(pid, sub_id)] = {**sub, "id": sub_id, "created_at": _now()}
+
+    def list_push_subscriptions(self, pid):
+        return [v for k, v in self.push_subs.items() if k[0] == pid]
+
+    def remove_push_subscription(self, pid, sub_id):
+        self.push_subs.pop((pid, sub_id), None)
+
+    def get_reminder_settings(self, pid):
+        return self.reminder_settings.get(pid)
+
+    def save_reminder_settings(self, pid, settings):
+        self.reminder_settings[pid] = dict(settings)
+
+    def get_reminder(self, pid, doc_id):
+        return self.reminders.get((pid, doc_id))
+
+    def save_reminder(self, pid, doc_id, record):
+        self.reminders[(pid, doc_id)] = {**record, "id": doc_id}
+
+    def list_reminders(self, pid, n=10):
+        mine = [v for k, v in self.reminders.items() if k[0] == pid]
+        return sorted(mine, key=lambda v: v.get("at") or _now(), reverse=True)[:n]
 
     def save_settings(self, pid, settings, by):
         self.settings[pid] = {**settings, "updated_by": by, "updated_at": _now()}
@@ -569,6 +612,36 @@ class FirestoreSessionStore:
 
     def set_billing_state(self, state):
         self._db.collection("usage").document("billing").set(state)
+
+    def add_push_subscription(self, pid, sub_id, sub):
+        self._patient(pid).set({"created_at": self._fs.SERVER_TIMESTAMP}, merge=True)
+        self._patient(pid).collection("push_subscriptions").document(sub_id).set(
+            {**sub, "created_at": self._fs.SERVER_TIMESTAMP})
+
+    def list_push_subscriptions(self, pid):
+        return [{"id": s.id, **s.to_dict()} for s in self._patient(pid).collection("push_subscriptions").stream()]
+
+    def remove_push_subscription(self, pid, sub_id):
+        self._patient(pid).collection("push_subscriptions").document(sub_id).delete()
+
+    def get_reminder_settings(self, pid):
+        snap = self._patient(pid).collection("caregiver").document("reminder").get()
+        return snap.to_dict() if snap.exists else None
+
+    def save_reminder_settings(self, pid, settings):
+        self._patient(pid).collection("caregiver").document("reminder").set(settings)
+
+    def get_reminder(self, pid, doc_id):
+        snap = self._patient(pid).collection("reminders").document(doc_id).get()
+        return snap.to_dict() if snap.exists else None
+
+    def save_reminder(self, pid, doc_id, record):
+        self._patient(pid).collection("reminders").document(doc_id).set(record)
+
+    def list_reminders(self, pid, n=10):
+        query = (self._patient(pid).collection("reminders")
+                 .order_by("at", direction=self._fs.Query.DESCENDING).limit(n))
+        return [{"id": s.id, **s.to_dict()} for s in query.stream()]
 
     def save_settings(self, pid, settings, by):
         self._patient(pid).collection("caregiver").document("settings").set(

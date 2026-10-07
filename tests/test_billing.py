@@ -33,7 +33,7 @@ def test_at_75_percent_model_use_pauses_and_the_site_stays_up(env):
         assert env.client.post(path, headers=auth("tok-tomer"), json={"texts": ["x"]}).status_code == 409
     assert env.client.get(f"/api/caregiver/{DAD}/overview", headers=auth("tok-tomer")).status_code == 200  # page works
     assert env.client.post("/internal/memory/sweep",
-                           headers={"Authorization": "Bearer oidc-scheduler"}).json() == {"processed": {}, "paused": True}
+                           headers={"Authorization": "Bearer oidc-scheduler"}).json()["paused"] is True
     banner = env.client.get("/api/caregiver/accounts", headers=auth("tok-tomer")).json()["billing"]
     assert banner["paused"] is True and banner["cost"] == 90 and banner["budget"] == 120
 

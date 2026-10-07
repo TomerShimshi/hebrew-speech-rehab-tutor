@@ -729,6 +729,123 @@ async function uploadRecording(sessionId, blob) {
   }
 }
 
+// ---- daily reminder notification (11) ------------------------------------------------------
+// A permanent line on his start screen: "🔔 ... every day at 10:00 · change". Turning it on is
+// one tap per device (the browser asks permission; the device subscribes) and also switches the
+// reminder on for his account. He can pick the hour himself; the caregiver page can too.
+const pushSupported = "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+const REMINDER_HOURS = [8, 10, 13, 17, 19];
+let myReminder = null; // {enabled, hour, days} for this account, from /api/me
+const hh = (h) => `${String(h).padStart(2, "0")}:00`;
+
+function urlBase64ToUint8Array(b64) {
+  const pad = "=".repeat((4 - (b64.length % 4)) % 4);
+  const raw = atob((b64 + pad).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from(raw, (c) => c.charCodeAt(0));
+}
+
+async function sendSubscription(sub) {
+  const res = await api("api/push/subscribe", { subscription: sub.toJSON() });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+}
+
+async function saveMyReminder(enabled, hour) {
+  const res = await fetch("api/reminder", {
+    method: "PUT", body: JSON.stringify({ enabled, hour }),
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${await idToken()}` },
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  myReminder = await res.json();
+}
+
+function renderReminder(subscribed) {
+  $("reminder-box").hidden = false;
+  $("reminder-times").hidden = true;
+  const denied = Notification.permission === "denied";
+  $("push-enable").hidden = subscribed || denied;
+  $("reminder-state").hidden = !subscribed;
+  if (denied && !subscribed) {
+    $("push-status").textContent = "התזכורות חסומות בדפדפן. אפשר להפעיל אותן בהגדרות האתר.";
+    return;
+  }
+  if (!subscribed) return;
+  const on = !!myReminder?.enabled;
+  const days = myReminder?.days?.length === 7 ? "כל יום" : "בימים שנבחרו";
+  const change = el("button", { class: "link", type: "button", text: on ? "שינוי" : "להפעיל" });
+  change.addEventListener("click", () => {
+    $("reminder-times").hidden = !$("reminder-times").hidden;
+  });
+  $("reminder-state").replaceChildren(on ? `🔔 תזכורת יומית ${days} ב־${hh(myReminder.hour)} · ` : "🔕 התזכורת כבויה · ", change);
+  $("reminder-off").hidden = !on;
+  $("reminder-times").querySelector(".reminder-buttons").replaceChildren(...REMINDER_HOURS.map((h) => {
+    const b = el("button", { type: "button", class: on && myReminder.hour === h ? "on" : "", text: hh(h) });
+    b.addEventListener("click", async () => {
+      try {
+        await saveMyReminder(true, h);
+        $("push-status").textContent = `✓ התזכורת תגיע כל יום ב־${hh(h)}`;
+      } catch {
+        $("push-status").textContent = "השמירה לא הצליחה. נסה שוב.";
+      }
+      renderReminder(true);
+    });
+    return b;
+  }));
+}
+
+function el(tag, props = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === "text") node.textContent = v; else if (k === "class") node.className = v; else node.setAttribute(k, v);
+  }
+  node.append(...children);
+  return node;
+}
+
+async function setupPush(reminder) {
+  myReminder = reminder || myReminder;
+  if (!pushSupported) return;
+  try {
+    const reg = await navigator.serviceWorker.register("sw.js");
+    const existing = await reg.pushManager.getSubscription();
+    const subscribed = !!existing && Notification.permission === "granted";
+    if (subscribed) await sendSubscription(existing); // keep the server's copy current
+    renderReminder(subscribed);
+  } catch (err) {
+    log("push", `setup failed: ${err.message}`);
+  }
+}
+
+$("push-enable").addEventListener("click", async () => {
+  try {
+    if ((await Notification.requestPermission()) !== "granted") {
+      $("push-status").textContent = "בלי אישור לא נוכל לשלוח תזכורת. אפשר לנסות שוב בכל זמן.";
+      return;
+    }
+    const key = (await (await api("api/push/public-key")).json()).key;
+    if (!key) throw new Error("no key");
+    const reg = await navigator.serviceWorker.ready;
+    const sub = (await reg.pushManager.getSubscription())
+      || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(key) });
+    await sendSubscription(sub);
+    await saveMyReminder(true, myReminder?.hour ?? 10); // on for his account too
+    $("push-status").textContent = `✓ התזכורת היומית הופעלה. אפשר לבחור שעה אחרת ב"שינוי".`;
+    renderReminder(true);
+  } catch (err) {
+    log("push", `enable failed: ${err.message}`);
+    $("push-status").textContent = "ההפעלה לא הצליחה. נסה שוב בעוד רגע.";
+  }
+});
+
+$("reminder-off").addEventListener("click", async () => {
+  try {
+    await saveMyReminder(false);
+    $("push-status").textContent = "התזכורת כובתה. אפשר להפעיל אותה שוב בכל זמן.";
+  } catch {
+    $("push-status").textContent = "לא הצלחנו לכבות. נסה שוב.";
+  }
+  renderReminder(true);
+});
+
 // ---- tap-to-talk (09): he marks his own turn; automatic detection is off for this account --
 function setTapToTalk(on) {
   s.tapToTalk = on;
@@ -780,6 +897,7 @@ async function onUserChanged(user) {
     const me = await res.json();
     $("admin-open").hidden = !me.is_caregiver; // Dad never sees it; the server enforces it too
     $("recording-note").hidden = !me.recording; // he's told when sessions are recorded (09)
+    setupPush(me.reminder); // the daily reminder line (11)
     // Soft stop on spending (10): practice is paused until a caregiver resumes it.
     $("talk").disabled = !!me.paused;
     $("start-status").textContent = me.paused ? PAUSED_TEXT : "";

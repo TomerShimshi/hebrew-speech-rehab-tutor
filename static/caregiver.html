@@ -63,6 +63,18 @@
           <label class="choice"><input id="record-audio" type="checkbox">
             <span><b>הקלטת השיחות</b>: שני הקולות, לשמיעה כאן בלבד. נמחקות אוטומטית אחרי 90 יום.
             כשזה פועל, במסך הפתיחה שלו כתוב שהשיחות נשמרות.</span></label>
+          <fieldset class="reminder-box">
+            <legend>🔔 תזכורת יומית (התראה מהאפליקציה)</legend>
+            <label class="choice"><input id="reminder-on" type="checkbox"><span>לשלוח תזכורת יומית</span></label>
+            <div class="voice-row">
+              <span>בשעה</span>
+              <select id="reminder-hour"></select>
+              <span>בימים:</span>
+              <span id="reminder-days"></span>
+            </div>
+            <p class="muted">היא לא נשלחת אם הוא כבר התאמן באותו יום, או כשהשימוש מושהה. כדי לקבל אותה, במכשיר שלו
+              לוחצים פעם אחת על "🔔 תזכורת יומית" במסך הפתיחה ומאשרים.</p>
+          </fieldset>
           <div class="cg-actions">
             <button id="voice-save" class="small on" type="button">שמירה</button>
             <button id="voice-cancel" class="small" type="button">ביטול</button>

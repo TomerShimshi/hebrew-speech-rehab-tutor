@@ -43,6 +43,18 @@ h1 { font-size: clamp(2.2rem, 7vw, 3.5rem); margin: 0; }
   font-size: clamp(1.5rem, 4.5vw, 2rem); font-weight: bold; color: #7a4a00;
   background: #fff3d6; border: 2px solid #f0b43c; border-radius: 1.2rem; padding: .8rem 1.4rem;
 }
+/* The daily reminder line on his start screen (11) */
+.reminder-line { display: flex; flex-direction: column; align-items: center; gap: .5rem; }
+#reminder-state { margin: 0; font-size: 1.25rem; }
+#reminder-state .link { font-size: 1.15rem; }
+.reminder-times { display: flex; flex-direction: column; align-items: center; gap: .6rem; }
+.reminder-q { margin: 0; font-size: 1.3rem; font-weight: bold; }
+.reminder-buttons { display: flex; flex-wrap: wrap; gap: .6rem; justify-content: center; }
+.reminder-buttons button {
+  font-size: 1.4rem; padding: .6rem 1.1rem; border-radius: 1rem; border: 2px solid var(--accent);
+  background: var(--card); color: var(--accent); cursor: pointer; direction: ltr;
+}
+.reminder-buttons button.on { background: var(--accent); color: #fff; }
 .recording-note { margin: 0; font-size: 1.05rem; color: var(--muted); }
 /* "Made by" credit: small and quiet, at the bottom of the screen */
 .credit { margin: 0; font-size: .85rem; color: #8a93a3; letter-spacing: .02em; }

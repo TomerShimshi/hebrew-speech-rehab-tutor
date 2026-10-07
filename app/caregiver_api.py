@@ -33,8 +33,9 @@ from app.config import REPO_ROOT, Settings, get_settings
 from app.games import profile_for
 from app.deps import (
     _bounded_generate, games_for, get_audio_store, get_games_reader, get_profile_loader, get_prompt_archive,
-    get_store, get_text_client,
+    get_push_sender, get_store, get_text_client,
 )
+from app.reminders import TITLE, ReminderSettings, send_to_devices, text_for
 from fastapi.responses import Response
 from app.patient_profile import PatientProfileLoader
 from app.session_prompt import build_session_prompt
@@ -219,6 +220,9 @@ def overview(pid: str = Depends(account), settings: Settings = Depends(get_setti
         "games_profile": games_profile,
         "notes": notes,
         "audio": _audio_usage(audio, pid),
+        "reminder": {**ReminderSettings(**(store.get_reminder_settings(pid) or {})).model_dump(),
+                     "devices": len(store.list_push_subscriptions(pid)),
+                     "history": store.list_reminders(pid, 7)},
         "settings": {**current_settings(store, settings, pid)[0].model_dump(),
                      "auto_state": (store.get_settings(pid) or {}).get("auto_state") or {}},
         "flags": store.list_flags(pid),
@@ -305,6 +309,28 @@ def save_notes(text: str = Body(..., embed=True, max_length=NOTES_MAX_CHARS), pi
     store.save_notes(pid, text.strip(), caregiver.email)
     print(f"[caregiver] {caregiver.email} saved planner notes for {pid} ({len(text.strip())} chars)", flush=True)
     return {"ok": True}
+
+
+@router.put("/{email}/reminder")
+def save_reminder(reminder: ReminderSettings = Body(..., embed=True), pid: str = Depends(account),
+                  caregiver: User = Depends(require_caregiver), store: SessionStore = Depends(get_store)) -> dict:
+    """The daily reminder notification (11): on/off, hour, days."""
+    store.save_reminder_settings(pid, {**reminder.model_dump(), "days": sorted(set(reminder.days) & set(range(7)))})
+    print(f"[caregiver] {caregiver.email} set {pid}'s reminder: {reminder.model_dump()}", flush=True)
+    return {"ok": True}
+
+
+@router.post("/{email}/reminder/test")
+def test_reminder(pid: str = Depends(account), store: SessionStore = Depends(get_store),
+                  sender=Depends(get_push_sender)) -> dict:
+    """Sends one reminder now to the account's devices (doesn't count as the day's reminder)."""
+    if sender is None:
+        raise HTTPException(status_code=503, detail="Notifications are not configured")
+    now = dt.datetime.now(dt.timezone.utc)
+    delivered = send_to_devices(store, pid, {"title": TITLE, "body": text_for(now.date()) + " (בדיקה)", "url": "./"}, sender)
+    store.save_reminder(pid, f"test-{now.strftime('%Y%m%dT%H%M%S')}",
+                        {"status": "test", "devices": delivered, "at": now})
+    return {"devices": delivered}
 
 
 @router.put("/{email}/settings")

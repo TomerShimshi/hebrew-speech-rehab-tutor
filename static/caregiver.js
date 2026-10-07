@@ -453,6 +453,44 @@ function renderGames(recs, profile) {
 // ---- the account's voice settings (09): summary at the top, editable in place ------------
 const NOISE_NAME = { 0: "כבוי", 1: "עדין", 2: "בינוני", 3: "חזק" };
 let voiceSaved = null;
+let reminderSaved = null;
+const DAY_NAMES = ["א׳", "ב׳", "ג׳", "ד׳", "ה׳", "ו׳", "ש׳"]; // Sunday = 0
+$("reminder-hour").replaceChildren(...Array.from({ length: 24 }, (_, h) => new Option(`${String(h).padStart(2, "0")}:00`, String(h))));
+$("reminder-days").replaceChildren(...DAY_NAMES.map((d, i) => el("label", { class: "day" },
+  el("input", { type: "checkbox", value: String(i), class: "reminder-day" }), ` ${d}`)));
+
+const REMINDER_STATUS = { sent: "נשלחה", skipped: "דולגה", failed: "לא נמסרה", test: "בדיקה" };
+const REMINDER_REASON = { "already practised today": "כבר התאמן היום", "paused (spending soft stop)": "השימוש מושהה",
+                          "not one of the chosen days": "יום שלא נבחר", "no device has reminders on": "אין מכשיר רשום" };
+
+function reminderSummary(r) {
+  if (!r) return null;
+  const days = r.days?.length === 7 ? "כל יום" : (r.days || []).map((d) => DAY_NAMES[d]).join(" ");
+  const last = r.history?.[0];
+  return el("div", {},
+    el("div", { class: "voice-facts" },
+      el("span", {}, "🔔 תזכורת יומית: ", el("b", { text: r.enabled ? `${String(r.hour).padStart(2, "0")}:00, ${days}` : "כבויה" }),
+         el("span", { class: "mode", text: ` (${r.devices} מכשירים רשומים)` })),
+      r.devices ? confirmButton("שליחת תזכורת לבדיקה", "לשלוח עכשיו תזכורת למכשירים שלו?", async (where) => {
+        busy(where, "שולח");
+        try {
+          const res = await api(acct("/reminder/test"), {});
+          where.textContent = `✓ נשלחה ל־${res.devices} מכשירים`;
+        } catch {
+          where.textContent = "השליחה נכשלה.";
+        }
+      }) : null),
+    last ? p(`אחרונה: ${when(last.at)} · ${REMINDER_STATUS[last.status] || last.status}` +
+             (last.reason ? ` (${REMINDER_REASON[last.reason] || last.reason})` : ""), "muted kv") : null);
+}
+
+function fillReminderForm(r) {
+  reminderSaved = r;
+  $("reminder-on").checked = !!r?.enabled;
+  $("reminder-hour").value = String(r?.hour ?? 10);
+  const days = new Set(r?.days ?? [0, 1, 2, 3, 4, 5, 6]);
+  document.querySelectorAll(".reminder-day").forEach((c) => { c.checked = days.has(Number(c.value)); });
+}
 let audioUsage = ""; // "34 קבצים, 68MB" -- this account's stored recordings
 
 // "noise filter 0 -> 1 (2 noise interruptions)" -> Hebrew, for the page
@@ -498,7 +536,7 @@ function fillVoiceForm(v) {
 }
 
 $("voice-edit").addEventListener("click", () => { $("voice-form").hidden = !$("voice-form").hidden; });
-$("voice-cancel").addEventListener("click", () => { fillVoiceForm(voiceSaved); $("voice-form").hidden = true; });
+$("voice-cancel").addEventListener("click", () => { fillVoiceForm(voiceSaved); fillReminderForm(reminderSaved); $("voice-form").hidden = true; });
 $("silence").addEventListener("input", () => { $("silence-value").textContent = $("silence").value; });
 $("voice-save").addEventListener("click", async () => {
   $("voice-save").disabled = true;
@@ -507,6 +545,9 @@ $("voice-save").addEventListener("click", async () => {
       silence_ms: Math.round(Number($("silence").value) * 1000), silence_auto: $("silence-mode").value === "auto",
       noise_level: Number($("noise-level").value), noise_auto: $("noise-mode").value === "auto",
       tap_to_talk: $("tap-to-talk").checked, record_audio: $("record-audio").checked } }, "PUT");
+    await api(acct("/reminder"), { reminder: {
+      enabled: $("reminder-on").checked, hour: Number($("reminder-hour").value),
+      days: [...document.querySelectorAll(".reminder-day")].filter((c) => c.checked).map((c) => Number(c.value)) } }, "PUT");
     await loadAccount();
     $("voice-form").hidden = true;
     $("voice-status").textContent = "";
@@ -785,6 +826,8 @@ async function loadAccount() {
     audioUsage = au.enabled && au.files !== null && au.files !== undefined
       ? `${au.files} קבצים, ${(au.bytes / 1048576).toFixed(1)}MB` : "";
     renderVoice(ov.settings);
+    fillReminderForm(ov.reminder);
+    $("voice-summary").append(reminderSummary(ov.reminder) || "");
     $("history").replaceChildren(p("נטען בפתיחה…", "muted"));
     if ($("sec-history").open) loadHistory();
     $("next-prompt").replaceChildren(p("נטען בפתיחה…", "muted"));

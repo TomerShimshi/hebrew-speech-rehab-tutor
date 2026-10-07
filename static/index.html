@@ -33,6 +33,17 @@
     <p class="lead">האימון היומי שלנו מחכה</p>
     <button id="talk" class="big primary" type="button">שנתחיל?</button>
     <p id="start-status" class="status" aria-live="polite"></p>
+    <!-- The daily reminder (11): always visible once supported; he can change the time himself -->
+    <div id="reminder-box" class="reminder-line" hidden>
+      <button id="push-enable" class="big secondary" type="button" hidden>🔔 תזכורת יומית</button>
+      <p id="reminder-state" hidden></p>
+      <div id="reminder-times" class="reminder-times" hidden>
+        <p class="reminder-q">באיזו שעה לשלוח לך תזכורת?</p>
+        <div class="reminder-buttons"></div>
+        <button id="reminder-off" class="link" type="button">לכבות את התזכורת</button>
+      </div>
+      <p id="push-status" class="recording-note" aria-live="polite"></p>
+    </div>
     <p id="recording-note" class="recording-note" hidden>🎙️ השיחות נשמרות כדי לעקוב אחרי ההתקדמות</p>
     <div class="links">
       <button id="admin-open" class="link" type="button" hidden>ניהול</button>

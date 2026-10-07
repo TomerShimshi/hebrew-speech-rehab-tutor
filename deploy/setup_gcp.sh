@@ -129,6 +129,8 @@ put_secret upstash-url "$(dotenv_value UPSTASH_REDIS_REST_URL)"
 put_secret upstash-readonly-token "$(dotenv_value UPSTASH_REDIS_READONLY_TOKEN)"
 echo ">> Research sub-agent secret (Tavily web search, sub-plan 07)..."
 put_secret tavily-api-key "$(dotenv_value TAVILY_API_KEY)"
+echo ">> Daily reminder notifications (sub-plan 11): the private Web Push key..."
+put_secret vapid-private-key "$(dotenv_value VAPID_PRIVATE_KEY)"
 
 # ---------------------------------------------------------------------------
 # Firestore: sessions + transcripts. Only the backend's service account touches it

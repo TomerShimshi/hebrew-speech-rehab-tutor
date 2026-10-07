@@ -108,13 +108,13 @@ def test_sweep_processes_abandoned_and_failed_sessions(env):
 
     env.llm = FakeClient(*[server_error() for _ in range(6)])  # models down during the sweep
     env.configure()
-    assert sweep(env).json() == {"processed": {abandoned: "failed"}}
+    assert sweep(env).json()["processed"] == {abandoned: "failed"}
 
     env.llm = FakeClient(text("ok"), consolidated("Recovered memory."), plan_reply())  # an hour later
     env.configure()
-    assert sweep(env).json() == {"processed": {abandoned: "done", f"plan:{abandoned}": "done"}}
+    assert sweep(env).json()["processed"] == {abandoned: "done", f"plan:{abandoned}": "done"}
     assert env.store.get_memory(DAD)["memory_prompt"] == "Recovered memory."
-    assert sweep(env).json() == {"processed": {}}  # nothing left
+    assert sweep(env).json()["processed"] == {}  # nothing left
 
 
 def test_sweep_respects_the_batch_limit(env):

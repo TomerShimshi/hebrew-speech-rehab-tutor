@@ -6,6 +6,8 @@ from types import SimpleNamespace
 # Settings() also reads the developer's .env (even in module-level test constants, created
 # before any fixture runs): tests must never use the real Tavily key. Env vars beat .env.
 os.environ["TAVILY_API_KEY"] = ""
+os.environ["VAPID_PRIVATE_KEY"] = ""  # the daily reminder (11): tests use a fake sender, never the real key
+os.environ["VAPID_PUBLIC_KEY"] = ""
 os.environ["GEMINI_SEARCH_ENABLED"] = "false"  # the Gemini search fallback (10): on only where a test says so
 
 import pytest
@@ -15,7 +17,7 @@ from app.auth import get_oidc_verifier, get_token_verifier
 from app.config import Settings, get_settings
 from app.audio_store import InMemoryAudioStore
 from app.main import (
-    app, get_audio_store, get_games_reader, get_genai_client, get_profile_loader, get_prompt_archive, get_store,
+    app, get_push_sender, get_audio_store, get_games_reader, get_genai_client, get_profile_loader, get_prompt_archive, get_store,
     get_text_client, get_token_limiter,
 )
 from app.prompt_archive import PromptArchive
@@ -87,7 +89,7 @@ def env(tmp_path, monkeypatch):
     # archived: uri -> text the prompt archive "uploaded"
     # games_reader: a fake Upstash (None = games not configured); tests NEVER reach the real one
     state = SimpleNamespace(store=InMemorySessionStore(), limit=5, key=SECRET, llm=FakeClient(), archived={},
-                            games_reader=None, audio=InMemoryAudioStore())
+                            games_reader=None, audio=InMemoryAudioStore(), pushed=[])
 
     def configure(**overrides):
         fields = {
@@ -112,6 +114,14 @@ def env(tmp_path, monkeypatch):
         app.dependency_overrides[get_text_client] = lambda: state.llm
         app.dependency_overrides[get_games_reader] = lambda: state.games_reader
         app.dependency_overrides[get_audio_store] = lambda: state.audio  # never the real bucket
+        # notifications (11): recorded here, never sent; a subscription whose endpoint contains
+        # "gone" behaves like a device that removed the app
+        def fake_push(sub, payload):
+            from app.reminders import PushGone
+            if "gone" in sub["endpoint"]:
+                raise PushGone()
+            state.pushed.append((sub["endpoint"], payload))
+        app.dependency_overrides[get_push_sender] = lambda: fake_push
         app.dependency_overrides[get_prompt_archive] = lambda: PromptArchive(
             settings.prompt_archive_uri, upload=lambda uri, text: state.archived.__setitem__(uri, text))
         if state.key:

@@ -1,52 +1,79 @@
-# Sub-plan 11: Daily WhatsApp reminder to practice
+# Sub-plan 11: Daily reminder to practice (app notification)
 
 Part of the [master design](00-master-design.md). After [10](10-paid-gemini.md). Requested by Tomer (2026-10-07).
 
 ## Goal
-Once a day, Dad gets a short, warm WhatsApp message reminding him to practice, with a link that opens the app. Daily practice matters more than long sessions (the dose research in the master design), and WhatsApp is where he already is.
+Once a day, Dad gets a short, warm notification on his phone / tablet reminding him to practice. Tapping it opens the app. Daily practice matters more than long sessions (the dose research in the master design).
+
+## Why a notification from the app, not WhatsApp (decided with Tomer, 2026-10-07)
+- **WhatsApp:**
+  - Meta's official business API charges per message.
+  - CallMeBot is free, but unofficial, and the messages come from a foreign bot number.
+  - Automating a personal WhatsApp number breaks WhatsApp's terms and risks a ban.
+- **SMS** costs per message.
+- **A notification from the home-screen app (09)** is **free**, needs **no outside service**, and is standard on the web ("Web Push").
+  - **Android:** it works in Chrome.
+  - **iPhone / iPad:** it works only when the app is added to the home screen (iOS 16.4+), which is what we recommend anyway.
+- The file name keeps "whatsapp" from the first draft; the plan is notifications.
 
 ## Design
-- **The message:** short, warm, adult, in Hebrew, with the link. For example:
-  > בוקר טוב! 🌞 המטפלת מחכה לשיחה היומית שלכם. כמה דקות של דיבור עושות את ההבדל 💪
-  > https://…/
-- **Variety:** a few versions rotate, so it doesn't feel automatic. Optionally, it mentions the topic of the next lesson, from the plan, in one friendly line, with no check-in answers.
-- **When:** a time chosen per account (e.g. 10:00, Israel time), sent by Cloud Scheduler → the app.
-- **Smart skipping:**
-  - no reminder if he already practised today
-  - none while the soft stop is on (10)
-  - optionally, none on chosen days (e.g. Saturday)
-- **Set per account on the caregiver page:** on/off, the time, the days, and the phone number. The phone number is stored in Firestore only: never in the repo, never in logs.
-- **Tracked:** every reminder sent or skipped (and why) is recorded on the account and shown on the caregiver page, plus a log line.
-- **Opt-in:** Dad agrees to get the messages (and WhatsApp's own rules require the recipient's opt-in for business messages).
+- **Turning it on (once per device, on his screen):**
+  - A button on the start screen, **"🔔 תזכורת יומית"** ("daily reminder"), shown only while that device isn't subscribed.
+  - Pressing it asks the browser's permission ("דברו איתי wants to send notifications" → Allow). The device then subscribes, and the server stores the subscription under his account.
+  - Browsers only allow this after a tap, so it can't be done for him silently; Tomer can do it with him on his device.
+- **The message:**
+  - Short, warm, adult Hebrew, masculine. A few versions rotate: "בוקר טוב! 🌞 המטפלת מחכה לשיחה היומית שלך", "כמה דקות של דיבור היום? 🗣️ אני כאן", …
+  - Title: "דברו איתי", with the app icon.
+  - Tapping it opens the app.
+- **When:**
+  - At the account's chosen **hour** (Israel time, e.g. 10:00).
+  - Sent by the existing **hourly sweep** (Cloud Scheduler), so there's no new job: it runs on the hour, and a reminder set for 10:00 goes out at 10:00.
+- **Smart skipping**, each recorded with the reason:
+  - he already practised today
+  - the soft stop is on (10)
+  - today isn't one of the chosen days
+  - it was already sent today
+- **On the caregiver page, per account** (with the other settings at the top):
+  - on/off, the hour, the days
+  - how many devices are subscribed
+  - the last reminders sent or skipped, and why
+  - **"שליחת תזכורת לבדיקה"** ("send a test reminder"): sends one now to that account's devices
+- **Subscriptions that stop working** (app removed, permission revoked) are removed automatically. Push services answer "gone" for those.
+- **Keys:**
+  - Web Push needs one "VAPID" key pair, generated once.
+  - The private key goes in Secret Manager; the public key is not secret.
+  - Free; no account anywhere.
 
-## How to send WhatsApp messages: the options (to verify and choose before building)
-| Option | What it is | Setup | Cost (to verify) | Notes |
-|---|---|---|---|---|
-| **WhatsApp Cloud API** (Meta, official) | A business number sends approved "template" messages | Meta Business account; a phone number for the business (not one used in the WhatsApp app); a message template approved by Meta ("utility" category) | A small per-message fee for business-initiated templates (Israel rate to check; ~30 messages a month) | The most reliable and official. The most setup. |
-| **Twilio WhatsApp** | Twilio's layer over the same official API | A Twilio account (card), number + template through Twilio | Twilio's fee + Meta's | Simpler setup than Meta directly; costs a bit more |
-| **CallMeBot** (free, unofficial) | A free bot service for personal notifications | The recipient (Dad's phone) sends a one-time activation message to the bot; we get a key | Free | Unofficial, for personal use; reliability not guaranteed |
-| **Alternative: phone notifications** (not WhatsApp) | Web push from the home-screen app (09) | None outside the app | Free | Not WhatsApp; Android works well; iPad needs the app on the home screen |
-
-**Recommendation, to confirm after checking current terms and prices:** the official **WhatsApp Cloud API**. The cost of ~30 messages a month is small, and it's the dependable choice for something he relies on daily. **CallMeBot** is a free option to try first, if Tomer prefers to start quickly.
-
-## Files (expected)
+## Files
 | File | Purpose |
 |---|---|
-| `app/reminders.py` | Decide (send / skip and why), build the message, send it through the chosen provider (behind one small interface, so the provider can change). |
-| `app/main.py` | `POST /internal/reminders` (Cloud Scheduler, OIDC like the sweep). |
-| `app/caregiver_api.py`, `static/caregiver.*` | Reminder settings per account; history; "send a test now". |
-| `deploy/setup_gcp.sh`, `.env.example` | The provider's token in Secret Manager; a scheduler job (every 15 minutes, each account's own time). |
-| `tests/` | Skipped if already practised / paused / off / wrong day; message text; provider faked (never sends real messages in tests). |
+| `static/sw.js` | The service worker: shows the notification, and opens the app on tap. |
+| `static/app.js`, `static/index.html` | The "🔔 תזכורת יומית" button; subscribe and send the subscription to the server. |
+| `app/reminders.py` | Decide (send / skip and why), the rotating texts, send through Web Push (`pywebpush`), remove dead subscriptions. |
+| `app/main.py` | `POST /api/push/subscribe`, `GET /api/push/public-key`; reminders in the hourly sweep. |
+| `app/caregiver_api.py`, `static/caregiver.*` | Reminder settings, devices, history, "send a test". |
+| `app/store.py` | Subscriptions + reminder history per account. |
+| `deploy/*`, `requirements.txt` | The VAPID private key in Secret Manager; `pywebpush`. |
+| `tests/` | Send / skip rules (practised, paused, day, already sent, hour), subscribe, dead subscriptions removed, caregivers only; Web Push faked (tests never send). |
+
+## Progress (2026-10-07)
+- Built and deployed (revision 56): `app/reminders.py` (send / skip rules, rotating texts, `pywebpush`, gone devices removed), `static/sw.js`, the "🔔 תזכורת יומית" button, `POST /api/push/subscribe`, reminders inside the hourly sweep (before the soft-stop check, so a paused day is recorded as skipped), caregiver settings / devices / last reminder / "send a test".
+- Keys: VAPID pair generated once; public key in `.env` + an env var, private key in Secret Manager (`vapid-private-key`). Tests blank both and use a fake sender.
+- A missed hour still sends later that day (the condition is "the hour has come", not "exactly this hour").
+- **Tomer's feedback, built (revision 57):**
+  - **The start screen always shows the reminder.** When it's on: "🔔 תזכורת יומית כל יום ב־10:00 · שינוי"; when it's off: "🔕 התזכורת כבויה · להפעיל"; on a device that isn't subscribed: the button.
+  - **He can pick the hour himself:** big buttons 08 / 10 / 13 / 17 / 19 and "turn off" (`PUT /api/reminder`, his own account only; the caregiver's chosen days are kept). The caregiver page still sets any hour and the days, so the family decides whether to leave it to him.
+  - **Turning it on from his screen does both steps:** it subscribes the device **and** switches the reminder on for the account. Before, only the device was subscribed, so nothing showed and nothing was sent until the caregiver page switched it on.
+- Tomer checked it on his account (7.10.26). Still open: a real daily reminder on Dad's S24.
 
 ## Manual steps for Tomer
-- Choose the provider (after we check terms and prices together), and create the account / number / template it needs.
-- Dad's phone number, entered on the caregiver page (never in the repo).
-- Dad's agreement to get the messages.
+- On Dad's phone / tablet: open the app from the **home-screen icon**, press "🔔 תזכורת יומית" and **Allow**.
+- Choose the hour and days on the caregiver page, and send a test.
 
 ## Done when
-- [ ] A test message arrives on Tomer's phone from the caregiver page.
-- [ ] Dad gets the daily reminder at his time, skipped when he already practised or the app is paused.
-- [ ] `pytest` passes; no phone number or provider token in the repo or the logs.
+- [x] Tomer turned it on from his device and checked the reminder line (7.10.26).
+- [ ] Dad gets the daily reminder at his hour, and it's skipped when he already practised or the app is paused.
+- [x] `pytest` passes.
 
 ## Commit
-`Sub-plan 11: daily WhatsApp reminder to practice`
+`Sub-plan 11: daily practice reminder as an app notification`

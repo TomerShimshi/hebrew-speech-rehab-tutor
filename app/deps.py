@@ -33,6 +33,14 @@ def get_audio_store():
     return GcsAudioStore(get_settings().audio_uri_prefix)
 
 
+def get_push_sender(settings: Settings = Depends(get_settings)):
+    """Sends Web Push notifications (11), or None when the keys aren't configured."""
+    if not (settings.vapid_private_key and settings.vapid_public_key):
+        return None
+    from app.reminders import webpush_sender
+    return webpush_sender(settings.vapid_private_key, settings.sweep_audience or "https://localhost")
+
+
 @lru_cache
 def get_profile_loader() -> PatientProfileLoader:
     return PatientProfileLoader(get_settings())
