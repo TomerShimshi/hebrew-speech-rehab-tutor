@@ -47,6 +47,7 @@ Finishing touches that make the app better for Dad and for the people helping hi
 2. [x] Model visibility → deploy.
 3. [x] Export for the therapist → deploy → Tomer tries print / save as PDF.
 4. [x] **README update** (Tomer's request): what the app is, how it's built (architecture, the three agent calls, research, caregiver page), how to run it locally, deploy and set up GCP, the manual steps, costs and privacy, and links to the plan docs. No secrets or emails.
+4.5. [x] **Hebrew translation of the export** (Tomer's request): pressing export asks (an inline window, "לתרגם את הסיכום לעברית?") yes / no. Yes sends the export's English texts to one model call (`prompts/translate_export.yaml`: translate only, keep his Hebrew words and names, glossary: the tutor = "המטפלת" (Tomer's choice), feminine; the patient = "המטופל"), shows the progress dots, then prints in Hebrew. On any failure it prints in English and says so.
 5. [ ] Progress graphs → deploy.
 6. [ ] Voice settings (silence + tap-to-talk) → deploy → a session with each setting.
 7. [ ] Target word on screen → deploy → a session.

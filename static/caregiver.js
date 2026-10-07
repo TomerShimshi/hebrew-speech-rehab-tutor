@@ -11,8 +11,8 @@ const MOOD = { good: "מצב רוח טוב", ok: "מצב רוח בסדר", low: 
 const RESULT = { uncued: "✓", cued: "~", failed: "✗" };
 const RESULT_TEXT = { uncued: "לבד", cued: "עם רמז", failed: "לא הצליח" };
 const FLAG_KIND = { sudden_decline: "ירידה פתאומית", distress: "מצוקה", safety: "בטיחות", technical: "תקלה טכנית",
-                    tutor_issue: "טעות של המאמנת" };
-const END_REASON = { end_button: "כפתור סיום", tutor_goodbye: "המאמנת סיימה", abandoned: "החלון נסגר",
+                    tutor_issue: "טעות של המטפלת" };
+const END_REASON = { end_button: "כפתור סיום", tutor_goodbye: "המטפלת סיימה", abandoned: "החלון נסגר",
                      error: "תקלה" };
 const GOAL = { name_retrieval: "שליפת שמות", discourse: "סיפור והסבר", high_level_language: "שפה גבוהה",
                conversation: "שיחה חופשית" };
@@ -137,7 +137,7 @@ function flagBody(f) {
     el("span", { class: "who", text: `${who}:` }), el("span", { dir: "rtl", text: `«${text}»` })) : null;
   if (f.tutor_said || f.he_said) {
     return [ISSUE[f.issue] ? p(`סוג: ${ISSUE[f.issue]}`, "muted kv") : null,
-            quote("המאמנת", f.tutor_said), quote("הוא", f.he_said),
+            quote("המטפלת", f.tutor_said), quote("הוא", f.he_said),
             f.evidence ? el("p", { class: "kv", dir: "ltr", text: f.evidence }) : null];
   }
   // older flags: one free-text line with "[kind] TUTOR: ... HIM: ..." -- split it into lines
@@ -148,7 +148,7 @@ function flagBody(f) {
   const lines = [m && ISSUE[m[1]] ? p(`סוג: ${ISSUE[m[1]]}`, "muted kv") : null];
   for (let i = 0; i < parts.length; i++) {
     if (parts[i] === "TUTOR:" || parts[i] === "HIM:") {
-      lines.push(quote(parts[i] === "TUTOR:" ? "המאמנת" : "הוא", parts[i + 1] || ""));
+      lines.push(quote(parts[i] === "TUTOR:" ? "המטפלת" : "הוא", parts[i + 1] || ""));
       i++;
     } else {
       lines.push(p(parts[i]));
@@ -176,7 +176,7 @@ function renderTranscript(box, turns) {
     const main = t.text || t.live_text || "";
     const alt = mine && t.live_text && t.text && t.live_text.trim() !== t.text.trim() ? t.live_text : "";
     return el("div", { class: `turn ${mine ? "patient" : "tutor"}`, dir: "auto" },
-      el("b", { text: mine ? "הוא: " : "המאמנת: " }), main || "(ריק)",
+      el("b", { text: mine ? "הוא: " : "המטפלת: " }), main || "(ריק)",
       alt ? el("span", { class: "alt", text: `כתוביות הדפדפן: ${alt}` }) : null);
   }));
 }
@@ -248,7 +248,7 @@ function renderPlan(plan, notes) {
   $("plan").replaceChildren(
     plan.rendered
       ? el("pre", { class: "plan", dir: "auto", text: plan.rendered })
-      : p("אין תוכנית שמורה: המאמנת תעקוב אחרי המבנה הכללי.", "muted"),
+      : p("אין תוכנית שמורה: המטפלת תעקוב אחרי המבנה הכללי.", "muted"),
     plan.built_at ? p(`נבנה: ${when(plan.built_at)} · גרסת הנחיות ${plan.prompt_version || "?"}`, "muted kv") : null,
     plan.model ? el("p", { class: "kv" }, "נבנה על ידי: ", modelChip("model", plan.model),
                     weakModel(plan.model) ? " המודל החלש. כדאי לבנות מחדש כשהמכסה מתחדשת (או אחרי המעבר לגרסה בתשלום)." : "")
@@ -289,7 +289,7 @@ async function removeItem(section, item, where) {
   try {
     await api(acct("/memory/remove-item"), { section, item });
     await loadAccount();
-    $("memory-status").textContent = "✓ הפריט הוסר, והסיכום של המאמנת עודכן בלעדיו. הגרסה הקודמת נשמרה ברשימת הגרסאות.";
+    $("memory-status").textContent = "✓ הפריט הוסר, והסיכום של המטפלת עודכן בלעדיו. הגרסה הקודמת נשמרה ברשימת הגרסאות.";
   } catch (err) {
     const msg = err.status === 409
       ? "הזיכרון השתנה בינתיים. רענן ונסה שוב."
@@ -306,7 +306,7 @@ function renderMemory(memory) {
   }
   $("memory").replaceChildren(
     p(`מבוסס על ${memory.sessions_processed || 0} שיחות · עודכן ${when(memory.updated_at)}`, "muted kv"),
-    el("h3", { text: "מה המאמנת מקבלת בתחילת כל שיחה" }),
+    el("h3", { text: "מה המטפלת מקבלת בתחילת כל שיחה" }),
     el("pre", { class: "plan", dir: "auto", text: memory.memory_prompt }),
     memory.focus_next_session?.length
       ? el("div", {}, el("h3", { text: "דגשים לשיחה הבאה" }),
@@ -454,19 +454,22 @@ function probeStats(results) {
            treated: ownShare(by("treated")), untreated: ownShare(by("untreated")) };
 }
 
-function buildExport(n) {
+// t(): maps each English text to its Hebrew translation (identity when not translating).
+function buildExport(n, t = (s) => s, translated = false) {
   const ov = lastOverview;
   const sessions = lastSessions.filter((s) => s.status !== "active").slice(0, n);
   const oldest = sessions.at(-1)?.started_at;
   const newest = sessions[0]?.started_at;
-  const list = (items) => el("ul", {}, items.map((i) => el("li", { dir: "auto", text: i })));
+  const list = (items) => el("ul", {}, items.map((i) => el("li", { dir: "auto", text: t(i) })));
   const out = [
     el("h1", { text: "דברו איתי · סיכום לקלינאית" }),
     p(`${ov.email} · ${sessions.length} שיחות${oldest ? ` · ${when(oldest, false)} – ${when(newest, false)}` : ""} · הופק ${when(new Date().toISOString(), false)}`, "meta"),
-    p("סיכומי השיחות נכתבים על ידי המערכת באנגלית; המילים והשמות שלו מופיעים בעברית. הבדיקות: ✓ שלף לבד · ~ עם רמז · ✗ לא שלף.", "meta"),
+    p(translated
+      ? "הסיכומים תורגמו לעברית אוטומטית מהסיכומים שהמערכת כותבת באנגלית. הבדיקות: ✓ שלף לבד · ~ עם רמז · ✗ לא שלף."
+      : "סיכומי השיחות נכתבים על ידי המערכת באנגלית; המילים והשמות שלו מופיעים בעברית. הבדיקות: ✓ שלף לבד · ~ עם רמז · ✗ לא שלף.", "meta"),
     el("h2", { text: "מטרות ודגשים" }),
-    ov.next_plan?.rendered ? p(`השיעור הבא: ${(ov.next_plan.rendered.split("\n")[1] || "").replace(/^Main goal /, "")}`) : null,
-    ov.notes?.text ? el("div", {}, el("h3", { text: "הערות המשפחה / הקלינאית" }), el("p", { dir: "auto", text: ov.notes.text })) : null,
+    ov.next_plan?.rendered ? p(`השיעור הבא: ${t((ov.next_plan.rendered.split("\n")[1] || "").replace(/^Main goal \([a-z_]+\): /, ""))}`) : null,
+    ov.notes?.text ? el("div", {}, el("h3", { text: "הערות המשפחה / הקלינאית" }), el("p", { dir: "auto", text: t(ov.notes.text) })) : null,
     ov.memory?.focus_next_session?.length ? el("div", {}, el("h3", { text: "דגשים לשיחה הבאה" }), list(ov.memory.focus_next_session)) : null,
   ];
 
@@ -486,9 +489,9 @@ function buildExport(n) {
     const st = probeStats(s.probe_results);
     out.push(el("div", { class: "ex-session" },
       el("h3", { text: [when(s.started_at), minutes(s.started_at, s.ended_at), MOOD[s.mood], GOAL[s.plan_goal]].filter(Boolean).join(" · ") }),
-      s.summary ? el("p", { dir: "auto", text: s.summary }) : p("(אין סיכום)", "meta"),
-      s.highlights?.length ? el("p", { dir: "auto", text: `הצלחות: ${s.highlights.join(" · ")}` }) : null,
-      s.difficulties?.length ? el("p", { dir: "auto", text: `קשיים: ${s.difficulties.join(" · ")}` }) : null,
+      s.summary ? el("p", { dir: "auto", text: t(s.summary) }) : p("(אין סיכום)", "meta"),
+      s.highlights?.length ? el("p", { dir: "auto", text: `הצלחות: ${s.highlights.map(t).join(" · ")}` }) : null,
+      s.difficulties?.length ? el("p", { dir: "auto", text: `קשיים: ${s.difficulties.map(t).join(" · ")}` }) : null,
       s.probe_results?.length
         ? el("p", { dir: "auto", text: `בדיקה: ${s.probe_results.map((r) => `${RESULT[r.result] || "?"} ${r.word}`).join("  ")}  (✓${st.uncued} ~${st.cued} ✗${st.failed})` })
         : null,
@@ -515,11 +518,42 @@ function buildExport(n) {
   $("export").replaceChildren(...out.filter(Boolean));
 }
 
-$("export-run").addEventListener("click", () => {
-  if (!lastOverview) return;
-  buildExport(Number($("export-n").value));
+function printExport() {
   document.body.classList.add("printing");
   window.print();
+}
+
+// Ask first (an inline window -- no browser dialogs): translate to Hebrew, or print as is?
+$("export-run").addEventListener("click", () => {
+  if (!lastOverview) return;
+  $("export-status").textContent = "";
+  $("translate-ask").hidden = false;
+});
+$("translate-no").addEventListener("click", () => {
+  $("translate-ask").hidden = true;
+  buildExport(Number($("export-n").value));
+  printExport();
+});
+$("translate-yes").addEventListener("click", async () => {
+  $("translate-ask").hidden = true;
+  const n = Number($("export-n").value);
+  const texts = new Set(); // every English text the export shows, collected by a dry build
+  buildExport(n, (s) => { if (s && /[A-Za-z]{3}/.test(s)) texts.add(s); return s; });
+  const originals = [...texts];
+  busy($("export-status"), "מתרגם לעברית, זה עשוי לקחת עד כדקה");
+  $("export-run").disabled = true;
+  try {
+    const { translations } = await api(acct("/export/translate"), { texts: originals });
+    const map = new Map(originals.map((o, i) => [o, translations[i]]));
+    buildExport(n, (s) => map.get(s) ?? s, true);
+    $("export-status").textContent = "";
+  } catch {
+    buildExport(n);
+    $("export-status").textContent = "התרגום לא הצליח, הסיכום יודפס באנגלית.";
+  } finally {
+    $("export-run").disabled = false;
+  }
+  printExport();
 });
 window.addEventListener("afterprint", () => document.body.classList.remove("printing"));
 

@@ -17,14 +17,17 @@ import re
 from typing import Literal
 from urllib.parse import urlencode
 
+import yaml
 from fastapi import APIRouter, Body, Depends, HTTPException
+from google.genai import types
+from pydantic import BaseModel
 
 from app.agent.memory_edit import MemoryEditError, remove_item, remove_word, restore_version
-from app.agent.next_class import build_next_plan
+from app.agent.next_class import _models, build_next_plan
 from app.agent.research import personal_terms
 from app.auth import User, require_caregiver
 from app.class_plan import plan_for_session, render_class_plan
-from app.config import Settings, get_settings
+from app.config import REPO_ROOT, Settings, get_settings
 from app.games import profile_for
 from app.deps import (
     _bounded_generate, games_for, get_games_reader, get_profile_loader, get_prompt_archive, get_store,
@@ -38,6 +41,12 @@ from app.store import ENDED, PLAN_DONE, SessionStore
 router = APIRouter(prefix="/api/caregiver", dependencies=[Depends(require_caregiver)])
 
 NOTES_MAX_CHARS = 1500
+TRANSLATE_PROMPT = REPO_ROOT / "prompts" / "translate_export.yaml"
+TRANSLATE_MAX_TEXTS, TRANSLATE_MAX_CHARS = 400, 80_000
+
+
+class Translations(BaseModel):
+    translations: list[str]
 
 SESSION_FIELDS = ("id", "status", "started_at", "ended_at", "end_reason", "turn_count", "prompt_version",
                   "summary", "topics", "mood", "highlights", "difficulties", "probe_results",
@@ -265,6 +274,36 @@ def memory_restore(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     print(f"[caregiver] {caregiver.email} restored {pid}'s memory to {version}; backup={backup}", flush=True)
     return {"ok": True, "backup": backup}
+
+
+@router.post("/{email}/export/translate")
+def translate_export(
+    texts: list[str] = Body(..., embed=True),
+    pid: str = Depends(account),
+    settings: Settings = Depends(get_settings),
+    llm_client=Depends(get_text_client),
+) -> dict:
+    """Translates the therapist export's English texts into Hebrew -- one model call. The
+    caller falls back to English if this fails."""
+    if len(texts) > TRANSLATE_MAX_TEXTS or sum(len(t) for t in texts) > TRANSLATE_MAX_CHARS:
+        raise HTTPException(status_code=413, detail="Too much text to translate at once")
+    if not texts:
+        return {"translations": []}
+    prompt = yaml.safe_load(TRANSLATE_PROMPT.read_text(encoding="utf-8"))["system"]
+    try:
+        result = _bounded_generate(120)(
+            llm_client, _models(settings), json.dumps(texts, ensure_ascii=False),
+            types.GenerateContentConfig(system_instruction=prompt, response_mime_type="application/json",
+                                        response_schema=Translations, temperature=0.2))
+        out = result.response.parsed
+        if not isinstance(out, Translations):
+            out = Translations.model_validate_json(result.response.text)
+    except Exception as exc:  # noqa: BLE001 -- the page prints the English version instead
+        raise HTTPException(status_code=503, detail="Translation failed; print in English") from exc
+    if len(out.translations) != len(texts):
+        raise HTTPException(status_code=502, detail="Translation came back incomplete")
+    print(f"[caregiver] translated an export for {pid}: {len(texts)} texts, model {result.model}", flush=True)
+    return {"translations": out.translations, "model": result.model}
 
 
 @router.post("/{email}/plan/rebuild")

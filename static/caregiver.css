@@ -114,5 +114,8 @@ table.words th { color: var(--muted); font-weight: normal; }
   body.printing .cg-main { width: 100%; padding: 0; }
   @page { margin: 14mm; }
 }
+.ask-card { max-width: 26rem; text-align: center; }
+.ask-card h3 { color: var(--text); font-size: 1.3rem; margin: 0 0 .4rem; }
+.ask-card .cg-actions { justify-content: center; }
 .cg-actions { display: flex; flex-wrap: wrap; gap: .4rem .8rem; align-items: center; margin-top: .6rem; }
 .cg-card button.small:disabled { opacity: .5; cursor: default; }

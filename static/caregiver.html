@@ -69,6 +69,17 @@
           <select id="export-n"><option>5</option><option selected>10</option><option>20</option><option>30</option></select>
           <button id="export-run" class="small" type="button">הדפסה / שמירה כ־PDF</button>
         </div>
+        <p id="export-status" class="kv" aria-live="polite"></p>
+        <div id="translate-ask" class="overlay" role="dialog" aria-labelledby="translate-title" hidden>
+          <div class="overlay-card ask-card">
+            <h3 id="translate-title">לתרגם את הסיכום לעברית?</h3>
+            <p class="muted">הסיכומים נשמרים באנגלית. התרגום עשוי לקחת קצת יותר זמן.</p>
+            <div class="cg-actions">
+              <button id="translate-yes" class="small on" type="button">כן, לתרגם</button>
+              <button id="translate-no" class="small" type="button">לא, להדפיס כמו שזה</button>
+            </div>
+          </div>
+        </div>
       </details>
 
       <details class="cg-card" id="sec-sessions" open>
@@ -88,7 +99,7 @@
 
       <details class="cg-card" id="sec-next-prompt">
         <summary>הפרומפט לשיחה הבאה</summary>
-        <p class="muted">הטקסט המלא שהמאמנת תקבל אם השיחה הבאה תתחיל עכשיו: ההנחיות, הפרופיל, הזיכרון, השיעור והמשחקים.
+        <p class="muted">הטקסט המלא שהמטפלת תקבל אם השיחה הבאה תתחיל עכשיו: ההנחיות, הפרופיל, הזיכרון, השיעור והמשחקים.
           נבנה באותו קוד שמתחיל שיחה.</p>
         <div id="next-prompt"><p class="muted">נטען בפתיחה…</p></div>
       </details>
@@ -106,7 +117,7 @@
       </details>
 
       <details class="cg-card" id="sec-memory">
-        <summary>הזיכרון של המאמנת</summary>
+        <summary>הזיכרון של המטפלת</summary>
         <p id="memory-status" class="kv" aria-live="polite"></p>
         <div id="memory"></div>
         <details class="cg-sub" id="sec-history">
@@ -119,7 +130,7 @@
 
       <details class="cg-card" id="sec-words">
         <summary>בנק המילים</summary>
-        <p class="muted">מילים ושמות שהמאמנת תרגלה איתו, ומתי לחזור עליהם. ✕ מסיר מילה שלא שייכת (למשל שם שהומצא). הזיכרון נשמר בגיבוי לפני כן.</p>
+        <p class="muted">מילים ושמות שהמטפלת תרגלה איתו, ומתי לחזור עליהם. ✕ מסיר מילה שלא שייכת (למשל שם שהומצא). הזיכרון נשמר בגיבוי לפני כן.</p>
         <p id="words-status" class="kv" aria-live="polite"></p>
         <div id="words"></div>
       </details>
@@ -141,7 +152,7 @@
           <label class="choice">
             <input type="radio" name="reset-scope" value="memory" checked>
             <span><b>שכחי את הזיכרון</b><br>
-            המאמנת תתחיל כמו בפגישה ראשונה. השיחות והתמלולים נשמרים.</span>
+            המטפלת תתחיל כמו בפגישה ראשונה. השיחות והתמלולים נשמרים.</span>
           </label>
           <label class="choice">
             <input type="radio" name="reset-scope" value="everything">

@@ -305,3 +305,34 @@ def test_models_are_shown_per_session_and_for_the_next_plan(env):
     row = get(env, f"/api/caregiver/{DAD}/sessions").json()["sessions"][0]
     assert (row["memory_model"], row["plan_model"]) == ("gemini-3.8-flash", "gemini-3.5-flash-lite")
     assert get(env, f"/api/caregiver/{DAD}/overview").json()["next_plan"]["model"] == "gemini-3.5-flash-lite"
+
+
+
+# ---- 09 (4.5): translating the therapist export -----------------------------------------------------
+
+def test_export_translation(env):
+    from fake_llm import FakeClient, text
+    from app.caregiver_api import Translations
+    seed(env, DAD)
+    he = Translations(translations=["הוא דיבר על הכנרת.", "שלף את טבריה לבד"])
+    env.llm = FakeClient(text(he.model_dump_json(), parsed=he))
+    body = post(env, f"/api/caregiver/{DAD}/export/translate",
+                {"texts": ["He talked about the Galilee.", "Retrieved טבריה on his own"]}).json()
+    assert body["translations"] == he.translations
+    sent = env.llm.requests[0]
+    assert "Retrieved טבריה on his own" in sent["contents"]  # Hebrew words go through untouched
+    assert "Keep every Hebrew word" in sent["config"].system_instruction
+
+
+def test_export_translation_failures(env):
+    from fake_llm import FakeClient, client_error, text
+    from app.caregiver_api import Translations
+    seed(env, DAD)
+    path = f"/api/caregiver/{DAD}/export/translate"
+    short = Translations(translations=["רק אחד"])
+    env.llm = FakeClient(text(short.model_dump_json(), parsed=short))
+    assert post(env, path, {"texts": ["one", "two"]}).status_code == 502  # incomplete -> page prints English
+    env.llm = FakeClient(client_error(400))
+    assert post(env, path, {"texts": ["one"]}).status_code == 503
+    assert post(env, path, {"texts": ["x"] * 401}).status_code == 413
+    assert post(env, path, {"texts": ["one"]}, token="tok-dad").status_code == 403
