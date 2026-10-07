@@ -107,3 +107,46 @@ def test_duplicates_with_the_same_text_are_dropped(monkeypatch):
            {"title": "Errorless learning", "url": "https://a.example/2", "content": "Same  abstract text."}]
     monkeypatch.setattr(rs, "_post_json", FakeTavily(dup))
     assert len(rs.web_search("KEY", "errorless")) == 1
+
+
+
+# ---- 10: the Gemini search fallback ----------------------------------------------------------------
+
+def _grounded_response(chunks, supports=(), text="SFA helps naming."):
+    from types import SimpleNamespace as NS
+    meta = NS(grounding_chunks=[NS(web=NS(uri=u, title=t)) for u, t in chunks],
+              grounding_supports=[NS(segment=NS(text=s), grounding_chunk_indices=idx) for s, idx in supports])
+    return NS(response=NS(candidates=[NS(grounding_metadata=meta)], text=text), model="m", attempts=1)
+
+
+def test_gemini_search_takes_sources_from_grounding_metadata_and_resolves_redirects():
+    redirect = "https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc"
+    real = {redirect: "https://www.asha.org/practice-portal/aphasia/",
+            redirect + "2": "https://blog.example/tips"}
+    response = _grounded_response([(redirect, "asha.org"), (redirect + "2", "blog.example"), (redirect, "asha.org")],
+                                  supports=[("Semantic feature analysis improves naming.", [0])])
+    seen = {}
+    gen = lambda client, models, ask, config: (seen.update(ask=ask, tools=config.tools), response)[1]  # noqa: E731
+    out = rs.gemini_search(None, ["m"], "sfa anomia", "open", generate_fn=gen, resolve=real.get)
+    assert [(r["url"], r["trusted"]) for r in out] == [("https://www.asha.org/practice-portal/aphasia/", True),
+                                                        ("https://blog.example/tips", False)]  # deduplicated
+    assert out[0]["content"] == "Semantic feature analysis improves naming."
+    assert out[1]["content"] == "SFA helps naming."  # no snippet of its own: the summary
+    assert seen["tools"][0].google_search is not None and "Use only pages" not in seen["ask"]
+    trusted = rs.gemini_search(None, ["m"], "sfa", "trusted", generate_fn=gen, resolve=real.get)
+    assert [r["url"] for r in trusted] == ["https://www.asha.org/practice-portal/aphasia/"]  # trusted sites only
+    assert "asha.org" in seen["ask"] and "Use only pages" in seen["ask"]
+
+
+def test_gemini_search_unresolved_redirect_uses_the_title_domain():
+    redirect = "https://vertexaisearch.cloud.google.com/grounding-api-redirect/x"
+    response = _grounded_response([(redirect, "asha.org")])
+    out = rs.gemini_search(None, ["m"], "sfa", "trusted", generate_fn=lambda *a: response, resolve=lambda u: u)
+    assert out[0]["trusted"] is True and out[0]["url"] == redirect
+
+
+def test_gemini_search_unavailable_on_errors():
+    def failing(*args):
+        raise RuntimeError("429 RESOURCE_EXHAUSTED")
+    with pytest.raises(rs.SearchUnavailable):
+        rs.gemini_search(None, ["m"], "sfa", generate_fn=failing)

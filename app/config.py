@@ -29,6 +29,10 @@ class Settings(BaseSettings):
 
     # Second guard behind sign-in: caps Live sessions even for allowed users.
     token_rate_limit_per_hour: int = 30
+    # Runaway guards on paid use (10): a day's live minutes per account, and one session's length
+    # (a tab left open would otherwise keep reconnecting every ~10 minutes).
+    live_daily_minutes: int = 60
+    live_max_session_minutes: int = 30
 
     # Sign-in (Firebase Auth, Google provider). The emails live in .env / Cloud Run env vars,
     # never in the (public) repo. Comma-separated.
@@ -70,6 +74,10 @@ class Settings(BaseSettings):
     tavily_api_key: str = ""
     research_daily_limit: int = 3  # research runs per account per day
     research_monthly_limit: int = 800  # app-wide Tavily searches per month (below the free 1,000)
+    # Fallback when Tavily is unavailable (10): Gemini with Google Search grounding. The paid tier
+    # includes 5,000 grounded prompts a month; on the free tier it gets 429 and research is skipped.
+    gemini_search_enabled: bool = True
+    gemini_search_monthly_limit: int = 1000
     research_max_searches: int = 3  # per research run
     research_cache_days: int = 30
 

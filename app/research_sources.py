@@ -1,7 +1,10 @@
-"""The research sub-agent's one source (sub-plan 07): Tavily web search, as a plain function.
+"""The research sub-agent's search (sub-plan 07; fallback added in 10), as plain functions.
 
-  web_search(api_key, query, scope)   scope "trusted": only the sites in trusted_sources.yaml
+  web_search(api_key, query, scope)   Tavily -- the first choice (free 1,000 / month)
+                                      scope "trusted": only the sites in trusted_sources.yaml
                                       scope "open":    any site (results marked trusted=False)
+  gemini_search(client, models, ...)  Gemini + Google Search grounding -- the fallback when
+                                      Tavily is unavailable (paid tier: 5,000 / month included)
 
 It returns plain dicts and raises on failure (TavilyUnavailable when the key or the monthly
 quota is the problem -- then research is skipped). Guardrails that don't depend on the model
@@ -16,6 +19,7 @@ from functools import lru_cache
 from urllib.parse import urlsplit
 
 import yaml
+from google.genai import types
 
 from app.config import REPO_ROOT
 
@@ -101,3 +105,75 @@ def web_search(api_key: str, query: str, scope: str = "trusted", max_results: in
                         "content": content[:CONTENT_CHARS],
                         "trusted": is_trusted_domain(r.get("url", ""))})
     return results
+
+
+# ---- Gemini + Google Search: the fallback (10) ---------------------------------------------------
+
+class SearchUnavailable(Exception):
+    """The fallback can't search either (e.g. 429 on the free tier, every model failing)."""
+
+
+REDIRECT_HOST = "grounding-api-redirect"
+
+
+def resolve_url(uri: str, timeout_s: float = 6) -> str:
+    """Grounding sources are Google redirect links; follow one to the real page address."""
+    if REDIRECT_HOST not in (uri or ""):
+        return uri
+    headers = {"User-Agent": "Mozilla/5.0 (research link check)"}
+    for method in ("HEAD", "GET"):  # some redirects only answer a normal GET
+        try:
+            req = urllib.request.Request(uri, method=method, headers=headers)
+            with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+                if REDIRECT_HOST not in resp.geturl():
+                    return resp.geturl()
+        except urllib.error.HTTPError as exc:  # the page itself may refuse us -- its address is still known
+            if exc.url and REDIRECT_HOST not in exc.url:
+                return exc.url
+        except Exception:  # noqa: BLE001
+            pass
+    return uri  # unresolved: kept, but it can't count as trusted by its URL
+
+
+def gemini_search(client, models, query: str, scope: str = "trusted", *, generate_fn,
+                  resolve=resolve_url, max_results: int = 5) -> list[dict]:
+    """One grounded Gemini call; the sources come from its grounding metadata (never from its
+    own text), each resolved to its real address. A "trusted" search keeps only trusted sites."""
+    if scope not in SCOPES:
+        raise ValueError(f"scope must be one of {SCOPES}")
+    sites = ", ".join(trusted_domains())
+    ask = (f"Search the web for: {query}\n"
+           + (f"Use only pages from these sites: {sites}.\n" if scope == "trusted" else "")
+           + "Then summarize in 3-5 sentences what the sources say, for a speech-language pathologist.")
+    try:
+        result = generate_fn(client, models, ask, types.GenerateContentConfig(
+            tools=[types.Tool(google_search=types.GoogleSearch())], temperature=0.2))
+    except Exception as exc:  # noqa: BLE001 -- e.g. 429 on the free tier
+        raise SearchUnavailable(f"gemini search: {exc!s:.150}") from exc
+    candidate = (result.response.candidates or [None])[0]
+    meta = getattr(candidate, "grounding_metadata", None)
+    chunks = list(getattr(meta, "grounding_chunks", None) or [])
+    snippets: dict[int, list[str]] = {}
+    for support in getattr(meta, "grounding_supports", None) or []:
+        text = getattr(getattr(support, "segment", None), "text", "") or ""
+        for i in getattr(support, "grounding_chunk_indices", None) or []:
+            snippets.setdefault(i, []).append(text)
+    summary = (result.response.text or "")[:CONTENT_CHARS]
+    results, seen = [], set()
+    for i, chunk in enumerate(chunks):
+        web = getattr(chunk, "web", None)
+        if not web or not getattr(web, "uri", None):
+            continue
+        url = resolve(web.uri)
+        title = (getattr(web, "title", "") or "").strip()
+        if url in seen:
+            continue
+        seen.add(url)
+        # The title of a grounding source is usually its domain ("asha.org"): a fallback when
+        # the redirect couldn't be resolved.
+        trusted = is_trusted_domain(url) or (REDIRECT_HOST in url and bool(title) and is_trusted_domain(f"https://{title}/"))
+        content = " ".join(snippets.get(i, [])) or summary
+        results.append({"title": title, "url": url, "content": content[:CONTENT_CHARS], "trusted": trusted})
+    if scope == "trusted":
+        results = [r for r in results if r["trusted"]]
+    return results[:max_results]

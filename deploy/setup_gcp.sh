@@ -43,8 +43,8 @@ fi
 CURRENCY="$(gcv billing accounts describe "$BILLING_ACCOUNT" --format='value(currencyCode)')"
 if [[ -z "${BUDGET_AMOUNT:-}" ]]; then
   case "$CURRENCY" in
-    USD) BUDGET_AMOUNT=1 ;;
-    ILS) BUDGET_AMOUNT=4 ;;
+    USD) BUDGET_AMOUNT=32 ;;   # paid Gemini tier (sub-plan 10): ~120 ILS
+    ILS) BUDGET_AMOUNT=120 ;;  # email at 50%, soft stop at 75% (90 ILS), kill switch at 100%
     *) echo "!! Billing currency is $CURRENCY -- set BUDGET_AMOUNT (about 1 USD) and re-run"; exit 1 ;;
   esac
 fi
@@ -270,14 +270,43 @@ if [[ -z "$BUDGET_ID" ]]; then
     --budget-amount="${BUDGET_AMOUNT}${CURRENCY}" \
     --filter-projects="projects/${PROJECT_ID}" \
     --threshold-rule=percent=0.5 \
-    --threshold-rule=percent=0.9 \
+    --threshold-rule=percent=0.75 \
     --threshold-rule=percent=1.0 \
     --notifications-rule-pubsub-topic="$TOPIC_PATH"
 else
   gcloud billing budgets update "$BUDGET_ID" \
     --billing-account="$BILLING_ACCOUNT" \
     --budget-amount="${BUDGET_AMOUNT}${CURRENCY}" \
+    --clear-threshold-rules \
+    --add-threshold-rule=percent=0.5 \
+    --add-threshold-rule=percent=0.75 \
+    --add-threshold-rule=percent=1.0 \
     --notifications-rule-pubsub-topic="$TOPIC_PATH"
+fi
+
+# ---------------------------------------------------------------------------
+# Soft stop (sub-plan 10): the same budget notifications are pushed to the app, which pauses
+# model use at 75% of the budget (the kill switch above handles 100%). Signed as the sweeper's
+# service account, verified by the app like the hourly sweep.
+# ---------------------------------------------------------------------------
+echo ">> Soft stop: budget notifications -> the app..."
+PUBSUB_AGENT="service-${PROJECT_NUMBER}@gcp-sa-pubsub.iam.gserviceaccount.com"
+gcloud iam service-accounts add-iam-policy-binding "$SWEEPER_SA" \
+  --member="serviceAccount:${PUBSUB_AGENT}" --role="roles/iam.serviceAccountTokenCreator" >/dev/null
+if [[ -z "${SERVICE_URL:-}" ]]; then
+  echo "   app not deployed yet -- run deploy.sh, then re-run this script"
+else
+  PUSH_ARGS=(
+    --push-endpoint="${SERVICE_URL}/internal/budget"
+    --push-auth-service-account="$SWEEPER_SA"
+    --push-auth-token-audience="$SERVICE_URL"
+  )
+  if gcloud pubsub subscriptions describe budget-to-app >/dev/null 2>&1; then
+    gcloud pubsub subscriptions update budget-to-app "${PUSH_ARGS[@]}" >/dev/null
+  else
+    gcloud pubsub subscriptions create budget-to-app --topic="$TOPIC" --ack-deadline=60 "${PUSH_ARGS[@]}" >/dev/null
+  fi
+  echo "   push subscription budget-to-app -> ${SERVICE_URL}/internal/budget"
 fi
 
 echo ">> Done. Next: ./deploy/deploy.sh"

@@ -17,6 +17,7 @@ const NOTE_SILENCE =
   "[He has been silent for 30 seconds. If you already said goodbye, call end_session now. " +
   "Otherwise gently check whether he is still there (one short question in Hebrew).]";
 const SILENCE_NUDGE_MS = 30 * 1000;
+const PAUSED_TEXT = "האימון מושהה כרגע, נחזור בקרוב 🙏";
 
 const $ = (id) => document.getElementById(id);
 // Carry app.js's ?v=<asset version> onto the worklets, so a deploy never runs stale audio code.
@@ -315,7 +316,11 @@ async function fetchToken(resumeHandle) {
     session_id: s.sessionId,
   });
   if (res.status === 401 || res.status === 403) throw new Error("צריך להתחבר מחדש כדי להמשיך.");
+  const detail = res.ok ? "" : (await res.clone().json().catch(() => ({}))).detail;
+  if (res.status === 429 && detail === "daily_limit") throw new Error("הגענו למכסת האימון של היום, נמשיך מחר 🙂");
+  if (res.status === 409 && detail === "session_too_long") throw new Error("השיחה הזאת ארוכה מאוד, אז סיימנו להיום. נתראה בפעם הבאה 🙂");
   if (res.status === 429) throw new Error("נראה שהיו הרבה אימונים בשעה האחרונה. נסה שוב מאוחר יותר.");
+  if (res.status === 503 && (await res.clone().json().catch(() => ({}))).detail === "paused") throw new Error(PAUSED_TEXT);
   if (!res.ok) throw new Error("לא הצלחנו להתחיל את האימון. נסה שוב בעוד רגע.");
   const t = await res.json();
   s.sessionId = t.session_id;
@@ -607,9 +612,11 @@ function endSession(errorMessage, reason = errorMessage ? "error" : "end_button"
   $("talk").disabled = false;
   if (errorMessage) {
     $("start-status").textContent = errorMessage;
+    $("start-status").classList.toggle("paused-note", errorMessage === PAUSED_TEXT);
     show("start");
   } else {
     $("start-status").textContent = "";
+    $("start-status").classList.remove("paused-note");
     showGameHomework(sess.gameHomework || []);
     show("ended");
   }
@@ -773,6 +780,10 @@ async function onUserChanged(user) {
     const me = await res.json();
     $("admin-open").hidden = !me.is_caregiver; // Dad never sees it; the server enforces it too
     $("recording-note").hidden = !me.recording; // he's told when sessions are recorded (09)
+    // Soft stop on spending (10): practice is paused until a caregiver resumes it.
+    $("talk").disabled = !!me.paused;
+    $("start-status").textContent = me.paused ? PAUSED_TEXT : "";
+    $("start-status").classList.toggle("paused-note", !!me.paused);
     signinMessage("");
     show("start");
   } else if (res?.status === 403) {

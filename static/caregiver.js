@@ -798,9 +798,33 @@ async function loadAccount() {
   }
 }
 
+function renderBilling(b) {
+  const box = $("billing");
+  box.hidden = !b?.paused;
+  if (!b?.paused) return;
+  const spend = b.cost != null ? `${Math.round(b.cost)} מתוך ${Math.round(b.budget)} ${b.currency === "ILS" ? "₪" : b.currency || ""}` : "";
+  box.replaceChildren(
+    el("div", { class: "title", text: "⏸️ השימוש במודלים מושהה (עצירה רכה של ההוצאות)" }),
+    p(`ההוצאה החודשית הגיעה ל־75% מהתקציב${spend ? ` (${spend})` : ""}${b.since ? `, מאז ${when(b.since)}` : ""}. ` +
+      "שיחות חדשות, עדכוני זיכרון ובניית שיעורים ממתינים. האתר והנתונים זמינים כרגיל, ושום דבר לא אבד: " +
+      "שיחות שהסתיימו יעובדו אחרי ההמשך. בתחילת חודש חדש זה מתאפס לבד. בכל מקרה, ב־100% מתג הניתוק עוצר הכל."),
+    confirmButton("▶️ להמשיך (לשאר החודש)", "להמשיך את השימוש במודלים? ההוצאה תמשיך לגדול.", async (where) => {
+      busy(where, "ממשיך");
+      try {
+        await api("api/caregiver/billing/resume", {});
+        await loadAccounts();
+        status("✓ השימוש במודלים חודש. שיחות שהמתינו יעובדו בסבב הבא (או בכפתור העיבוד).");
+      } catch {
+        where.textContent = "ההמשך נכשל. נסה שוב.";
+      }
+    }),
+  );
+}
+
 async function loadAccounts() {
   const data = await api("api/caregiver/accounts");
   accounts = data.accounts;
+  renderBilling(data.billing);
   let saved = "";
   try { saved = localStorage.getItem(ACCOUNT_KEY) || ""; } catch { /* storage may be blocked */ }
   const emails = accounts.map((a) => a.email);

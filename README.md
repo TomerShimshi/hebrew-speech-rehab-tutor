@@ -33,7 +33,7 @@ flowchart LR
    - **Next-lesson builder:** writes the next session's plan. It has one main goal and 3–5 uncued check-in items (the progress measure: practised vs. new items), hints, an activity, homework and a game to play.
      - **Code guards** reject plans that invent his people, use answers that are too easy, or repeat the check-in items in practice.
      - It may ask the research sub-agent once (below).
-   - **Research sub-agent** (only when needed): looks up evidence-based home-practice techniques with **Tavily**, on trusted sites first (ASHA, PubMed, NIH, aphasia guidelines). Only techniques whose source the search actually returned are kept, and anything medical is dropped.
+   - **Research sub-agent** (only when needed): looks up evidence-based home-practice techniques with **Tavily** (Gemini with Google Search as the fallback), on trusted sites first (ASHA, PubMed, NIH, aphasia guidelines). Only techniques whose source the search actually returned are kept, and anything medical is dropped.
 3. **The caregiver page** (`/caregiver`, caregivers only), for every account:
    - **Reading:** sessions with summaries, check-in results, full transcripts and **the exact prompt the tutor got**; the next lesson and the prompt for the next session; the memory and its history; the word bank; research notes; games-app suggestions.
    - **Actions:** rebuild the next lesson now; notes for the planner; remove a wrong memory item or word; restore an earlier memory version; mark flags handled; open a prefilled GitHub issue for the games app; reset.
@@ -103,24 +103,36 @@ The tests use fakes for Gemini, Firestore, Upstash and Tavily, so they never cal
 - creates Firestore (all client access denied: only the backend reads and writes)
 - creates a private bucket, which holds the patient profile, plus prompt archives and memory backups (those two expire after 30 days)
 - creates the hourly **memory sweep** (Cloud Scheduler)
-- creates the **budget and kill switch**
+- creates the **budget**, the **soft stop** (a Pub/Sub push to the app) and the **kill switch**
 
 `deploy.sh` deploys to Cloud Run (0–1 instances) and keeps only what's live: old revisions, images and source archives are cleaned up.
 
-### Budget kill switch
-A budget publishes to a Pub/Sub topic. The `budget-killswitch` function ([deploy/budget_killswitch/](deploy/budget_killswitch/main.py)) **disables billing on the project** once the reported cost reaches the budget, which stops every paid service. Budget data lags by a few hours. To bring the app back, check the cost, then re-link billing (Billing → Account management). Dry run:
+### Spending limits: email, soft stop, kill switch
+One monthly budget (default **120 ILS**, set by `setup_gcp.sh`) publishes its notifications to the `budget-alerts` Pub/Sub topic, several times a day:
 
+| Spend | What happens |
+|---|---|
+| 50% | email |
+| **75%** | **soft stop** (in the app): new sessions and every model call pause. His screen says practice is paused; the site, the data and the caregiver page stay up. A caregiver presses **"continue (for the rest of the month)"** on the caregiver page. A new month clears it by itself. Nothing is lost: ended sessions are processed after the resume. |
+| **100%** | **kill switch**: the `budget-killswitch` function ([deploy/budget_killswitch/](deploy/budget_killswitch/main.py)) **disables billing on the project**, which stops every paid service. To bring the app back, check the cost, then re-link billing (Billing → Account management). |
+
+There are also runaway guards in the app: at most 60 live minutes per account per day, and at most 30 minutes per session.
+
+Budget data lags real usage by a few hours. Test the soft stop and the kill switch with a fake notification. Both listen to the same topic; the kill switch ignores anything below 100%:
 ```
-KILLSWITCH_DRY_RUN=true PROJECT_ID=<your-project> ./deploy/setup_gcp.sh
-gcloud pubsub topics publish budget-alerts --message='{"costAmount": 2, "budgetAmount": 1}'
+gcloud pubsub topics publish budget-alerts --message='{"costAmount": 95, "budgetAmount": 120, "currencyCode": "ILS"}'
 gcloud functions logs read budget-killswitch --region us-central1 --limit 5
 ```
+(Kill-switch dry run: `KILLSWITCH_DRY_RUN=true PROJECT_ID=<your-project> ./deploy/setup_gcp.sh`.)
+
+**Stopping billing by hand, any time:**
+- **Gemini only:** Cloud console → APIs & Services → *Generative Language API* → **Disable**. The site and caregiver page keep working; **Enable** to undo.
+- **Everything:** Cloud console → Billing → Account management → the project → **Disable billing**. Re-link to undo.
 
 ## Cost and privacy
-- **GCP:** within the free tier (Cloud Run, Firestore, Storage, Secret Manager, Scheduler).
-- **Gemini, free tier (current):** free, but Google may use the content to improve its products, and the stronger models' daily quota runs out (the app then falls back to smaller models).
-- **Gemini, paid tier (planned, [sub-plan 10](docs/plans/10-paid-gemini.md)):** about **$0.25–0.50 per ~12-minute session**, roughly $8–15 a month for a daily session. The content isn't used to improve Google's products. The budget and kill switch must be raised **before** switching.
-- **Research:** Tavily's free tier; only generic clinical keywords are ever sent (queries containing his names, places or Hebrew are blocked in code).
+- **Gemini runs on the paid tier**, with a key that belongs to the app's own project, so the budget above covers it. About **$0.25–0.50 per ~12-minute session**, roughly $8–15 a month for a daily session; the `3.8-flash` price doubles on 1 January 2027. On the paid tier, Google doesn't use the conversations to improve its products. To go back to the free tier: disable billing (above), or use a key from a project without billing.
+- **GCP:** within the free tier (Cloud Run, Firestore, Storage, Secret Manager, Scheduler, Pub/Sub, Logging).
+- **Research:** Tavily first (free 1,000 searches a month). When it's unavailable, Gemini with Google Search (included in the paid tier, 5,000 a month; our own limit is 1,000). Only generic clinical keywords are ever sent: queries containing his names, places or Hebrew are blocked in code.
 
 ## Safety
 - An emergency button on every screen shows the stroke warning signs (BE-FAST) and Magen David Adom (101).

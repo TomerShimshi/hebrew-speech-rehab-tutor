@@ -26,7 +26,9 @@ from app.config import REPO_ROOT, Settings
 from app.llm import generate
 from app.research_sources import (
     SCOPES,
+    SearchUnavailable,
     TavilyUnavailable,
+    gemini_search,
     has_hebrew,
     is_medical,
     is_trusted_domain,
@@ -55,6 +57,20 @@ def load_prompt() -> dict:
 def _models(settings: Settings) -> list[str]:
     fallbacks = [m.strip() for m in settings.summary_fallback_models.split(",") if m.strip()]
     return [settings.summary_model, *fallbacks]
+
+
+def tavily_ok(store: SessionStore, settings: Settings, month: str) -> bool:
+    return bool(settings.tavily_api_key) and store.searches_in_month(month) < settings.research_monthly_limit
+
+
+def gemini_ok(store: SessionStore, settings: Settings, month: str) -> bool:
+    return (settings.gemini_search_enabled
+            and store.searches_in_month(month, "gemini") < settings.gemini_search_monthly_limit)
+
+
+def search_available(store: SessionStore, settings: Settings, month: str) -> bool:
+    """Tavily, or the Gemini fallback (10)."""
+    return tavily_ok(store, settings, month) or gemini_ok(store, settings, month)
 
 
 def personal_terms(memory_raw: dict | None, profile_text: str = "", extra: tuple[str, ...] = ()) -> set[str]:
@@ -133,6 +149,7 @@ def research_technique(
     now: dt.datetime | None = None,
     generate_fn=generate,
     search_fn: Callable[..., list[dict]] = web_search,
+    gemini_search_fn: Callable[..., list[dict]] = gemini_search,
 ) -> dict:
     now = now or dt.datetime.now(dt.timezone.utc)
     q = normalize_question(question)
@@ -151,14 +168,33 @@ def research_technique(
             return _public(cached, "cached")
 
         month, day = now.strftime("%Y-%m"), now.date().isoformat()
-        if not settings.tavily_api_key or store.searches_in_month(month) >= settings.research_monthly_limit:
+        if not search_available(store, settings, month):
             return {"status": "unavailable", "message": "Research is not available right now; plan without it."}
         if store.research_runs_on(pid, day) >= settings.research_daily_limit:
             return {"status": "budget", "message": "Today's research budget is used up; plan without it."}
         store.add_research_run(pid, day)
 
         returned: dict[str, dict] = {}  # url -> result, from THIS run only
-        state = {"searches": 0, "open_used": False, "unavailable": False, "queries": []}
+        state = {"searches": 0, "open_used": False, "unavailable": False, "queries": [],
+                 "tavily_ok": tavily_ok(store, settings, month), "gemini_ok": gemini_ok(store, settings, month)}
+
+        def search(query: str, scope: str) -> tuple[list[dict], str]:
+            """Tavily first; Gemini + Google Search when Tavily is unavailable (10)."""
+            if state["tavily_ok"]:
+                store.add_search(month, "tavily")
+                try:
+                    return search_fn(settings.tavily_api_key, query, scope=scope), "tavily"
+                except TavilyUnavailable as exc:
+                    state["tavily_ok"] = False
+                    _log(f"tavily unavailable ({exc}); falling back to gemini search")
+            if state["gemini_ok"] and store.searches_in_month(month, "gemini") < settings.gemini_search_monthly_limit:
+                store.add_search(month, "gemini")
+                try:
+                    return gemini_search_fn(client, _models(settings), query, scope, generate_fn=generate_fn), "gemini"
+                except SearchUnavailable as exc:
+                    state["gemini_ok"] = False
+                    _log(f"gemini search unavailable: {exc}")
+            raise TavilyUnavailable("no search provider available")
 
         def handle_search(args: dict) -> dict:
             query = " ".join(str(args.get("query", "")).split())[:200]
@@ -176,25 +212,23 @@ def research_technique(
             if has_hebrew(query) or personal_terms_in(query, personal):
                 raise ValueError("the query contains personal details or Hebrew; use generic English keywords")
             if store.searches_in_month(month) >= settings.research_monthly_limit:
-                state["unavailable"] = True
-                raise ValueError("monthly search limit reached; finish with what you have")
+                state["tavily_ok"] = False  # our own monthly line for Tavily (the fallback may still work)
             state["searches"] += 1
             state["open_used"] |= scope == "open"
-            state["queries"].append({"query": query, "scope": scope})
-            store.add_search(month)
             try:
-                found = search_fn(settings.tavily_api_key, query, scope=scope)
+                found, provider = search(query, scope)
             except TavilyUnavailable as exc:
                 state["unavailable"] = True
-                _log(f"tavily unavailable: {exc}")
+                _log(f"no search available: {exc}")
                 raise ValueError("search is unavailable now; finish with what you have") from exc
+            state["queries"].append({"query": query, "scope": scope, "provider": provider})
             for r in found:
                 returned.setdefault(r["url"], r)
             return {"results": [{"title": r["title"], "url": r["url"], "content": r["content"]} for r in found]}
 
         search_tool = Tool(
             name="web_search",
-            description="Search the web (Tavily). Returns up to 5 results: title, url, content snippet.",
+            description="Search the web. Returns up to 5 results: title, url, content snippet.",
             parameters={
                 "type": "object",
                 "properties": {

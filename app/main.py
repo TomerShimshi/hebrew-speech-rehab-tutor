@@ -1,7 +1,9 @@
 """FastAPI entrypoint: `uvicorn app.main:app`."""
 
+import base64
 import datetime as dt
 import hashlib
+import json
 from functools import lru_cache
 from pathlib import Path
 
@@ -19,6 +21,7 @@ from app.live_token import create_live_token
 from app.patient_profile import PatientProfileLoader, extract_vocabulary
 from app.prompt_archive import PromptArchive
 from app.schemas import VoiceSettings
+from app import billing_guard
 from app.voice_tuning import adjust_after_session, current_settings
 from app.session_prompt import build_session_prompt
 from app.rate_limit import SlidingWindowLimiter
@@ -102,7 +105,7 @@ def me(user: User = Depends(verify_user), settings: Settings = Depends(get_setti
     # and whether its sessions are recorded (the start screen says so -- 09).
     recording = audio.enabled and voice_settings(store, settings, user.email).record_audio
     return {"email": user.email, "is_caregiver": user.email in settings.caregiver_email_set,
-            "recording": recording}
+            "recording": recording, "paused": billing_guard.is_paused(store)}
 
 
 def voice_settings(store: SessionStore, settings: Settings, pid: str) -> VoiceSettings:
@@ -113,6 +116,26 @@ def patient_id_for(user: User) -> str:
     # Every account is its own record (sessions, transcripts, memory), keyed by login email,
     # so memories never mix -- e.g. Tomer's test sessions vs Dad's real ones.
     return user.email
+
+
+def now_utc() -> dt.datetime:
+    return dt.datetime.now(dt.timezone.utc)
+
+
+def live_minutes_today(store: SessionStore, settings: Settings, pid: str) -> float:
+    """Live minutes this account used today (Israel time); each session counts at most its cap."""
+    from zoneinfo import ZoneInfo
+    tz = ZoneInfo("Asia/Jerusalem")
+    now = now_utc()
+    midnight = now.astimezone(tz).replace(hour=0, minute=0, second=0, microsecond=0)
+    cap = dt.timedelta(minutes=settings.live_max_session_minutes)
+    total = dt.timedelta()
+    for s in store.list_sessions(pid, 30):
+        started = s.get("started_at")
+        if not started or started < midnight:
+            continue
+        total += min(cap, (s.get("ended_at") or now) - started)
+    return total.total_seconds() / 60
 
 
 def _own_active_session(store: SessionStore, settings: Settings, user: User, sid: str) -> dict:
@@ -140,10 +163,17 @@ def start_session(
     games_reader=Depends(get_games_reader),
     audio=Depends(get_audio_store),
 ) -> dict:
+    if billing_guard.is_paused(store):  # soft stop on spending (10): the page says practice is paused
+        raise HTTPException(status_code=503, detail="paused")
     if not limiter.allow():
         raise HTTPException(status_code=429, detail="Too many sessions, try again later")
     if session_id:
-        _own_active_session(store, settings, user, session_id)  # reconnect: same session
+        session = _own_active_session(store, settings, user, session_id)  # reconnect: same session
+        started = session.get("started_at")
+        if started and now_utc() - started > dt.timedelta(minutes=settings.live_max_session_minutes):
+            raise HTTPException(status_code=409, detail="session_too_long")  # a tab left open: end it
+    elif live_minutes_today(store, settings, patient_id_for(user)) >= settings.live_daily_minutes:
+        raise HTTPException(status_code=429, detail="daily_limit")
     profile_text = profile.get()
     # The same function builds the caregiver page's "prompt for the next session" (8.5).
     built = build_session_prompt(store, settings, patient_id_for(user), profile_text, games_reader)
@@ -261,6 +291,10 @@ def end_session(
     # Update the tutor's memory now, inside this request (Cloud Run throttles CPU after the
     # response). The browser doesn't wait: it sent this with keepalive and moved on.
     # Failures are recorded and retried by the hourly sweep.
+    if billing_guard.is_paused(store):
+        # Soft stop (10): the transcript is saved; the memory update waits ("pending") for the
+        # sweep after a caregiver resumes.
+        return {"status": "ended", "memory_status": "pending", "plan_status": None, "paused": True}
     bounded = _bounded_generate(settings.memory_end_deadline_s)  # one budget for both calls
     profile_text = profile.get()
     memory_status = run_memory_update(
@@ -278,6 +312,25 @@ def end_session(
     return {"status": "ended", "memory_status": memory_status, "plan_status": plan_status}
 
 
+@app.post("/internal/budget")
+async def budget_alert(
+    request: Request,
+    _caller: str = Depends(verify_sweeper),  # Pub/Sub push, signed as the sweeper's service account
+    store: SessionStore = Depends(get_store),
+) -> dict:
+    """The monthly budget's notifications (Pub/Sub push): records the spend and applies the
+    soft stop at 75% of the budget (10). The kill switch handles 100% on its own."""
+    body = await request.json()
+    try:
+        data = base64.b64decode(body["message"]["data"]).decode("utf-8")
+        notification = json.loads(data)
+    except Exception as exc:  # noqa: BLE001 -- a malformed message must not be retried forever
+        print(f"[billing] unreadable budget message: {exc!r:.150}", flush=True)
+        return {"ok": False}
+    state = billing_guard.handle_notification(store, notification)
+    return {"ok": True, "paused": state.get("paused", False)}
+
+
 @app.post("/internal/memory/sweep")
 def memory_sweep(
     _caller: str = Depends(verify_sweeper),
@@ -290,6 +343,8 @@ def memory_sweep(
     """Hourly (Cloud Scheduler): update memory for sessions still waiting -- tabs closed
     mid-session, or updates that failed because the models were overloaded -- and rebuild
     next plans that are stale because he played the games after they were built (06)."""
+    if billing_guard.is_paused(store):
+        return {"processed": {}, "paused": True}  # soft stop (10): nothing calls a model
     results: dict[str, str] = {}
     budget = settings.memory_sweep_batch
     profile_text = profile.get()

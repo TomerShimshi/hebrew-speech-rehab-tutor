@@ -10,7 +10,8 @@ Layout (see docs/plans/03 and 04):
   patients/{pid}/plans/next               the lesson plan for the coming session (05)
   patients/{pid}/technique_notes/{id}     research findings, keyed by the normalized question (07)
   patients/{pid}/research_usage/{date}    research runs that day (07)
-  usage/tavily-{YYYY-MM}                  app-wide Tavily searches that month (07)
+  usage/{provider}-{YYYY-MM}              app-wide searches that month: tavily (07), gemini (10)
+  usage/billing                           the month's spend and the soft stop (10)
   patients/{pid}/caregiver/notes          the caregiver's notes for the plan builder (08)
   patients/{pid}/caregiver/settings       per-account session settings: voice, tap-to-talk (09)
   patients/{pid}/sessions/{sid}/prompt/live  the exact system instruction the tutor got (8.5)
@@ -88,8 +89,8 @@ class SessionStore(Protocol):
     def recent_technique_notes(self, pid: str, n: int = 3) -> list[dict]: ...
     def research_runs_on(self, pid: str, day: str) -> int: ...
     def add_research_run(self, pid: str, day: str) -> None: ...
-    def searches_in_month(self, month: str) -> int: ...
-    def add_search(self, month: str) -> None: ...
+    def searches_in_month(self, month: str, provider: str = "tavily") -> int: ...
+    def add_search(self, month: str, provider: str = "tavily") -> None: ...
     # caregiver page (sub-plan 08), newest first
     def list_sessions(self, pid: str, n: int = 30) -> list[dict]: ...
     def list_flags(self, pid: str, n: int = 50) -> list[dict]: ...
@@ -102,6 +103,8 @@ class SessionStore(Protocol):
     def save_notes(self, pid: str, text: str, by: str) -> None: ...
     def save_session_prompt(self, pid: str, sid: str, text: str, version: str) -> None: ...
     def get_settings(self, pid: str) -> dict | None: ...
+    def get_billing_state(self) -> dict | None: ...
+    def set_billing_state(self, state: dict) -> None: ...
     def save_settings(self, pid: str, settings: dict, by: str) -> None: ...
     def get_session_prompt(self, pid: str, sid: str) -> dict | None: ...
 
@@ -125,6 +128,7 @@ class InMemorySessionStore:
         self.notes: dict[str, dict] = {}
         self.session_prompts: dict[tuple[str, str], dict] = {}
         self.settings: dict[str, dict] = {}
+        self.billing: dict | None = None
 
     def create_session(self, pid, *, user_email, model, prompt_version):
         sid = uuid.uuid4().hex
@@ -305,17 +309,23 @@ class InMemorySessionStore:
     def get_settings(self, pid):
         return self.settings.get(pid)
 
+    def get_billing_state(self):
+        return self.billing
+
+    def set_billing_state(self, state):
+        self.billing = dict(state)
+
     def save_settings(self, pid, settings, by):
         self.settings[pid] = {**settings, "updated_by": by, "updated_at": _now()}
 
     def add_research_run(self, pid, day):
         self.research_runs[(pid, day)] = self.research_runs_on(pid, day) + 1
 
-    def searches_in_month(self, month):
-        return self.monthly_searches.get(month, 0)
+    def searches_in_month(self, month, provider="tavily"):
+        return self.monthly_searches.get(f"{provider}-{month}", 0)
 
-    def add_search(self, month):
-        self.monthly_searches[month] = self.searches_in_month(month) + 1
+    def add_search(self, month, provider="tavily"):
+        self.monthly_searches[f"{provider}-{month}"] = self.searches_in_month(month, provider) + 1
 
     def pending_plan_sessions(self, pid, limit=2):
         found = [v for k, v in self.sessions.items()
@@ -553,6 +563,13 @@ class FirestoreSessionStore:
         snap = self._patient(pid).collection("caregiver").document("settings").get()
         return snap.to_dict() if snap.exists else None
 
+    def get_billing_state(self):
+        snap = self._db.collection("usage").document("billing").get()
+        return snap.to_dict() if snap.exists else None
+
+    def set_billing_state(self, state):
+        self._db.collection("usage").document("billing").set(state)
+
     def save_settings(self, pid, settings, by):
         self._patient(pid).collection("caregiver").document("settings").set(
             {**settings, "updated_by": by, "updated_at": self._fs.SERVER_TIMESTAMP})
@@ -565,12 +582,12 @@ class FirestoreSessionStore:
         self._patient(pid).collection("research_usage").document(day).set(
             {"runs": self._fs.Increment(1)}, merge=True)
 
-    def searches_in_month(self, month):
-        snap = self._db.collection("usage").document(f"tavily-{month}").get()
+    def searches_in_month(self, month, provider="tavily"):
+        snap = self._db.collection("usage").document(f"{provider}-{month}").get()
         return int((snap.to_dict() or {}).get("searches", 0)) if snap.exists else 0
 
-    def add_search(self, month):
-        self._db.collection("usage").document(f"tavily-{month}").set(
+    def add_search(self, month, provider="tavily"):
+        self._db.collection("usage").document(f"{provider}-{month}").set(
             {"searches": self._fs.Increment(1)}, merge=True)
 
     def add_flag(self, pid, sid, flag):

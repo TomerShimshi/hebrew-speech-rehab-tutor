@@ -69,7 +69,7 @@ def test_finds_and_keeps_sourced_techniques():
     assert out["techniques"][1]["source_url"] == BLOG_URL
     assert [c["scope"] for c in search.calls] == ["trusted", "open"]
     note = store.get_technique_note(PID, note_id(QUESTION))
-    assert note["queries"][0] == {"query": "semantic feature analysis anomia", "scope": "trusted"}
+    assert note["queries"][0] == {"query": "semantic feature analysis anomia", "scope": "trusted", "provider": "tavily"}
     assert store.searches_in_month("2026-10") == 2 and store.research_runs_on(PID, "2026-10-04") == 1
     # the findings call sees the search results, the question, and nothing else
     findings_input = client.requests[-1]["contents"]
@@ -180,3 +180,62 @@ def test_personal_terms_from_memory_and_profile():
     terms = personal_terms(memory, "Name: efraim. Speaks Hebrew and Russian.", extra=("dad.cohen@example.com", "efraim"))
     assert {"Haifa", "Rina", "Noam", "Galilee", "Tiberias", "cohen", "efraim"} <= terms
     assert not {"Hebrew", "Russian", "He", "Grandson", "Practice", "Name"} & terms
+
+
+
+# ---- 10: Gemini + Google Search when Tavily is unavailable ---------------------------------------
+
+class FakeGeminiSearch:
+    def __init__(self, error=None):
+        self.calls, self.error = [], error
+
+    def __call__(self, client, models, query, scope="trusted", *, generate_fn):
+        from app.research_sources import SearchUnavailable
+        self.calls.append({"query": query, "scope": scope})
+        if self.error:
+            raise SearchUnavailable(self.error)
+        return [{"title": "asha.org", "url": SFA_URL, "content": "Semantic feature analysis...", "trusted": True}]
+
+
+def run_with_fallback(client, store=None, search=None, gemini=None, **settings_overrides):
+    store = store or InMemorySessionStore()
+    search, gemini = search or FakeSearch(), gemini or FakeGeminiSearch()
+    out = research_technique(store, client, settings(gemini_search_enabled=True, **settings_overrides), PID, QUESTION,
+                             personal={"Rina"}, now=NOW, generate_fn=gen, search_fn=search, gemini_search_fn=gemini)
+    return out, store, search, gemini
+
+
+def test_tavily_quota_error_falls_back_to_gemini_search_for_the_same_query():
+    client = FakeClient(tool_calls(("web_search", {"query": "semantic feature analysis"})), text("done"), findings(technique()))
+    out, store, search, gemini = run_with_fallback(client, search=FakeSearch(error=TavilyUnavailable("tavily HTTP 432")))
+    assert out["status"] == "ok" and [t["name"] for t in out["techniques"]] == ["Semantic Feature Analysis"]
+    assert [c["query"] for c in gemini.calls] == ["semantic feature analysis"]  # the same query, not lost
+    note = store.get_technique_note(PID, note_id(QUESTION))
+    assert note["queries"][0]["provider"] == "gemini"
+    assert (store.searches_in_month("2026-10", "tavily"), store.searches_in_month("2026-10", "gemini")) == (1, 1)
+
+
+def test_no_tavily_key_goes_straight_to_gemini_search():
+    client = FakeClient(tool_calls(("web_search", {"query": "anomia"})), text("done"), findings(technique()))
+    out, store, search, gemini = run_with_fallback(client, tavily_api_key="")
+    assert out["status"] == "ok" and search.calls == [] and len(gemini.calls) == 1
+
+
+def test_the_fallback_keeps_the_guardrails():
+    client = FakeClient(tool_calls(("web_search", {"query": "names like Rina"})),
+                        tool_calls(("web_search", {"query": "anomia"})), text("done"),
+                        findings(technique(), technique("Invented", url="https://made-up.example/")))
+    out, _, _, gemini = run_with_fallback(client, tavily_api_key="")
+    assert [c["query"] for c in gemini.calls] == ["anomia"]  # personal query blocked before any search
+    assert [t["name"] for t in out["techniques"]] == ["Semantic Feature Analysis"]  # unsourced one dropped
+
+
+def test_both_providers_unavailable():
+    client = FakeClient(tool_calls(("web_search", {"query": "anomia"})), text("done"))
+    out, *_ = run_with_fallback(client, tavily_api_key="", gemini=FakeGeminiSearch(error="429 no grounding quota"))
+    assert out["status"] == "unavailable"
+    store = InMemorySessionStore()
+    for _ in range(3):
+        store.add_search("2026-10", "gemini")
+    out, *_ = run_with_fallback(FakeClient(), store=store, tavily_api_key="", gemini_search_monthly_limit=3)
+    assert out["status"] == "unavailable"  # the fallback's own monthly line

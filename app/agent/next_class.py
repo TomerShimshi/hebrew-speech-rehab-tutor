@@ -20,7 +20,7 @@ from google.genai import types
 
 from app import word_bank
 from app.agent.memory_update import format_memory
-from app.agent.research import personal_terms, research_technique
+from app.agent.research import personal_terms, research_technique, search_available
 from app.agent.runner import Tool, run_tool_loop
 from app.config import REPO_ROOT, Settings
 from app.games import render_games_for_plan
@@ -157,9 +157,8 @@ def render_notes(notes: list[dict]) -> str:
 
 
 def research_available(store: SessionStore, settings: Settings, pid: str, now: dt.datetime) -> bool:
-    return bool(settings.tavily_api_key
-                and store.research_runs_on(pid, now.date().isoformat()) < settings.research_daily_limit
-                and store.searches_in_month(now.strftime("%Y-%m")) < settings.research_monthly_limit)
+    return bool(store.research_runs_on(pid, now.date().isoformat()) < settings.research_daily_limit
+                and search_available(store, settings, now.strftime("%Y-%m")))
 
 
 def run_research_phase(store, client, settings, pid, context, personal, now, generate_fn, research_fn) -> dict | None:

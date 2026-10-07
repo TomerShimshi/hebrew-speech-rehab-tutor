@@ -6,6 +6,7 @@ from types import SimpleNamespace
 # Settings() also reads the developer's .env (even in module-level test constants, created
 # before any fixture runs): tests must never use the real Tavily key. Env vars beat .env.
 os.environ["TAVILY_API_KEY"] = ""
+os.environ["GEMINI_SEARCH_ENABLED"] = "false"  # the Gemini search fallback (10): on only where a test says so
 
 import pytest
 from fastapi.testclient import TestClient

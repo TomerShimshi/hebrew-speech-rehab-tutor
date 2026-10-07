@@ -24,6 +24,7 @@ from pydantic import BaseModel
 
 from app.agent.memory_edit import MemoryEditError, remove_item, remove_word, restore_version
 from app.agent.memory_update import run_memory_update
+from app import billing_guard
 from app.agent.next_class import _models, build_next_plan
 from app.agent.research import personal_terms
 from app.auth import User, require_caregiver
@@ -59,6 +60,12 @@ SESSION_FIELDS = ("id", "status", "started_at", "ended_at", "end_reason", "turn_
                   "memory_model", "plan_model",  # which model did the work (09)
                   "voice_used", "voice_decision",  # the settings it ran with, and the automatic decision after it
                   "audio_bytes", "audio_type")  # its recording, if any (09)
+
+
+def not_paused(store: SessionStore = Depends(get_store)) -> None:
+    """Model-calling actions wait while spending is paused (the soft stop, 10)."""
+    if billing_guard.is_paused(store):
+        raise HTTPException(status_code=409, detail="paused")
 
 
 def account(email: str, settings: Settings = Depends(get_settings)) -> str:
@@ -173,10 +180,22 @@ def progress(pid: str = Depends(account), store: SessionStore = Depends(get_stor
     return progress_series(store.list_sessions(pid, 30), (store.get_memory(pid) or {}).get("word_bank") or {})
 
 
+@router.post("/billing/resume")
+def billing_resume(caregiver: User = Depends(require_caregiver), store: SessionStore = Depends(get_store)) -> dict:
+    """Ends the soft stop for the rest of this month (the kill switch still guards 100%)."""
+    state = billing_guard.resume(store, caregiver.email)
+    print(f"[caregiver] {caregiver.email} resumed model use (spend {state.get('cost')} of {state.get('budget')})", flush=True)
+    return {"ok": True}
+
+
 @router.get("/accounts")
 def accounts(caregiver: User = Depends(require_caregiver), settings: Settings = Depends(get_settings),
              store: SessionStore = Depends(get_store)) -> dict:
-    return {"me": caregiver.email, "accounts": [
+    billing = store.get_billing_state() or {}
+    return {"me": caregiver.email,
+            "billing": {**{k: billing.get(k) for k in ("cost", "budget", "currency", "month", "since", "resumed_by")},
+                        "paused": billing_guard.is_paused(store)},
+            "accounts": [
         {"email": email, **store.account_overview(email)} for email in sorted(settings.allowed_email_set)
     ]}
 
@@ -314,7 +333,7 @@ def set_recommendation_status(rec_id: str, status: Literal["new", "accepted", "r
     return {"ok": True}
 
 
-@router.post("/{email}/memory/remove-item")
+@router.post("/{email}/memory/remove-item", dependencies=[Depends(not_paused)])
 def memory_remove_item(
     section: str = Body(..., embed=True, max_length=64),
     item: str = Body(..., embed=True, max_length=2000),
@@ -371,7 +390,7 @@ def memory_restore(
     return {"ok": True, "backup": backup}
 
 
-@router.post("/{email}/export/translate")
+@router.post("/{email}/export/translate", dependencies=[Depends(not_paused)])
 def translate_export(
     texts: list[str] = Body(..., embed=True),
     pid: str = Depends(account),
@@ -404,7 +423,7 @@ def translate_export(
 STUCK_ACTIVE_AFTER = dt.timedelta(minutes=20)  # sessions last ~10-15 min: still "active" = tab closed
 
 
-@router.post("/{email}/sessions/{sid}/process")
+@router.post("/{email}/sessions/{sid}/process", dependencies=[Depends(not_paused)])
 def process_session(
     sid: str,
     pid: str = Depends(account),
@@ -444,7 +463,7 @@ def process_session(
             "error": after.get("memory_error") or after.get("plan_error")}
 
 
-@router.post("/{email}/plan/rebuild")
+@router.post("/{email}/plan/rebuild", dependencies=[Depends(not_paused)])
 def rebuild_plan(
     pid: str = Depends(account),
     caregiver: User = Depends(require_caregiver),
