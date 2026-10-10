@@ -18,6 +18,7 @@ _SECTIONS = (
     ("fatigue_protocol", "FATIGUE AND FRUSTRATION"),
     ("safety", "SAFETY"),
     ("patient_profile", "PATIENT PROFILE"),
+    ("session_timing", "WHEN YOU LAST SPOKE"),
     ("memory_prompt", "WHAT YOU REMEMBER FROM PREVIOUS SESSIONS"),
     ("games_recent", "HIS GAMES APP"),
     ("class_plan", "TODAY'S PLAN"),
@@ -39,6 +40,7 @@ def read_optional_text(path: Path | None) -> str:
 def render_tutor_prompt(
     *,
     patient_profile: str = "",
+    session_timing: str = "",
     memory_prompt: str = "",
     games_recent: str = "",
     class_plan: str = "",
@@ -47,6 +49,7 @@ def render_tutor_prompt(
     template = yaml.safe_load(template_path.read_text(encoding="utf-8"))
     values = {
         "patient_profile": patient_profile,
+        "session_timing": session_timing,
         "memory_prompt": memory_prompt,
         "games_recent": games_recent,
         "class_plan": class_plan,

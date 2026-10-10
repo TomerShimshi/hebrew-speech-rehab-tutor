@@ -76,7 +76,11 @@ gcloud run deploy "$SERVICE" \
   --set-env-vars "$ENV_VARS" \
   --allow-unauthenticated
 
-URL="$(gcv run services describe "$SERVICE" --region "$REGION" --format='value(status.url)')"
+# Cloud Run gives a service two addresses for the same thing: the app's link (from the project
+# number -- the one in Firebase's authorized domains, so sign-in works there) and an older
+# hash-based one (status.url; still the sweep's token audience above). Print the app's link.
+PROJECT_NUMBER="$(gcv projects describe "$PROJECT_ID" --format='value(projectNumber)')"
+URL="https://${SERVICE}-${PROJECT_NUMBER}.${REGION}.run.app"
 echo ">> Deployed: $URL"
 echo ">> Health:   $(curl -fsS "$URL/api/health" || echo 'health check failed')"
 

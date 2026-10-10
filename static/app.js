@@ -324,6 +324,7 @@ async function fetchToken(resumeHandle) {
   if (!res.ok) throw new Error("לא הצלחנו להתחיל את האימון. נסה שוב בעוד רגע.");
   const t = await res.json();
   s.sessionId = t.session_id;
+  if (t.start_note) s.startNote = t.start_note; // the greeting cue, with when they last talked
   if (t.game_homework) s.gameHomework = t.game_homework; // buttons for the end screen (06)
   setTapToTalk(!!t.voice?.tap_to_talk); // per-account setting (09)
   s.noiseLevel = t.voice?.noise_level || 0; // the noise filter level (09), adjusted after each session
@@ -421,7 +422,7 @@ function handleServerMessage(msg, isResume) {
     s.ready = true;
     s.modelActive = false; // a fresh connection has no turn in progress
     setIndicator("listening");
-    if (!isResume) sendNote(NOTE_START);
+    if (!isResume) sendNote(s.startNote || NOTE_START);
     return;
   }
   if (msg.sessionResumptionUpdate?.resumable && msg.sessionResumptionUpdate.newHandle) {
@@ -934,6 +935,12 @@ try {
   log("auth", `init failed: ${err.message}`);
   signinMessage("ההתחברות עדיין לא מוגדרת בשרת.");
 }
+
+// The server sleeps when idle (Cloud Run scales to zero; waking takes ~10 s). Wake it as soon as
+// the app is on screen -- also when he returns to a tab left open -- so it's ready by his tap.
+const warmUp = () => { if (document.visibilityState === "visible" && !s) fetch("api/health").catch(() => {}); };
+warmUp();
+document.addEventListener("visibilitychange", warmUp);
 
 $("emergency").addEventListener("click", () => { $("emergency-overlay").hidden = false; });
 $("emergency-close").addEventListener("click", () => { $("emergency-overlay").hidden = true; });

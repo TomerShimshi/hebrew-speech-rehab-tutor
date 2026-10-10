@@ -176,9 +176,14 @@ def start_session(
             raise HTTPException(status_code=409, detail="session_too_long")  # a tab left open: end it
     elif live_minutes_today(store, settings, patient_id_for(user)) >= settings.live_daily_minutes:
         raise HTTPException(status_code=429, detail="daily_limit")
+    if not session_id:
+        # A session still "active" means its tab was closed without ending: close it out
+        # (before the prompt, so "when you last spoke" counts it).
+        store.mark_abandoned(patient_id_for(user))
     profile_text = profile.get()
     # The same function builds the caregiver page's "prompt for the next session" (8.5).
-    built = build_session_prompt(store, settings, patient_id_for(user), profile_text, games_reader)
+    built = build_session_prompt(store, settings, patient_id_for(user), profile_text, games_reader,
+                                 exclude_sid=session_id)
     prompt, plan = built.prompt, built.plan
     # Per-account voice settings from the caregiver page (09): silence length, tap-to-talk.
     voice = voice_settings(store, settings, patient_id_for(user))
@@ -191,8 +196,6 @@ def start_session(
         voice=voice,
     )
     if not session_id:
-        # A session still "active" means its tab was closed without ending: close it out.
-        store.mark_abandoned(patient_id_for(user))
         session_id = store.create_session(
             patient_id_for(user),
             user_email=user.email,
@@ -224,6 +227,7 @@ def start_session(
         "ws_url": live.ws_url,
         "expires_at": live.expires_at.isoformat(),
         "prompt_version": prompt.version,
+        "start_note": built.start_note,  # the greeting cue, with when they last talked
         # buttons for the end screen: the game homework the tutor will suggest
         "game_homework": homework_buttons(plan, patient_id_for(user), settings),
         "voice": {"tap_to_talk": voice.tap_to_talk, "noise_level": voice.noise_level,
