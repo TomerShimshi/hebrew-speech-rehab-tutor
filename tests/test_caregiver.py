@@ -402,7 +402,12 @@ def test_voice_settings_reach_the_session_token(env):
     env.client.post("/api/session/start", headers=auth("tok-tomer"))
     assert _vad().silence_duration_ms == 3000 and not _vad().disabled
     # validated, and caregivers only
-    assert put({"voice": {"silence_ms": 500, "tap_to_talk": False}}).status_code == 422
+    # 0 = no silence length: Gemini decides when he's done
+    assert put({"voice": {"silence_ms": 0, "silence_auto": False, "tap_to_talk": False}}).status_code == 200
+    env.client.post("/api/session/start", headers=auth("tok-dad"))
+    assert _vad().silence_duration_ms is None and not _vad().disabled
+    assert _vad().end_of_speech_sensitivity is not None
+    assert put({"voice": {"silence_ms": -1, "tap_to_talk": False}}).status_code == 422
     assert put({"voice": {"silence_ms": 9000, "tap_to_talk": False}}).status_code == 422
     assert put({"voice": {"silence_ms": 4000, "tap_to_talk": False}}, token="tok-dad").status_code == 403
 

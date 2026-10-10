@@ -80,7 +80,8 @@ def build_live_config(
                     start_of_speech_sensitivity=(types.StartSensitivity.START_SENSITIVITY_LOW if voice.noise_level >= 3
                                                  else types.StartSensitivity.START_SENSITIVITY_HIGH),
                     end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_LOW,
-                    silence_duration_ms=voice.silence_ms,  # per account, from the caregiver page
+                    # per account, from the caregiver page; 0 = not set: Gemini's own end-of-turn timing
+                    silence_duration_ms=voice.silence_ms or None,
                 )
             )
         ),

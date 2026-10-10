@@ -56,7 +56,8 @@ def decide(current: VoiceSettings, state: dict, measured: dict) -> tuple[VoiceSe
         if measured["cut_offs"] >= TRIGGER:
             state["silence_clean"] = 0
             if current.silence_ms < SILENCE_MAX_MS:
-                new.silence_ms = min(SILENCE_MAX_MS, current.silence_ms + SILENCE_STEP_MS)
+                # from below the automatic range (e.g. a fixed 0 switched to automatic): its minimum
+                new.silence_ms = min(SILENCE_MAX_MS, max(SILENCE_MIN_MS, current.silence_ms + SILENCE_STEP_MS))
                 changes.append(f"silence {current.silence_ms / 1000:g}s -> {new.silence_ms / 1000:g}s "
                                f"({measured['cut_offs']} cut-offs)")
         else:

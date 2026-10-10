@@ -105,7 +105,8 @@ class MemoryDoc(BaseModel):
 # ---- per-account session settings (sub-plan 09), set on the caregiver page ----------------------
 
 class VoiceSettings(BaseModel):
-    silence_ms: int = Field(default=3000, ge=2000, le=8000)  # silence before she answers (automatic mode)
+    # Silence before she answers (automatic mode); 0 = none set: Gemini decides when he's done.
+    silence_ms: int = Field(default=3000, ge=0, le=8000)
     silence_auto: bool = True  # adjusted after each session (app/voice_tuning.py) unless the family fixed it
     noise_level: int = Field(default=0, ge=0, le=3)  # browser noise filter while she speaks (0 = off)
     noise_auto: bool = True

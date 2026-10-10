@@ -51,6 +51,9 @@ def test_bounds_fixed_values_and_the_tap_to_talk_suggestion():
     fixed = VoiceSettings(silence_ms=4000, silence_auto=False, noise_level=1, noise_auto=False)
     v, st, ch = decide(fixed, {}, {"cut_offs": 5, "noise_interruptions": 5})
     assert (v.silence_ms, v.noise_level, ch) == (4000, 1, [])  # the family's fixed values are never touched
+    # a fixed 0 switched to automatic: cut-offs move it straight to the automatic minimum
+    v, _, _ = decide(VoiceSettings(silence_ms=0), {}, {"cut_offs": 3, "noise_interruptions": 0})
+    assert v.silence_ms == 2500
     low = VoiceSettings(silence_ms=2500)
     v, st, _ = decide(low, {"silence_clean": 2}, {"cut_offs": 0, "noise_interruptions": 0})
     assert v.silence_ms == 2500  # minimum

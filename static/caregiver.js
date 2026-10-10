@@ -510,7 +510,7 @@ function renderVoice(v) {
     el("div", { class: "voice-facts" },
       v.tap_to_talk ? el("span", {}, el("b", { text: "לחיצה לדיבור פעילה" }), el("span", { class: "mode", text: " (השקט והמסנן לא חלים)" }))
                     : null,
-      fact("שקט לפני שהיא עונה", `${v.silence_ms / 1000} שניות`, v.silence_auto),
+      fact("שקט לפני שהיא עונה", silenceText(v.silence_ms), v.silence_auto),
       fact("מסנן רעשים", `${v.noise_level} · ${NOISE_NAME[v.noise_level]}`, v.noise_auto),
       v.tap_to_talk ? null : el("span", {}, "לחיצה לדיבור: ", el("b", { text: "כבויה" })),
       el("span", {}, "הקלטה: ", el("b", { text: v.record_audio === false ? "כבויה" : "פועלת" }),
@@ -524,10 +524,16 @@ function renderVoice(v) {
   fillVoiceForm(v);
 }
 
+// 0 = no silence length set: Gemini decides on its own when he finished speaking.
+const silenceText = (ms) => (ms ? `${ms / 1000} שניות` : "0 · Gemini מחליט לבד");
+function showSilenceValue() {
+  $("silence-value").textContent = silenceText(Number($("silence").value) * 1000);
+}
+
 function fillVoiceForm(v) {
   $("silence-mode").value = v.silence_auto ? "auto" : "fixed";
   $("silence").value = v.silence_ms / 1000;
-  $("silence-value").textContent = $("silence").value;
+  showSilenceValue();
   $("noise-mode").value = v.noise_auto ? "auto" : "fixed";
   $("noise-level").value = String(v.noise_level);
   $("tap-to-talk").checked = !!v.tap_to_talk;
@@ -537,7 +543,7 @@ function fillVoiceForm(v) {
 
 $("voice-edit").addEventListener("click", () => { $("voice-form").hidden = !$("voice-form").hidden; });
 $("voice-cancel").addEventListener("click", () => { fillVoiceForm(voiceSaved); fillReminderForm(reminderSaved); $("voice-form").hidden = true; });
-$("silence").addEventListener("input", () => { $("silence-value").textContent = $("silence").value; });
+$("silence").addEventListener("input", showSilenceValue);
 $("voice-save").addEventListener("click", async () => {
   $("voice-save").disabled = true;
   try {
@@ -588,7 +594,7 @@ function voiceLine(s) {
   const u = s.voice_used, d = s.voice_decision;
   if (!u && !d) return null;
   const parts = [];
-  if (u) parts.push(u.tap_to_talk ? "לחיצה לדיבור" : `שקט ${u.silence_ms / 1000} ש׳ · מסנן ${u.noise_level}`);
+  if (u) parts.push(u.tap_to_talk ? "לחיצה לדיבור" : `שקט ${u.silence_ms ? `${u.silence_ms / 1000} ש׳` : "לפי Gemini"} · מסנן ${u.noise_level}`);
   if (d?.measured) parts.push(`קטיעות ${d.measured.cut_offs} · הפרעות רעש ${d.measured.noise_interruptions}`);
   if (d?.changes?.length) parts.push(`→ ${d.changes.map(changeText).join(" · ")}`);
   else if (d?.measured) parts.push("→ ללא שינוי");
