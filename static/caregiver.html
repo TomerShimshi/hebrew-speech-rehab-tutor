@@ -152,6 +152,15 @@
         <p id="rebuild-status" class="kv" aria-live="polite"></p>
       </details>
 
+      <details class="cg-card" id="sec-names-game">
+        <summary>משחק השמות</summary>
+        <p class="muted">משחק קצר בתחילת כל שיחה (אחרי כ־2 דקות): 2–3 שמות מתוך הרשימה, באותה שאלה בכל פעם, בלי רמזים.
+          זו מדידת ההתקדמות: "תורגל" = שמות שהמטפלת תרגלה איתו, "חדש" = שמות שלא תורגלו מעולם, להשוואה (ולכן לא מתרגלים אותם).
+          הרשימה מתחלפת בערך כל 3 שבועות. ✕ מוציא שם שלא מתאים.</p>
+        <p id="names-game-status" class="kv" aria-live="polite"></p>
+        <div id="names-game"></div>
+      </details>
+
       <details class="cg-card" id="sec-next-prompt">
         <summary>הפרומפט לשיחה הבאה</summary>
         <p class="muted">הטקסט המלא שהמטפלת תקבל אם השיחה הבאה תתחיל עכשיו: ההנחיות, הפרופיל, הזיכרון, השיעור והמשחקים.
@@ -185,7 +194,7 @@
 
       <details class="cg-card" id="sec-words">
         <summary>בנק המילים</summary>
-        <p class="muted">מילים ושמות שהמטפלת תרגלה איתו, ומתי לחזור עליהם. ✕ מסיר מילה שלא שייכת (למשל שם שהומצא). הזיכרון נשמר בגיבוי לפני כן.</p>
+        <p class="muted">מילים ושמות שהמטפלת תרגלה איתו, שנשאלו במשחק השמות, או שהוא חיפש בעצמו בשיחה (מצא לבד / לא מצא), ומתי לחזור עליהם. ✕ מסיר מילה שלא שייכת (למשל שם שהומצא). הזיכרון נשמר בגיבוי לפני כן.</p>
         <p id="words-status" class="kv" aria-live="polite"></p>
         <div id="words"></div>
       </details>

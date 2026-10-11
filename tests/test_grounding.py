@@ -1,11 +1,14 @@
-"""8.5: the plan must never invent his people -- the case from Tomer's session on 6.10.26."""
+"""8.5: the plan must never invent his people -- the case from Tomer's session on 6.10.26.
+Since 12 the check-in is the names game's stable set, so the rule covers practice items and
+the set's names."""
 
 import datetime as dt
 
 from app import llm
 from app.agent.memory_tools import MemoryDraft, build_memory_tools
-from app.agent.next_class import build_next_plan, enforce_plan_rules, grounding_text
+from app.agent.next_class import build_next_plan, enforce_plan_rules, enforce_set_rules, grounding_text
 from app.config import Settings
+from app.schemas import CheckInProposal
 from app.store import InMemorySessionStore
 from app.transcripts import EndReason, TurnIn
 from fake_llm import FakeClient, text
@@ -18,8 +21,13 @@ MEMORY = {"memory_prompt": "He likes Caesarea beach (חוף קיסריה) and li
           "word_bank": {"זכרון יעקב": {"attempts": 1}}}
 
 
-def probe(target, elicit, about=False, bridge=""):
-    return {"target": target, "kind": "untreated", "elicit": elicit, "bridge": bridge, "about_his_life": about}
+def practice(target, elicit, about=False):
+    return {"target": target, "elicit": elicit, "hint_meaning": "m", "hint_first_syllable": "s",
+            "sentence_completion": "c", "about_his_life": about}
+
+
+def item(target, question, about=False):
+    return {"target": target, "question": question, "about_his_life": about}
 
 
 def store_with_his_words(*lines):
@@ -31,40 +39,64 @@ def store_with_his_words(*lines):
     return store, sid
 
 
+def gen(c, m, ct, cf=None):
+    return llm.generate(c, m, ct, cf, sleep=lambda s: None)
+
+
 def test_invented_people_are_dropped_known_ones_kept():
     store, _ = store_with_his_words("יש לי אישה קוראים לה שיר")
     known = grounding_text(store, PID, MEMORY, "", "")
-    plan = a_plan(probe=[
-        probe("דני", "איך קוראים לחבר שקרוב אליך במיוחד?"),                 # personal by wording -> invented
-        probe("רונית", "מי מארגנת את החגים במשפחה?", about=True),              # marked personal -> invented
-        probe("שיר", "איך קוראים לאשתך?"),                                       # he said it himself
-        probe("פארק הירקון", "באיזה פארק טיילת כשגרת ברמת גן?", about=True),  # in the memory
-        probe("עכו", "העיר העתיקה עם החומות בצפון"),                           # general knowledge
-    ], practice=[])
-    kept = enforce_plan_rules(plan, practiced=set(), known=known)
-    assert [p.target for p in kept.probe] == ["שיר", "פארק הירקון", "עכו"]
+    plan = a_plan(practice=[
+        practice("דני", "איך קוראים לחבר שקרוב אליך במיוחד?"),                 # personal by wording -> invented
+        practice("רונית", "מי מארגנת את החגים במשפחה?", about=True),              # marked personal -> invented
+        practice("שיר", "איך קוראים לאשתך?"),                                       # he said it himself
+        practice("פארק הירקון", "באיזה פארק טיילת כשגרת ברמת גן?", about=True),  # in the memory
+        practice("עכו", "העיר העתיקה עם החומות בצפון"),                           # general knowledge
+    ])
+    kept = enforce_plan_rules(plan, untreated=set(), known=known)
+    assert [p.target for p in kept.practice] == ["שיר", "פארק הירקון", "עכו"]
+
+
+def test_the_names_game_set_follows_the_same_rule():
+    store, _ = store_with_his_words("יש לי אישה קוראים לה שיר")
+    known = grounding_text(store, PID, MEMORY, "", "")
+    proposal = CheckInProposal(items=[
+        item("דני", "איך קוראים לחבר הכי קרוב שלך?"),                        # invented
+        item("שיר", "איך קוראת אשתך?", about=True),                           # he said it
+        item("פארק הירקון", "הפארק שטיילת בו ברמת גן?", about=True),          # in the memory
+        item("עכו", "העיר העתיקה עם החומות בצפון?"),
+        item("ירושלים", "עיר הבירה?"),                                          # too famous as a new name
+        item("זכרון יעקב", "המושבה על הכרמל עם היקבים?"),                     # practiced: treated
+    ])
+    items = enforce_set_rules(proposal, {"זכרון יעקב": a_practiced_word()}, known)
+    assert [(i.target, i.kind) for i in items] == [("שיר", "untreated"), ("פארק הירקון", "untreated"),
+                                                    ("עכו", "untreated"), ("זכרון יעקב", "treated")]
+
+
+def a_practiced_word():
+    from app.schemas import WordStats
+    return WordStats(attempts=1, cued=1)
 
 
 def test_vowel_marks_and_punctuation_dont_matter():
     store, _ = store_with_his_words("גרתי בְּרָמַת גַּן, ליד הפארק.")
     known = grounding_text(store, PID, {}, "", "")
-    plan = a_plan(probe=[probe("רמת גן", "איפה גרת?", about=True), probe("עכו", "x"), probe("צפת", "y")], practice=[])
-    assert [p.target for p in enforce_plan_rules(plan, set(), known).probe] == ["רמת גן", "עכו", "צפת"]
+    plan = a_plan(practice=[practice("רמת גן", "איפה גרת?", about=True), practice("עכו", "x")])
+    assert [p.target for p in enforce_plan_rules(plan, set(), known).practice] == ["רמת גן", "עכו"]
 
 
 def test_the_6_10_failure_case_now_fails_safely():
-    """Notes ask for family names; the model invents them -> dropped -> plan too thin -> rejected,
-    and the previous plan stays (the sweep rebuilds it later)."""
+    """Notes ask for family names; the model invents them -> dropped -> nothing left to practice
+    on a names day -> rejected, and the previous plan stays (the sweep rebuilds it later)."""
     store, sid = store_with_his_words("שלום")
     store.save_notes(PID, "Family and friends names only, no places.", "tomer")
     store.save_next_plan(PID, "old", a_plan().model_dump(mode="json"))
-    invented = a_plan(probe=[probe("דני", "איך קוראים לחבר הכי קרוב שלך?"),
-                             probe("מיכל", "מי החברה שאתה בקשר איתה?", about=True),
-                             probe("אבי", "יש חבר ותיק שלך מהצבא?", about=True)], practice=[])
+    invented = a_plan(practice=[practice("דני", "איך קוראים לחבר הכי קרוב שלך?"),
+                                practice("מיכל", "מי החברה שאתה בקשר איתה?", about=True),
+                                practice("אבי", "יש חבר ותיק שלך מהצבא?", about=True)])
     client = FakeClient(text("{}", parsed=invented), text("{}", parsed=invented))  # invents twice
-    status = build_next_plan(store, client, SETTINGS, PID, sid, generate_fn=lambda c, m, ct, cf=None: llm.generate(
-        c, m, ct, cf, sleep=lambda s: None), today=dt.date(2026, 10, 6))
-    assert status == "failed" and "usable probe items" in store.get_session(PID, sid)["plan_error"]
+    status = build_next_plan(store, client, SETTINGS, PID, sid, generate_fn=gen, today=dt.date(2026, 10, 6))
+    assert status == "failed" and "no usable practice items" in store.get_session(PID, sid)["plan_error"]
     assert store.get_next_plan(PID)["built_after_session"] == "old"
     # the prompt tells the builder to collect names instead, and the retry says what was invented
     assert "COLLECT" in client.requests[0]["config"].system_instruction
@@ -83,38 +115,33 @@ def test_report_tutor_issue_becomes_a_low_flag():
     assert flag.evidence == "She gave a name he says he doesn't know."  # English only
 
 
-
 def test_word_bank_is_not_proof_of_his_life():
     """The 6.10 invented names landed in the word bank; that must not make them 'known'."""
     store, _ = store_with_his_words("שלום")
     memory = {**MEMORY, "word_bank": {"רונית": {"attempts": 1, "failed": 1}}}
     known = grounding_text(store, PID, memory, "", "")
-    plan = a_plan(probe=[probe("רונית", "בת המשפחה שמארגנת את החגים שלך"), probe("עכו", "x"),
-                         probe("צפת", "y"), probe("טבריה", "z")], practice=[])
-    assert [p.target for p in enforce_plan_rules(plan, set(), known).probe] == ["עכו", "צפת", "טבריה"]
+    plan = a_plan(practice=[practice("רונית", "בת המשפחה שמארגנת את החגים שלך"), practice("עכו", "x")])
+    assert [p.target for p in enforce_plan_rules(plan, set(), known).practice] == ["עכו"]
 
 
 def test_a_retry_that_stops_inventing_is_accepted():
     store, sid = store_with_his_words("שלום")
-    invented = a_plan(probe=[probe("דני", "החבר הכי קרוב שלך"), probe("מיכל", "החברה שלך", about=True),
-                             probe("אבי", "החבר שלך מהצבא", about=True)], practice=[])
-    honest = a_plan(probe=[probe("עכו", "העיר העתיקה עם החומות"), probe("צפת", "עיר המקובלים"),
-                           probe("פארק הירקון", "הפארק שטיילת בו כשגרת ברמת גן", about=True)], practice=[])
+    invented = a_plan(practice=[practice("דני", "החבר הכי קרוב שלך"), practice("מיכל", "החברה שלך", about=True)])
+    honest = a_plan(practice=[practice("עכו", "העיר העתיקה עם החומות"),
+                              practice("פארק הירקון", "הפארק שטיילת בו כשגרת ברמת גן", about=True)])
     client = FakeClient(text("{}", parsed=invented), text("{}", parsed=honest))
-    status = build_next_plan(store, client, SETTINGS, PID, sid, generate_fn=lambda c, m, ct, cf=None: llm.generate(
-        c, m, ct, cf, sleep=lambda s: None), today=dt.date(2026, 10, 6))
+    status = build_next_plan(store, client, SETTINGS, PID, sid, generate_fn=gen, today=dt.date(2026, 10, 6))
     assert status == "done"
-    assert [p["target"] for p in store.get_next_plan(PID)["probe"]] == ["עכו", "צפת", "פארק הירקון"]
-
+    assert [p["target"] for p in store.get_next_plan(PID)["practice"]] == ["עכו", "פארק הירקון"]
 
 
 def test_failed_plans_are_retried_by_the_sweep_at_most_three_times():
     store, sid = store_with_his_words("שלום")
     store.update_session(PID, sid, {"plan_status": "pending"})
-    bad = a_plan(probe=[], practice=[])
-    gen = lambda c, m, ct, cf=None: llm.generate(c, m, ct, cf, sleep=lambda s: None)  # noqa: E731
+    bad = a_plan(practice=[practice("דני", "החבר הכי קרוב שלך")])  # invented: nothing left on a names day
     for attempt in range(1, 4):
         assert store.pending_plan_sessions(PID) == [sid]
-        build_next_plan(store, FakeClient(text("{}", parsed=bad)), SETTINGS, PID, sid, generate_fn=gen)
+        build_next_plan(store, FakeClient(text("{}", parsed=bad), text("{}", parsed=bad)), SETTINGS, PID, sid,
+                        generate_fn=gen)
         assert store.get_session(PID, sid)["plan_attempts"] == attempt
     assert store.pending_plan_sessions(PID) == []  # stops: the quota isn't burned hourly forever

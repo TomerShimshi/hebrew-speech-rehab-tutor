@@ -17,6 +17,17 @@ const NOTE_SILENCE =
   "[He has been silent for 30 seconds. If you already said goodbye, call end_session now. " +
   "Otherwise gently check whether he is still there (one short question in Hebrew).]";
 const SILENCE_NUDGE_MS = 30 * 1000;
+// She can't feel time passing (12): silent notes tell her. Sent as context that doesn't make her
+// speak (clientContent, turnComplete false) -- she takes them into account at her next turn.
+const NAMES_GAME_AT_MS = 2 * 60 * 1000;
+const NOTE_NAMES_GAME =
+  "[About 2 minutes have passed: time for the short NAMES GAME of TODAY'S PLAN. Start it at your " +
+  "next turn, at a natural pause after he finishes his sentence -- or skip it if he seems tired or low.]";
+const TIME_NOTES = [
+  { at: 4 * 60 * 1000, text: "[Time note: about 4 minutes have passed, about 5 to go. It is NOT time to " +
+    "close: keep the conversation going.]" },
+  { at: 7 * 60 * 1000, text: "[Time note: about 7 minutes have passed, about 2 to go. Not time to close yet.]" },
+];
 const PAUSED_TEXT = "האימון מושהה כרגע, נחזור בקרוב 🙏";
 
 const $ = (id) => document.getElementById(id);
@@ -298,6 +309,11 @@ function sendNote(text) {
   sendJson({ realtimeInput: { text } });
 }
 
+// Context she reads without replying to it (tested: no speech, but she knows it afterwards).
+function sendSilentNote(text) {
+  sendJson({ clientContent: { turns: [{ role: "user", parts: [{ text }] }], turnComplete: false } });
+}
+
 // Every API call carries the Google sign-in token; the server checks it + the allowlist.
 async function api(path, body, { keepalive = false } = {}) {
   return fetch(path, {
@@ -324,6 +340,7 @@ async function fetchToken(resumeHandle) {
   if (!res.ok) throw new Error("לא הצלחנו להתחיל את האימון. נסה שוב בעוד רגע.");
   const t = await res.json();
   s.sessionId = t.session_id;
+  if (!resumeHandle) s.namesGame = !!t.names_game; // today's plan has a names game (12)
   if (t.start_note) s.startNote = t.start_note; // the greeting cue, with when they last talked
   if (t.game_homework) s.gameHomework = t.game_homework; // buttons for the end screen (06)
   setTapToTalk(!!t.voice?.tap_to_talk); // per-account setting (09)
@@ -548,6 +565,12 @@ async function startSession() {
   // The tutor never starts closing on her own (prompt); this note tells her when. It waits for a
   // quiet moment -- not while she talks or right after he spoke -- so it never cuts a thread.
   s.wrapTimer = setTimeout(() => { if (s) s.wrapDue = true; }, SESSION_WRAP_UP_MS);
+  const silentNotes = [...(s.namesGame ? [{ at: NAMES_GAME_AT_MS, text: NOTE_NAMES_GAME }] : []), ...TIME_NOTES];
+  s.noteTimers = silentNotes.map((n) => setTimeout(() => {
+    if (!s || s.hangingUp || !s.ready) return;
+    log("ui", `silent note: ${n.text.slice(1, 40)}…`);
+    sendSilentNote(n.text);
+  }, n.at));
   const sess = s;
   s.flushTimer = setInterval(() => flushTurns(sess), FLUSH_MS);
   // If he goes quiet after she finished talking (e.g. after her goodbye, or he walked away),
@@ -597,6 +620,7 @@ function endSession(errorMessage, reason = errorMessage ? "error" : "end_button"
   log("session", errorMessage ? `ended with error: ${errorMessage}` : `ended (${reason})`);
   s.ending = true;
   clearTimeout(s.wrapTimer);
+  (s.noteTimers || []).forEach(clearTimeout);
   clearInterval(s.silenceTimer);
   clearInterval(s.flushTimer);
   finishRemote(s, reason); // final transcript flush + mark the session ended (async)

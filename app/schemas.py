@@ -29,6 +29,18 @@ class WordResult(str, Enum):
     uncued = "uncued"  # retrieved on his own
     cued = "cued"  # retrieved after a hint
     failed = "failed"  # the tutor had to give the word
+    # A name in free talk that the tutor didn't practice or ask (12), with visible effort:
+    self_found = "self_found"  # he found it himself
+    not_found = "not_found"  # he tried and gave up, or talked around it
+
+
+class WordSource(str, Enum):
+    """Where a word-bank name came from (12). Only `practiced` makes a name "treated" in the
+    names game; the others were never trained, so they'd spoil the treated/untreated comparison."""
+    practiced = "practiced"  # the tutor practiced it with him (hints / practice items)
+    self_found = "self_found"  # found on his own in free talk
+    not_found = "not_found"  # missed in free talk
+    probe = "probe"  # only asked in the names game (an untreated item)
 
 
 class WordStats(BaseModel):
@@ -36,6 +48,10 @@ class WordStats(BaseModel):
     uncued: int = 0
     cued: int = 0
     failed: int = 0
+    self_found: int = 0
+    not_found: int = 0
+    # Old entries have no source: they were practiced or check-in items before 12, so practiced.
+    source: WordSource = WordSource.practiced
     low_confidence: int = 0  # attempts where the transcript was uncertain
     last_result: WordResult | None = None
     last_cue_level: str | None = None
@@ -178,6 +194,22 @@ class PracticeItem(BaseModel):
         "then it MUST be a name found in the memory/profile/notes/word bank or said by him; never invented."))
 
 
+class CheckInItem(BaseModel):
+    """One name in the names game (12): asked the same way every time."""
+    target: str = Field(description="HEBREW: the name he should come up with.")
+    question: str = Field(description="HEBREW: the fixed describing question she asks, WITHOUT hints, in her voice.")
+    about_his_life: bool = Field(default=False, description=(
+        "true if the answer comes from HIS OWN life (his people, his places, his events) -- then it MUST be a "
+        "name found in the memory/profile/notes or said by him; never invented."))
+    kind: str = Field(default="untreated", description="Set by code: 'treated' only if practiced in the word bank.")
+
+
+class CheckInProposal(BaseModel):
+    """The plan builder's proposal for a new names-game set (12)."""
+    items: list[CheckInItem] = Field(json_schema_extra={"minItems": 6, "maxItems": 10})
+    rationale: str = Field(default="", description="ENGLISH, one sentence: how the set was chosen (for the family).")
+
+
 class GameHomework(BaseModel):
     game_id: str = Field(description="A game id from the GAMES section")
     why: str = Field(description="One short line linking it to today's goal, in English")
@@ -197,9 +229,17 @@ class ClassPlan(BaseModel):
     primary_goal: PrimaryGoal
     recall_from_last_time: str = Field(default="", description="HEBREW: one sentence she says in her greeting, recalling last time.")
     warmup: str = Field(default="", description="HEBREW: the easy opener she says.")
-    # 3-5 uncued check-in items every regular session: the progress measurement (05).
-    probe: list[ProbeItem] = Field(default=[], min_length=0, json_schema_extra={"minItems": 3, "maxItems": 5})
+    # The names game (12): filled by CODE at session start from the stable check-in set
+    # (app/check_in_set.py) -- the plan builder leaves it empty. Older plans had their own items.
+    probe: list[ProbeItem] = Field(default=[], description="Leave EMPTY: filled by code from the check-in set.")
     practice: list[PracticeItem] = []
+    # Extra material (12b), used ONLY if the main plan runs out before the wrap-up note -- so a
+    # fast speaker never meets an "empty" plan and the tutor doesn't close early.
+    reserve_practice: list[PracticeItem] = Field(default=[], description=(
+        "2-3 EXTRA practice items (same rules as practice), used only if the main plan runs out early."))
+    reserve_topics: list[str] = Field(default=[], description=(
+        "ENGLISH: 2-3 extra conversation threads from his life or interests (a follow-up question each), "
+        "used only if the main plan runs out early."))
     activity: str = Field(default="", description="ENGLISH: the main activity, as instructions to her (a quoted Hebrew word is fine).")
     conversation_topics: list[str] = Field(default=[], description="ENGLISH: up to 3 topics.")
     homework: str = Field(default="", description="ENGLISH: the small task for next time (she says it in Hebrew).")
@@ -230,6 +270,8 @@ class ClassPlan(BaseModel):
             "probe": [p.model_copy(update={"kind": "treated" if p.kind == "treated" else "untreated"})
                       for p in self.probe[:5]],
             "practice": self.practice[:8],
+            "reserve_practice": self.reserve_practice[:3],
+            "reserve_topics": [cut(t, 200) for t in self.reserve_topics[:3]],
             "activity": cut(self.activity, 600),
             "conversation_topics": [cut(t, 150) for t in self.conversation_topics[:3]],
             "homework": cut(self.homework),

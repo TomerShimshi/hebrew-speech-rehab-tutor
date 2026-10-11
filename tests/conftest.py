@@ -35,6 +35,16 @@ def no_model_cooldowns():
     llm.reset_cooldowns()
 
 
+@pytest.fixture(autouse=True)
+def no_names_game_set_proposal(request, monkeypatch):
+    """Most plan-builder tests script the model's answers for the plan only; proposing a
+    names-game set (12) would take one of them. Tests of the set itself opt in with
+    @pytest.mark.names_game_set."""
+    if "names_game_set" not in request.keywords:
+        from app import check_in_set
+        monkeypatch.setattr(check_in_set, "needs_new_set", lambda *a, **k: False)
+
+
 DAD = "dad@example.com"
 TOMER = "tomer@example.com"
 STRANGER = "stranger@example.com"

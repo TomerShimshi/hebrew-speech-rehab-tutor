@@ -6,7 +6,7 @@ import datetime as dt
 from dataclasses import dataclass
 from zoneinfo import ZoneInfo
 
-from app.class_plan import plan_for_session, render_class_plan
+from app.class_plan import plan_for_session, render_class_plan, with_names_game
 from app.config import Settings
 from app.deps import games_for
 from app.games import recent_games_line
@@ -25,6 +25,11 @@ class SessionPrompt:
     plan: ClassPlan | None
     games: object  # GamesSnapshot | None
     start_note: str  # the first note she gets on the Live socket (the greeting cue)
+
+    @property
+    def names_game(self) -> bool:
+        """Today's plan has a names game (12): the page then cues it at ~2 minutes."""
+        return bool(self.plan and self.plan.probe)
 
 
 def memory_block(memory: dict | None) -> str:
@@ -119,8 +124,9 @@ def start_note(timing: SessionTiming) -> str:
 
 def build_session_prompt(store: SessionStore, settings: Settings, pid: str, profile_text: str,
                          games_reader, *, exclude_sid: str | None = None) -> SessionPrompt:
-    # Today's lesson plan (05): the built plan, the intro plan for a new/reset account, or none.
-    plan = plan_for_session(store, pid)
+    # Today's lesson plan (05): the built plan, the intro plan for a new/reset account, or none;
+    # with today's names-game items from the stable check-in set, in rotation (12).
+    plan = with_names_game(plan_for_session(store, pid), store.get_check_in_set(pid))
     # What he played in the Simon app lately -- fresh at every start, computed in code (06).
     games = games_for(pid, settings, games_reader)
     # On a reconnect the session already exists: it is "now", not the last conversation.

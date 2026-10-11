@@ -14,6 +14,7 @@ from functools import lru_cache
 import yaml
 from google.genai import types
 
+from app import check_in_set
 from app.agent.memory_tools import MemoryDraft, build_memory_tools
 from app.agent.runner import run_tool_loop
 from app.class_plan import render_class_plan
@@ -65,7 +66,7 @@ def format_memory(memory: MemoryDoc) -> str:
     if memory.word_bank:
         words = ", ".join(f"{w} ({s.last_result.value if s.last_result else '?'})"
                           for w, s in list(memory.word_bank.items())[-30:])
-        out.append(f"recently practiced words: {words}")
+        out.append(f"recent word-bank names (last result): {words}")
     return "\n".join(out)
 
 
@@ -175,6 +176,8 @@ def run_memory_update(
             "memory_status": MEM_DONE,
             "plan_status": PLAN_PENDING,  # next: build the next session's plan (05)
             "probe_results": draft.probe_results,
+            "own_names": draft.own_names,  # names he found / couldn't find in free talk (12)
+            "names_game": draft.names_game,
             "memory_error": None,
             "memory_model": result.model,
             "memory_attempts": run.attempts + result.attempts,
@@ -184,6 +187,10 @@ def run_memory_update(
         if draft.summary:
             session_fields.update(draft.summary.model_dump(mode="json"))
         store.update_session(pid, sid, session_fields)
+        # The names game's answers also go to the stable set (12): its rotation and history.
+        current_set = store.get_check_in_set(pid)
+        if current_set and check_in_set.record_results(current_set, draft.probe_results, sid, today):
+            store.save_check_in_set(pid, current_set)
         _log(f"{sid}: done ({len(run.calls)} tool calls, {len(draft.flags)} flag(s), model {result.model})")
         return MEM_DONE
     except Exception as exc:  # noqa: BLE001 -- recorded, retried on a later /start

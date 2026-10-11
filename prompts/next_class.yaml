@@ -1,5 +1,5 @@
 # Instructions for the next-class builder (sub-plan 05, SUMMARY_MODEL call #3).
-prompt_version: "0.10"
+prompt_version: "0.12"
 
 system: |
   You plan the NEXT Hebrew speaking-practice session for a man recovering from a stroke. A
@@ -23,32 +23,33 @@ system: |
   Build the plan:
   - recall_from_last_time: ONE sentence the tutor can use in her greeting (from the memory).
   - warmup: one easy, pleasant opener at his level.
-  - probe (REQUIRED, every session, whatever the goal): 3-5 items asked WITHOUT hints, to
-    measure progress over time -- names of people or places:
-      "treated" = words/names already in the word bank (prefer the ones listed as due);
-      "untreated" = new items of the same kind AND THE SAME DIFFICULTY, never practiced -- a
-        fair comparison. NOT the most famous answers (no Jerusalem, Tel Aviv, Haifa, Eilat-level
-        items): he gets those right anyway, so they can't show progress. Prefer names from his
-        own life that weren't practiced yet, or less-famous places and people (smaller towns,
-        regional sites, figures from his era) that take real retrieval effort.
-    If the word bank is empty, use only untreated items. For each: target + how the tutor
-    asks for it without giving it away (a description), in Hebrew.
-    CONNECTED, NOT TRIVIA: every item must link to his life or to the session's likely topics,
-    so it comes up naturally in conversation -- e.g. if he loves Caesarea, a nearby place
-    (Zichron Ya'akov on the Carmel, the Roman aqueduct); people from his stories; places on his
-    trips. Give each a "bridge": a natural Hebrew lead-in from that topic, in her voice
-    (e.g. "מקיסריה זה ממש קרוב למושבה הוותיקה על הכרמל, עם המדרחוב והיקבים..."). Avoid
-    stand-alone quiz questions about places he has no connection to.
+  - probe: leave it EMPTY. The check-in is now a separate "names game" whose names come from
+    the stable NAMES GAME SET (filled by code at the start of each session).
   - practice: up to 6 items for the main goal (for name_retrieval days; fewer or none on
     other days). Each with Hebrew hints: meaning/context, the FIRST SYLLABLE AS SPOKEN with
     vowel marks (e.g. "טְבֶ..." for טבריה) -- never the letter's name -- and a sentence to
     complete. Make sure every hint really matches its target and is correct Hebrew.
-    Practice items must be DIFFERENT from the check-in (probe) items: the check-in measures,
-    the practice trains (a practiced "untreated" item would no longer be a fair comparison).
+    Where practice names come from, in this order:
+      1. names he tried for and COULDN'T FIND on his own (word bank source "not_found") -- the
+         best next practice: real, from his life, and known to be hard for him;
+      2. names due in the word bank;
+      3. the NAMES GAME SET's TREATED names (practicing them is the treatment);
+      4. new names from his life or less-famous places, as before.
+    NEVER practice an UNTREATED name of the NAMES GAME SET: the game compares practiced with
+    never-practiced names, and a practiced "untreated" name spoils it (code removes them).
+  - reserve_practice + reserve_topics (REQUIRED, every regular plan): extra material she uses
+    ONLY if the main plan runs out before the ~9-minute wrap-up note -- 2-3 more practice items
+    (same rules and hints as practice, never the names game's untreated names) and 2-3 extra
+    threads from his life or interests, each with a concrete follow-up question (English).
+  - SIZE THE PLAN TO HIS PACE (the HIS PACE section): the main plan should fill about 9 minutes
+    of talking at HIS pace. A FAST talker (many short answers a minute) gets through a plan in
+    5-6 minutes: give him more -- up to 8 practice items, the activity AND practice, a richer
+    activity (more steps / more items to name or explain). A SLOW pace: fewer items, more time
+    per item. Typical: 4-6 practice items, or one activity plus 2-3 items.
   - activity: for discourse / high_level_language / conversation days, one concrete activity
     (from the techniques), tied to his interests when possible.
   - conversation_topics: up to 3, from his interests.
-  - homework: one small, concrete task for the next session.
+  - homework: one small, concrete task for the next session (she gives it only in the closing).
   - fatigue_fallback: an easy activity he will surely succeed at.
   - avoid: from the memory's what_to_avoid and the profile, if any.
 
@@ -128,3 +129,35 @@ research_phase: |
   names, places, other personal details, or any Hebrew. If it is rejected, rewrite it once.
 
   When done (or if no research is needed), reply with one short line saying why.
+
+# The names game's stable set (sub-plan 12): proposed only when a new one is due (~3 weeks).
+check_in_set: |
+  You choose the NAMES for a short "names game" that a warm Hebrew voice tutor plays with a man
+  recovering from a stroke, at the start of his practice sessions for the next ~3 weeks. It is
+  the progress measure for his difficulty retrieving PROPER NAMES (people and places): the same
+  names, asked the same way, every few sessions, WITHOUT hints.
+
+  Propose 6-10 names (items), two kinds mixed:
+  - treated: names already PRACTICED in the WORD BANK (source "practiced"), preferring the
+    ones he found hard (cued / failed);
+  - untreated: names of the SAME KIND AND DIFFICULTY that were never practiced -- from his life
+    (memory, profile, notes, his own words: family, friends, his town, places he loves or
+    visited), or less-famous places and public figures from his era. NOT the most famous
+    answers (Jerusalem, Tel Aviv, Haifa, Eilat-level): he gets those anyway.
+  Never the names of his CLOSEST family (his wife, children, grandchildren): he knows them, and
+  being asked his own son's name in a game feels like a test of his memory -- disrespectful.
+  Code decides which kind each name is (from the word bank); aim for about half and half.
+  The current NAMES GAME SET (if any) shows how he did: keep a name that is still hard; replace
+  names he now always gets.
+
+  For each item:
+  - target: the name, in Hebrew.
+  - question: ONE fixed describing question in Hebrew, in HER voice (a woman: "אני"; masculine
+    for him), that leads to exactly that name WITHOUT giving it away -- no first sound, no
+    letters, no part of the name. One sentence, clear and specific enough that only this name
+    fits (e.g. "איך נקרא בית הכנסת בקיסריה שבנוי בצורת ספר תורה?").
+  - about_his_life: true if the answer comes from his own life.
+
+  NEVER INVENT HIS LIFE: a name from his life must appear in the memory, profile, notes or his
+  own words; otherwise it is removed by code. rationale: one English sentence for the family on
+  how you chose the set.

@@ -1,5 +1,5 @@
 # Prompts for the post-session memory update (sub-plan 04, SUMMARY_MODEL call #2).
-prompt_version: "0.4"
+prompt_version: "0.5"
 
 tool_phase: |
   You are a careful assistant to a speech-language pathologist. After each practice session
@@ -24,11 +24,25 @@ tool_phase: |
      - homework_given: the task the tutor gave him for next time (replace the old one).
      Prefer replace over add when an existing item should be refined. Keep the memory lean:
      don't repeat what's already there.
-  3. For each word or name the tutor explicitly practiced with him, call record_word_result.
-     For each CHECK-IN item in today's plan that the tutor actually asked, call it with
-     probe=true and the result of his FIRST real attempt: "uncued" only if he got it before any
-     hint, "cued" if he got it after a hint, "failed" if the tutor had to give it. Skip check-in
-     items she never asked.
+  3. Names, with record_word_result:
+     a. Each word or name the tutor explicitly practiced with him (hints, practice items):
+        uncued / cued / failed.
+     b. THE NAMES GAME (the "Names game" items in TODAY'S PLAN, if any): for each item she
+        actually asked, call it with probe=true and his FIRST real attempt: "uncued" if he got
+        it, "failed" if she had to say it ("cued" only if she gave a hint anyway). Skip items she
+        never asked. Then call record_names_game once: played / skipped (she chose not to, e.g.
+        he was tired) / not_reached (the session ended first), with a short note.
+     c. NAMES IN FREE TALK that the tutor did NOT practice or ask -- only names of places,
+        people or landmarks, and only with VISIBLE EFFORT: a pause or hesitation, describing it
+        instead of naming it, a self-correction, or asking himself "איך קוראים ל...".
+        - he found it himself after the effort -> "self_found"
+        - he tried and gave up, or talked around it and never named it -> "not_found" (the word
+          is the name he was looking for, only if it is clear from the context or he or the
+          tutor said it; otherwise don't record it)
+        Names he says fluently are NOT recorded: he says many, and they'd bury the signal.
+        Example: "אז פעם היינו הולכים למרחצאות, אני לא זוכר איך קראו לה... חמת גדר, כן, חמת גדר"
+        -> חמת גדר, self_found. Use asr_confidence "low" when the two transcript versions disagree
+        about the name.
   4. Call raise_flag only for something the family should really see: a SUDDEN decline compared
      with the recent summaries, distress or hopelessness, a safety concern (stroke warning signs
      mentioned), or a technical problem that broke the session.
@@ -36,7 +50,10 @@ tool_phase: |
      family should know about: she asked about or stated something that isn't part of his life
      (e.g. a person or place he says he doesn't know) -> invented_fact; she pushed an answer he
      had rejected -> insisted; she spoke a language other than Hebrew -> wrong_language; she
-     interrupted him mid-sentence -> cut_off; anything else clearly wrong -> other. Put her
+     interrupted him mid-sentence -> cut_off; she started the closing (summary, homework,
+     goodbye) on her own before ~8 minutes (see the [s] timestamps) although he hadn't asked to
+     stop and wasn't tired -> early_goodbye (quote the start of her closing); anything else
+     clearly wrong -> other. Put her
      words in tutor_said and his reply in he_said (exact Hebrew quotes), and the explanation in
      what_went_wrong (English). Don't report normal hints or his own difficulties. For an item he
      said isn't part of his life, do NOT call record_word_result -- report it here instead.

@@ -17,6 +17,7 @@ from app.schemas import (
     MemorySections,
     SessionSummary,
     WordResult,
+    WordSource,
     WordStats,
 )
 
@@ -31,10 +32,15 @@ class MemoryDraft:
     # probe target -> "treated"/"untreated", from the plan the session used (05)
     probe_kinds: dict[str, str] = field(default_factory=dict)
     probe_results: list[dict] = field(default_factory=list)
+    # names he found / couldn't find in free talk (12), for the session's caregiver view
+    own_names: list[dict] = field(default_factory=list)
+    names_game: dict | None = None  # {status, note} (12)
 
 
 # What report_tutor_issue may report (8.5). Saved as a low-severity "tutor_issue" flag.
-TUTOR_ISSUE_KINDS = ("invented_fact", "insisted", "wrong_language", "cut_off", "other")
+TUTOR_ISSUE_KINDS = ("invented_fact", "insisted", "wrong_language", "cut_off", "early_goodbye", "other")
+NAMES_GAME_STATUSES = ("played", "skipped", "not_reached")
+OWN_RESULTS = (WordResult.self_found, WordResult.not_found)
 
 def _norm(text: str) -> str:
     return " ".join(text.split()).strip()
@@ -76,12 +82,25 @@ def build_memory_tools(draft: MemoryDraft) -> list[Tool]:
         if not word or len(word) > 60:
             raise ValueError("word is required (a single word or short name)")
         result = WordResult(args.get("result"))
+        low = args.get("asr_confidence") == "low"
+        if args.get("probe") and result in OWN_RESULTS:
+            raise ValueError("self_found / not_found are for names in free talk, never for names-game items: "
+                             "use uncued / cued / failed with probe=true")
+        if args.get("probe"):
+            # an untreated names-game item stays untrained: asked, never practiced (12)
+            source = WordSource.practiced if draft.probe_kinds.get(word) == "treated" else WordSource.probe
+        elif result in OWN_RESULTS:
+            source = WordSource(result.value)
+        else:
+            source = WordSource.practiced
         stats = word_bank.record(
             draft.word_bank.get(word), result, draft.today,
-            cue_level=args.get("cue_level"),
-            low_confidence=args.get("asr_confidence") == "low",
+            cue_level=args.get("cue_level"), low_confidence=low, source=source,
         )
         draft.word_bank[word] = stats
+        if result in OWN_RESULTS:
+            draft.own_names = [r for r in draft.own_names if r["word"] != word]
+            draft.own_names.append({"word": word, "result": result.value, "low_confidence": low})
         if args.get("probe"):
             # A check-in item from today's plan: also kept on the session for progress charts.
             draft.probe_results = [r for r in draft.probe_results if r["word"] != word]
@@ -91,6 +110,13 @@ def build_memory_tools(draft: MemoryDraft) -> list[Tool]:
                 "low_confidence": args.get("asr_confidence") == "low",
             })
         return {"ok": True, "next_due": stats.next_due}
+
+    def record_names_game(args: dict) -> dict:
+        status = args.get("status")
+        if status not in NAMES_GAME_STATUSES:
+            raise ValueError(f"status must be one of {list(NAMES_GAME_STATUSES)}")
+        draft.names_game = {"status": status, "note": str(args.get("note", ""))[:300]}
+        return {"ok": True}
 
     def save_session_summary(args: dict) -> dict:
         draft.summary = SessionSummary(**args)
@@ -130,22 +156,41 @@ def build_memory_tools(draft: MemoryDraft) -> list[Tool]:
         ),
         Tool(
             "record_word_result",
-            "Record how he did retrieving one specific word or name the tutor practiced with him.",
+            "Record how he did retrieving one specific name: one the tutor practiced or asked in the names "
+            "game, OR one he went for on his own in free talk with visible effort (self_found / not_found).",
             {
                 "type": "object",
                 "properties": {
                     "word": {"type": "string"},
                     "result": {"type": "string", "enum": [r.value for r in WordResult],
-                               "description": "uncued = on his own; cued = after a hint; failed = the tutor gave it."},
+                               "description": ("uncued = on his own; cued = after a hint; failed = the tutor gave it; "
+                                               "self_found / not_found = a name in free talk the tutor didn't practice or "
+                                               "ask: he found it himself after visible effort / he tried and gave up or "
+                                               "talked around it.")},
                     "cue_level": {"type": "string", "description": "Which hint worked, e.g. 'meaning', 'first syllable', 'sentence completion'."},
                     "asr_confidence": {"type": "string", "enum": ["high", "low"],
                                        "description": "low if the two transcript versions disagree about this word."},
                     "probe": {"type": "boolean",
-                              "description": "true if this word was one of TODAY'S PLAN check-in items."},
+                              "description": "true if this name was one of the NAMES GAME items in TODAY'S PLAN and she asked it there."},
                 },
                 "required": ["word", "result", "asr_confidence"],
             },
             record_word_result,
+        ),
+        Tool(
+            "record_names_game",
+            "Record what happened to the NAMES GAME of TODAY'S PLAN (only if the plan has one). Call once.",
+            {
+                "type": "object",
+                "properties": {
+                    "status": {"type": "string", "enum": list(NAMES_GAME_STATUSES),
+                               "description": ("played = she asked at least one game name; skipped = she chose not "
+                                               "to (e.g. he was tired); not_reached = the session ended before it.")},
+                    "note": {"type": "string", "description": "ENGLISH, one short sentence: how it went or why not."},
+                },
+                "required": ["status"],
+            },
+            record_names_game,
         ),
         Tool(
             "save_session_summary",

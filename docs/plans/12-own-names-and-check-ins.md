@@ -165,6 +165,38 @@ Our woven-in check-ins broke three of these:
 | `app/caregiver_api.py`, `static/caregiver.*` | The names game per session, the check-in set and "new set", found on his own / couldn't find, the word bank source, progress and the export. |
 | `tests/` | The new results and their schedule; treated vs untreated by source; the set's rotation and lifetime; untreated never in practice; the time notes; `tutor_early_goodbye`; fake memory-agent runs on a transcript like 9.10 (חמת גדר → `self_found`; fluent names not recorded). |
 
+## Progress (2026-10-10)
+- **Built:**
+  - `WordResult.self_found` / `not_found`, `WordStats.source`, and the schedule in `app/word_bank.py`.
+  - The stable set in `app/check_in_set.py`, stored at `plans/check_in` plus `check_in_history`.
+  - The memory agent's new results and `record_names_game`.
+  - The plan builder: it proposes a set when one is due, clears its own check-ins, and drops untreated names from practice.
+  - The prompts: `tutor.yaml` 1.9, `memory_update.yaml` 0.5, `next_class.yaml` 0.11.
+  - The page's silent time notes.
+  - The caregiver page: the "משחק השמות" section, session lines, the word source column, the progress series and the export.
+- **Changes from the design above, found while building:**
+  - **Silent notes are tested, not assumed.** A live test against the real model showed that a note sent as `clientContent` with `turnComplete: false` gets no reply, and she knows it afterwards (asked, she answered "בערך ארבע דקות"). So the ~2-minute names-game cue is silent too: she starts the game at her next turn, never cutting into his thinking pause. The time notes come at ~4 and ~7 minutes.
+  - **No `skip_names_game` tool for the live model.** The memory agent records the game's status from the transcript (`record_names_game`: played / skipped / not_reached). There's one less live tool that could misfire.
+  - **Early goodbyes are found by the memory agent**, as a tutor issue (`early_goodbye`, using the transcript's timestamps). The page can't see it: she can't hang up before he says goodbye anyway, so the earlier "she ends before ~8 minutes" idea would never trigger. It shows with the other tutor issues on the caregiver page.
+  - **Names missed in the game are not practiced later in the same session.** The practice items do that, so the untreated names stay untrained.
+  - **The set never includes his closest family's names** (wife, children). The first dry run asked "איך קוראים לבן שלך…": too easy for him, and disrespectful as a game question.
+- **Dry runs on Dad's data (nothing saved):**
+  - **9.10 session:** חמת גדר → `self_found`; רמת הגולן and בריכת המשושים not recorded; the 5.9-minute closing → `early_goodbye`; the old check-in → game "skipped".
+  - **First set:** treated זכרון יעקב, היכל נעמי, גן הנדיב, רוטשילד; untreated בריכת המשושים, חמת גדר, מלון עדן אין, ראש פינה. The plan practiced only treated names.
+- `pytest`: 256 passed.
+
+## 12b: sessions still ended at ~6 minutes (2026-10-11)
+Tomer's test session on 11.10 (prompt 1.9): the names game went well (0.5–1.3 min). At 6.0 she asked "משהו נוסף שהיית רוצה לשתף לגבי הטיולים שלך?". He answered "לא, לא ממש", and she closed at 6.2. The memory agent flagged it as `early_goodbye`. She hadn't run out of plan: 3 practice names were never used. But he's a fast talker (48 turns in 6.5 minutes), so the plan's content runs out sooner.
+- **Prompt (tutor 1.10):**
+  - No wrap-up questions before the wrap-up note ("משהו נוסף…?", "יש עוד משהו?").
+  - "No" or "that's it" ends the topic, not the session: she moves to the next item, the activity, the reserve, or a follow-up.
+- **A reserve in every plan:** `reserve_practice` (2–3 items, same rules as practice: grounded, never untreated names-game names, never a repeat) and `reserve_topics` (2–3 threads with a follow-up question). It's shown in TODAY'S PLAN as "use ONLY if everything above is done". An empty reserve never fails a plan.
+- **The plan sized to his pace (plan builder 0.12):** a HIS PACE section from his last 5 real sessions (answers per minute, words per answer): fast at 3.2+ answers/min, slow at 2.0 or below. A fast talker gets more (up to 8 practice items, the activity plus practice); a slow one gets fewer, with more time per item.
+  - Dry run: Tomer 3.6 answers/min → FAST; Dad 1.8 answers/min but 15 words per answer → SLOW (long answers).
+- **Today's names in the transcription:** the names-game, practice and reserve names are added to Gemini's `custom_vocabulary` at session start. On 11.10 Gemini wrote "סנוטיאן" for שדות ים (the browser caption caught "ים") and "אתלט" for עתלית. The tutor heard him correctly; only the written transcript was wrong.
+- **Not built:** plan-aware time notes (naming the items not done yet). Left out for now (Tomer: too ambiguous).
+- `pytest`: 260 passed.
+
 ## Check before deploying
 - **Re-run the memory agent on 9.10's transcript (dry run, nothing saved).** Expected: חמת גדר → `self_found`, בריכת המשושים → `self_found` low-confidence or not recorded, רמת הגולן (said fluently) → not recorded.
 - **Build Dad's first check-in set (dry run, nothing saved).** Tomer reviews the names and questions before it goes live. Expected: everything from his data; untreated names not in practice.

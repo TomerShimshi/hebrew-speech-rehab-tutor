@@ -28,7 +28,7 @@ from app import billing_guard
 from app.agent.next_class import _models, build_next_plan
 from app.agent.research import personal_terms
 from app.auth import User, require_caregiver
-from app.class_plan import plan_for_session, render_class_plan
+from app.class_plan import plan_for_session, render_class_plan, with_names_game
 from app.config import REPO_ROOT, Settings, get_settings
 from app.games import profile_for
 from app.deps import (
@@ -57,6 +57,7 @@ class Translations(BaseModel):
 
 SESSION_FIELDS = ("id", "status", "started_at", "ended_at", "end_reason", "turn_count", "prompt_version",
                   "summary", "topics", "mood", "highlights", "difficulties", "probe_results",
+                  "own_names", "names_game",  # names found / missed in free talk; the names game (12)
                   "memory_status", "memory_error", "plan_status", "plan_error",
                   "memory_model", "plan_model",  # which model did the work (09)
                   "voice_used", "voice_decision",  # the settings it ran with, and the automatic decision after it
@@ -153,11 +154,14 @@ def progress_series(sessions: list[dict], word_bank: dict) -> dict:
     points = []
     for s in reversed(sessions):  # oldest first, for the x-axis
         results = s.get("probe_results") or []
+        own = s.get("own_names") or []  # names in free talk (12), their own series
         mood = MOOD_SCORE.get(s.get("mood") or "")
-        if not results and mood is None:
+        if not results and not own and mood is None:
             continue
         points.append({"date": s.get("started_at"), "treated": _own_share(results, "treated"),
-                       "untreated": _own_share(results, "untreated"), "items": len(results), "mood": mood})
+                       "untreated": _own_share(results, "untreated"), "items": len(results), "mood": mood,
+                       "self_found": sum(o.get("result") == "self_found" for o in own),
+                       "not_found": sum(o.get("result") == "not_found" for o in own)})
     with_checkins = [p for p in points if p["items"]]
     recent, before = with_checkins[-5:], with_checkins[-10:-5]
     words = list((word_bank or {}).values())
@@ -170,9 +174,9 @@ def progress_series(sessions: list[dict], word_bank: dict) -> dict:
                        "sessions": len(before)},
         },
         "words": {"total": len(words),
-                  "own": sum((w or {}).get("last_result") == "uncued" for w in words),
+                  "own": sum((w or {}).get("last_result") in ("uncued", "self_found") for w in words),
                   "hint": sum((w or {}).get("last_result") == "cued" for w in words),
-                  "not_yet": sum((w or {}).get("last_result") == "failed" for w in words)},
+                  "not_yet": sum((w or {}).get("last_result") in ("failed", "not_found") for w in words)},
     }
 
 
@@ -214,7 +218,9 @@ def overview(pid: str = Depends(account), settings: Settings = Depends(get_setti
     stored_plan = store.get_next_plan(pid) or {}
     built_after = stored_plan.get("built_after_session")
     plan_model = (store.get_session(pid, built_after) or {}).get("plan_model") if built_after else None
-    plan = plan_for_session(store, pid)  # what the next session will really get (built or intro)
+    check_in = store.get_check_in_set(pid)
+    # what the next session will really get (built or intro), with the names it would ask now (12)
+    plan = with_names_game(plan_for_session(store, pid), check_in)
     return {
         "email": pid,
         "games_profile": games_profile,
@@ -229,6 +235,9 @@ def overview(pid: str = Depends(account), settings: Settings = Depends(get_setti
         "memory": {k: memory.get(k) for k in ("memory_prompt", "sections", "focus_next_session",
                                                "sessions_processed", "updated_at", "last_session_id")},
         "word_bank": _word_rows(memory.get("word_bank")),
+        "check_in_set": check_in,
+        "check_in_history": [{k: h.get(k) for k in ("id", "created_on", "retired_at", "sessions_played", "items")}
+                             for h in store.list_check_in_history(pid, 5)],
         "next_plan": {
             "rendered": render_class_plan(plan),
             "plan_type": plan.plan_type if plan else None,
@@ -397,6 +406,30 @@ def word_bank_remove(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     print(f"[caregiver] {caregiver.email} removed a word from {pid}'s word bank; backup={backup}", flush=True)
     return {"ok": True, "backup": backup}
+
+
+@router.post("/{email}/check-in/new")
+def check_in_new(pid: str = Depends(account), caregiver: User = Depends(require_caregiver),
+                 store: SessionStore = Depends(get_store)) -> dict:
+    """Retires the names-game set (kept for comparison); the next plan build proposes a new one."""
+    retired = store.retire_check_in_set(pid)
+    print(f"[caregiver] {caregiver.email} retired the names-game set of {pid}: {retired}", flush=True)
+    return {"ok": True, "retired": retired}
+
+
+@router.post("/{email}/check-in/remove-item")
+def check_in_remove_item(target: str = Body(..., embed=True, max_length=80), pid: str = Depends(account),
+                         caregiver: User = Depends(require_caregiver),
+                         store: SessionStore = Depends(get_store)) -> dict:
+    """Takes one name out of the names game (e.g. a misheard or wrong name)."""
+    current = store.get_check_in_set(pid)
+    name = " ".join(target.split())
+    items = [i for i in (current or {}).get("items") or [] if i.get("target") != name]
+    if current is None or len(items) == len(current.get("items") or []):
+        raise HTTPException(status_code=404, detail="Not in the names game")
+    store.save_check_in_set(pid, {**current, "items": items})
+    print(f"[caregiver] {caregiver.email} removed {name!r} from the names game of {pid}", flush=True)
+    return {"ok": True, "items": len(items)}
 
 
 @router.post("/{email}/memory/restore")

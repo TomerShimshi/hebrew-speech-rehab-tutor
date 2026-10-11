@@ -8,8 +8,12 @@ const $ = (id) => document.getElementById(id);
 const ACCOUNT_KEY = "caregiver.account";
 
 const MOOD = { good: "מצב רוח טוב", ok: "מצב רוח בסדר", low: "מצב רוח ירוד", unknown: "" };
-const RESULT = { uncued: "✓", cued: "~", failed: "✗" };
-const RESULT_TEXT = { uncued: "לבד", cued: "עם רמז", failed: "לא הצליח" };
+const RESULT = { uncued: "✓", cued: "~", failed: "✗", self_found: "★", not_found: "…" };
+const RESULT_TEXT = { uncued: "לבד", cued: "עם רמז", failed: "לא הצליח", self_found: "מצא לבד בשיחה",
+                      not_found: "לא מצא בשיחה" };
+// where a word-bank name came from (12): only "practiced" counts as practiced in the names game
+const SOURCE = { practiced: "תורגל", self_found: "מצא לבד", not_found: "לא מצא", probe: "משחק השמות (חדש)" };
+const GAME_STATUS = { played: "שוחק", skipped: "דולג", not_reached: "לא הגיעו אליו" };
 const FLAG_KIND = { sudden_decline: "ירידה פתאומית", distress: "מצוקה", safety: "בטיחות", technical: "תקלה טכנית",
                     tutor_issue: "טעות של המטפלת" };
 const END_REASON = { end_button: "כפתור סיום", tutor_goodbye: "המטפלת סיימה", abandoned: "החלון נסגר",
@@ -128,7 +132,7 @@ function renderFlags(flags) {
 }
 
 const ISSUE = { invented_fact: "המציאה עובדה", insisted: "התעקשה", wrong_language: "לא בעברית",
-                cut_off: "קטעה אותו", other: "אחר" };
+                cut_off: "קטעה אותו", early_goodbye: "סיימה מוקדם מדי", other: "אחר" };
 
 // Each language on its own line: the English explanation, her words, his words -- never
 // mixed in one line (bidirectional text is unreadable otherwise).
@@ -164,6 +168,25 @@ function probeChips(results) {
     title: `${RESULT_TEXT[r.result] || r.result} · ${r.kind === "treated" ? "תורגל בעבר" : "חדש"}${r.low_confidence ? " · תמלול לא בטוח" : ""}`,
     text: `${RESULT[r.result] || "?"} ${r.word}${r.kind === "treated" ? "" : " (חדש)"}${r.low_confidence ? " ?" : ""}`,
   })));
+}
+
+// The names game in one session (12): its answers, or why it didn't happen.
+function namesGameLine(s) {
+  const g = s.names_game;
+  if (!g && !s.probe_results?.length) return null;
+  const head = el("b", { text: `משחק השמות${g ? ` (${GAME_STATUS[g.status] || g.status})` : ""}: ` });
+  return el("div", { class: "kv" }, head, probeChips(s.probe_results) || "",
+            g?.note ? el("span", { class: "muted", dir: "ltr", text: ` ${g.note}` }) : null);
+}
+
+// Names he went for on his own in free talk (12): found / couldn't find.
+function ownNamesLine(s) {
+  const own = s.own_names || [];
+  if (!own.length) return null;
+  const names = (result) => own.filter((o) => o.result === result).map((o) => `${o.word}${o.low_confidence ? " ?" : ""}`);
+  const found = names("self_found"), missed = names("not_found");
+  return p([found.length ? `★ מצא לבד: ${found.join(", ")}` : "", missed.length ? `… לא מצא: ${missed.join(", ")}` : ""]
+    .filter(Boolean).join(" · "), "kv");
 }
 
 function renderTranscript(box, turns) {
@@ -257,7 +280,8 @@ function renderSessions(sessions) {
       s.summary ? p(s.summary) : p(s.memory_status === "done" ? "" : "עדיין אין סיכום לשיחה הזו.", "muted"),
       s.highlights?.length ? p(`הצלחות: ${s.highlights.join(" · ")}`) : null,
       s.difficulties?.length ? p(`קשיים: ${s.difficulties.join(" · ")}`) : null,
-      probeChips(s.probe_results),
+      namesGameLine(s),
+      ownNamesLine(s),
       voiceLine(s),
       el("div", { class: "cg-actions" }, button, promptButton, recordingButton(s), processButton),
       box, promptBox,
@@ -377,17 +401,67 @@ function renderWords(rows) {
     $("words").replaceChildren(p("בנק המילים ריק.", "muted"));
     return;
   }
-  const head = ["מילה", "ניסיונות", "✓ לבד", "~ עם רמז", "✗", "תוצאה אחרונה", "הופיעה לאחרונה", "לתרגול שוב", ""];
+  const head = ["מילה", "מקור", "ניסיונות", "✓ לבד", "~ עם רמז", "✗", "★ / …", "תוצאה אחרונה", "הופיעה לאחרונה", "לתרגול שוב", ""];
   $("words").replaceChildren(el("div", { class: "table-wrap" }, el("table", { class: "words" },
     el("thead", {}, el("tr", {}, head.map((h) => el("th", { text: h })))),
     el("tbody", {}, rows.map((r) => el("tr", {},
-      el("td", { dir: "auto", text: r.word }), el("td", { text: r.attempts ?? 0 }), el("td", { text: r.uncued ?? 0 }),
+      el("td", { dir: "auto", text: r.word }), el("td", { text: SOURCE[r.source || "practiced"] || r.source }),
+      el("td", { text: r.attempts ?? 0 }), el("td", { text: r.uncued ?? 0 }),
       el("td", { text: r.cued ?? 0 }), el("td", { text: r.failed ?? 0 }),
+      el("td", { text: `${r.self_found ?? 0} / ${r.not_found ?? 0}` }),
       el("td", { text: `${RESULT[r.last_result] || ""} ${RESULT_TEXT[r.last_result] || ""}${r.last_cue_level ? ` (${r.last_cue_level})` : ""}` }),
       el("td", { text: r.last_seen || "" }), el("td", { text: r.next_due || "" }),
       el("td", {}, confirmButton("✕", `להסיר את "${r.word}"?`, (where) => removeWord(r.word, where), "x")),
     ))),
   )));
+}
+
+// ---- the names game's set (12) ----------------------------------------------------------------
+function renderNamesGame(current, history) {
+  const box = $("names-game");
+  const newSet = confirmButton("רשימה חדשה", "להחליף את רשימת השמות? הרשימה הנוכחית נשמרת להשוואה, ורשימה חדשה תיבנה בבנייה הבאה של השיעור.",
+    async (where) => {
+      busy(where, "מחליף");
+      try {
+        await api(acct("/check-in/new"), {});
+        await loadAccount();
+        $("names-game-status").textContent = "✓ הרשימה הוחלפה. רשימה חדשה תיבנה עם השיעור הבא (או לחץ \"לבנות מחדש\" בשיעור הבא).";
+      } catch {
+        where.textContent = "ההחלפה נכשלה. נסה שוב.";
+      }
+    });
+  if (!current?.items?.length) {
+    box.replaceChildren(p("עדיין אין רשימה. היא תיבנה עם השיעור הבא, ובינתיים אין משחק שמות.", "muted"),
+      ...(history || []).slice(0, 1).map((h) => p(`הרשימה הקודמת (${h.created_on || ""}): ${(h.items || []).map((i) => i.target).join(", ")}`, "muted kv")));
+    return;
+  }
+  const head = ["שם", "סוג", "השאלה", "נשאל", "תוצאות", ""];
+  box.replaceChildren(
+    p(`מאז ${current.created_on} · שוחק ב־${current.sessions_played || 0} שיחות${current.rationale ? ` · ` : ""}`, "kv"),
+    current.rationale ? el("p", { class: "muted kv", dir: "ltr", text: current.rationale }) : null,
+    el("div", { class: "table-wrap" }, el("table", { class: "words" },
+      el("thead", {}, el("tr", {}, head.map((h) => el("th", { text: h })))),
+      el("tbody", {}, current.items.map((i) => el("tr", {},
+        el("td", { dir: "auto", text: i.target }),
+        el("td", { text: i.kind === "treated" ? "תורגל" : "חדש" }),
+        el("td", { dir: "auto", text: i.question }),
+        el("td", { text: i.asked ?? 0 }),
+        el("td", { text: (i.results || []).map((r) => RESULT[r.result] || "?").join(" ") }),
+        el("td", {}, confirmButton("✕", `להוציא את "${i.target}" ממשחק השמות?`, (where) => removeGameName(i.target, where), "x")),
+      ))))),
+    el("div", { class: "cg-actions" }, newSet),
+  );
+}
+
+async function removeGameName(target, where) {
+  busy(where, "מוציא");
+  try {
+    await api(acct("/check-in/remove-item"), { target });
+    await loadAccount();
+    $("names-game-status").textContent = `✓ "${target}" הוצא ממשחק השמות.`;
+  } catch {
+    where.textContent = "ההוצאה נכשלה. נסה שוב.";
+  }
 }
 
 async function removeWord(word, where) {
@@ -672,7 +746,7 @@ function renderProgress(data) {
   if (withChecks.length) {
     const c = data.compare;
     const fmt = (v) => (v === null || v === undefined ? "–" : `${v}%`);
-    out.push(el("h3", { text: "בדיקת השליפה: כמה הוא שלף לבד, בלי רמז" }),
+    out.push(el("h3", { text: "משחק השמות: כמה הוא שלף לבד, בלי רמז" }),
       legend([[COLORS.treated, "מילים ושמות שתורגלו"], [COLORS.untreated, "מילים חדשות (להשוואה)"]]),
       lineChart(withChecks, [{ key: "treated", color: COLORS.treated }, { key: "untreated", color: COLORS.untreated }]),
       c.before.sessions
@@ -681,6 +755,15 @@ function renderProgress(data) {
         : null,
       p("בכל שיחה יש רק 3–5 פריטי בדיקה, ולכן כל נקודה קופצת. מה שחשוב הוא המגמה לאורך זמן. " +
         "אם \"תורגלו\" עולה יותר מ\"חדשות\", התרגול עצמו עוזר; אם שתיהן עולות, השליפה משתפרת בכלל.", "muted kv"));
+  }
+  const withOwn = data.points.filter((pt) => pt.self_found || pt.not_found);
+  if (withOwn.length) {
+    const top = Math.max(2, ...withOwn.map((pt) => Math.max(pt.self_found, pt.not_found)));
+    out.push(el("h3", { text: "שמות בשיחה החופשית: מצא לבד / לא מצא" }),
+      legend([[COLORS.own, "מצא לבד (אחרי מאמץ)"], [COLORS.not_yet, "לא מצא"]]),
+      lineChart(withOwn, [{ key: "self_found", color: COLORS.own }, { key: "not_found", color: COLORS.not_yet }],
+                { yMax: top, yTicks: [0, Math.round(top / 2), top], yLabel: (v) => String(v), height: 140 }),
+      p("שמות שהוא חיפש בעצמו באמצע השיחה, בלי שהמטפלת שאלה. זה הסימן הקרוב ביותר לשליפה בחיים האמיתיים.", "muted kv"));
   }
   if (withMood.length) {
     out.push(el("h3", { text: "מצב רוח" }),
@@ -730,7 +813,7 @@ function buildExport(n, t = (s) => s, translated = false) {
 
   const withProbes = sessions.filter((s) => s.probe_results?.length);
   if (withProbes.length) {
-    out.push(el("h2", { text: "בדיקת שליפה לאורך זמן" }), el("table", {},
+    out.push(el("h2", { text: "משחק השמות לאורך זמן (שליפה בלי רמז)" }), el("table", {},
       el("thead", {}, el("tr", {}, ["תאריך", "✓", "~", "✗", "✓ במילים שתורגלו", "✓ במילים חדשות"].map((h) => el("th", { text: h })))),
       el("tbody", {}, withProbes.slice().reverse().map((s) => {
         const st = probeStats(s.probe_results);
@@ -748,8 +831,9 @@ function buildExport(n, t = (s) => s, translated = false) {
       s.highlights?.length ? el("p", { dir: "auto", text: `הצלחות: ${s.highlights.map(t).join(" · ")}` }) : null,
       s.difficulties?.length ? el("p", { dir: "auto", text: `קשיים: ${s.difficulties.map(t).join(" · ")}` }) : null,
       s.probe_results?.length
-        ? el("p", { dir: "auto", text: `בדיקה: ${s.probe_results.map((r) => `${RESULT[r.result] || "?"} ${r.word}`).join("  ")}  (✓${st.uncued} ~${st.cued} ✗${st.failed})` })
+        ? el("p", { dir: "auto", text: `משחק השמות: ${s.probe_results.map((r) => `${RESULT[r.result] || "?"} ${r.word}`).join("  ")}  (✓${st.uncued} ~${st.cued} ✗${st.failed})` })
         : null,
+      ownNamesLine(s),
     ));
   }
 
@@ -758,6 +842,15 @@ function buildExport(n, t = (s) => s, translated = false) {
     .filter(([k]) => sections[k]?.length);
   if (obs.length) {
     out.push(el("h2", { text: "תצפיות" }), ...obs.map(([k, title]) => el("div", {}, el("h3", { text: title }), list(sections[k]))));
+  }
+
+  const own = sessions.flatMap((s) => s.own_names || []);
+  if (own.length) {
+    const names = (r) => [...new Set(own.filter((o) => o.result === r).map((o) => o.word))].join(", ");
+    out.push(el("h2", { text: "שמות בשיחה החופשית" }),
+      p("שמות שהוא חיפש בעצמו באמצע השיחה (הפסקה, תיאור במקום שם, תיקון עצמי), בלי שהמטפלת שאלה.", "meta"),
+      names("self_found") ? el("p", { dir: "auto", text: `★ מצא לבד: ${names("self_found")}` }) : null,
+      names("not_found") ? el("p", { dir: "auto", text: `… לא מצא: ${names("not_found")}` }) : null);
   }
 
   const hard = (ov.word_bank || []).filter((w) => (w.failed || 0) + (w.cued || 0) > 0)
@@ -825,6 +918,7 @@ async function loadAccount() {
     renderPlan(ov.next_plan, ov.notes);
     renderMemory(ov.memory);
     renderWords(ov.word_bank);
+    renderNamesGame(ov.check_in_set, ov.check_in_history);
     renderResearch(ov.research_notes);
     renderGames(ov.recommendations, ov.games_profile);
     renderNotes(ov.notes);

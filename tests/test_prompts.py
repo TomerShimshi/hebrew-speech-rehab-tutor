@@ -42,5 +42,7 @@ def test_read_optional_text_handles_missing_file(tmp_path):
 def test_conversation_flow_rules_present():
     text = render_tutor_prompt().text
     assert "ONE THREAD AT A TIME" in text and "BRIDGE every change of topic" in text
-    assert "do NOT start closing on your own" in text
+    assert "NO summary, NO homework" in text and "never the end" in text  # no early goodbyes (12)
+    with_plan = render_tutor_prompt(class_plan="Plan type: regular").text
+    assert "NAMES GAME" in with_plan and "NO HINTS in the game" in with_plan
     assert "say again" not in text.split("Closing")[1].split("Ending the call")[0].replace("Don't ask him to repeat or \"say again\" anything", "")

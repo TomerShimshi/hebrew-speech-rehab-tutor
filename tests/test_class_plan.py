@@ -53,12 +53,12 @@ def test_intro_plan_for_a_new_account_and_none_once_there_is_memory_but_no_plan(
     assert plan_for_session(store, DAD).primary_goal.type.value == "name_retrieval"
 
 
-def test_render_lists_the_checkins_without_hints_and_the_practice_hints():
+def test_render_lists_the_names_game_without_hints_and_the_practice_hints():
     out = render_class_plan(a_plan())
-    assert "WITHOUT any hint first" in out
-    assert "  1. (treated)\n      ask: העיר על הכנרת\n      answer: טבריה" in out  # ask first, answer last
+    assert "Names game (when the note to start it comes; each question word for word, NO hints):" in out
+    assert "  1.\n      ask: העיר על הכנרת\n      answer: טבריה" in out  # ask first, answer last
     assert "first syllable: כִּנֶּ..." in out
-    assert "Homework to give at the end" in out and "Avoid: politics" in out
+    assert "Homework (say it ONLY in the closing" in out and "Avoid: politics" in out
     assert render_class_plan(None) == ""
 
 
@@ -87,18 +87,18 @@ def test_builder_saves_a_valid_plan_with_recent_goals_in_context():
     assert saved["plan_type"] == "regular" and saved["built_after_session"] == old
     context = client.requests[0]["contents"]
     assert "- discourse: Tell a story" in context  # recent goals, for rotation
-    assert "due for practice today: טבריה" in context  # the word bank's due words
+    assert "first): טבריה" in context  # the word bank's due words
     assert store.get_session(DAD, old)["plan_status"] == "done"
 
 
-def test_builder_rejects_a_plan_without_checkin_items():
+def test_builder_leaves_the_check_in_to_the_names_game_set():
+    """12: the plan's own check-in items are ignored (the names game comes from the stable set)."""
     store = InMemorySessionStore()
     store.save_memory(DAD, "s0", {"memory_prompt": "x"}, None)
     sid = store.create_session(DAD, user_email=DAD, model="m", prompt_version="v")
-    client = FakeClient(text("{}", parsed=a_plan(probe=[])))
-    assert build_next_plan(store, client, SETTINGS, DAD, sid, today=TODAY, generate_fn=gen) == "failed"
-    assert store.get_next_plan(DAD) is None
-    assert "probe items" in store.get_session(DAD, sid)["plan_error"]
+    client = FakeClient(text("{}", parsed=a_plan()))  # the model filled probe anyway
+    assert build_next_plan(store, client, SETTINGS, DAD, sid, today=TODAY, generate_fn=gen) == "done"
+    assert store.get_next_plan(DAD)["probe"] == []
 
 
 def test_builder_without_memory_leaves_the_intro_for_next_time():
@@ -143,14 +143,24 @@ def test_first_session_gets_the_intro_and_the_session_keeps_its_plan(env):
     assert env.store.get_session(DAD, sid)["class_plan"]["plan_type"] == "intro"
 
 
-def test_next_session_follows_the_built_plan(env):
+def test_next_session_follows_the_built_plan_with_the_names_game_from_the_set(env):
+    from app.check_in_set import new_set
+    from app.schemas import CheckInItem
     env.store.save_memory(DAD, "s0", {"memory_prompt": "He loves the Galilee."}, None)
     env.store.save_next_plan(DAD, "s0", a_plan().model_dump(mode="json"))
-    sid = env.client.post("/api/session/start", headers=auth()).json()["session_id"]
+    # without a set there is no names game today (the plan's old check-ins aren't used)
+    body = env.client.post("/api/session/start", headers=auth()).json()
+    assert body["names_game"] is False and "Names game (when the note" not in system_instruction()
+    env.store.save_check_in_set(DAD, new_set([CheckInItem(target="עכו", question="העיר העתיקה עם החומות?"),
+                                              CheckInItem(target="טבריה", question="העיר על הכנרת?", kind="treated")],
+                                             "s0", TODAY))
+    body = env.client.post("/api/session/start", headers=auth()).json()
     instruction = system_instruction()
-    assert "Main goal (name_retrieval)" in instruction and "answer: טבריה" in instruction
+    assert body["names_game"] is True
+    assert "Main goal (name_retrieval)" in instruction and "ask: העיר על הכנרת?" in instruction
     assert "Never read the plan aloud" in " ".join(instruction.split())
-    assert env.store.get_session(DAD, sid)["class_plan"]["probe"][0]["target"] == "טבריה"
+    probe = env.store.get_session(DAD, body["session_id"])["class_plan"]["probe"]
+    assert {(p["target"], p["kind"]) for p in probe} == {("עכו", "untreated"), ("טבריה", "treated")}
 
 
 def test_memory_but_no_plan_means_no_plan_section_at_all(env):
@@ -169,17 +179,6 @@ def test_forget_memory_makes_the_next_session_an_intro_again(env):
     assert "Plan type: intro" in system_instruction()
 
 
-def test_treated_or_untreated_is_decided_by_the_word_bank_not_the_model():
-    store = InMemorySessionStore()
-    store.save_memory(DAD, "s0", {"memory_prompt": "x", "word_bank": {"טבריה": {"attempts": 1}}}, None)
-    sid = store.create_session(DAD, user_email=DAD, model="m", prompt_version="v")
-    claimed = [dict(p, kind="treated") for p in PROBES]  # the model says everything was practiced
-    client = FakeClient(text("{}", parsed=a_plan(probe=claimed)))
-    build_next_plan(store, client, SETTINGS, DAD, sid, today=TODAY, generate_fn=gen)
-    kinds = {p["target"]: p["kind"] for p in store.get_next_plan(DAD)["probe"]}
-    assert kinds == {"טבריה": "treated", "עכו": "untreated", "צפת": "untreated"}
-
-
 def test_checkin_lead_ins_are_rendered():
     plan = a_plan(probe=[dict(PROBES[0], bridge="מדברים על הכנרת...")] + PROBES[1:])
     assert ("      lead-in: מדברים על הכנרת...\n      ask: העיר על הכנרת\n"
@@ -190,29 +189,21 @@ def practice_item(target):
     return {"target": target, "elicit": "x", "hint_meaning": "m", "hint_first_syllable": "s", "sentence_completion": "c"}
 
 
-def test_plan_rules_drop_repeats_and_too_famous_new_items():
+def test_plan_rules_never_practice_an_untreated_names_game_name():
     from app.agent.next_class import enforce_plan_rules
-    probe = PROBES + [{"target": "ירושלים", "kind": "untreated", "elicit": "עיר הבירה"}]
-    practice = [practice_item("עכו"), practice_item("כרמיאל")]
-    plan = enforce_plan_rules(a_plan(probe=probe, practice=practice), practiced={"טבריה"})
-    assert [p.target for p in plan.probe] == ["טבריה", "עכו", "צפת"]
-    assert [p.kind for p in plan.probe] == ["treated", "untreated", "untreated"]
-    assert [p.target for p in plan.practice] == ["כרמיאל"]
-    # a famous name he already practiced is a fair treated item
-    plan = enforce_plan_rules(a_plan(probe=probe), practiced={"ירושלים"})
-    assert "ירושלים" in [p.target for p in plan.probe]
+    practice = [practice_item("עכו"), practice_item("כרמיאל"), practice_item("טבריה")]
+    plan = enforce_plan_rules(a_plan(practice=practice), untreated={"עכו"})
+    assert [p.target for p in plan.practice] == ["כרמיאל", "טבריה"]  # treated names may be practiced
+    assert plan.probe == []
 
 
-def test_plan_rules_reject_thin_plans():
+def test_plan_rules_reject_a_names_day_without_practice():
     import pytest
     from app.agent.next_class import enforce_plan_rules
-    famous = [{"target": t, "kind": "untreated", "elicit": "x"} for t in ("ירושלים", "תל אביב", "עכו")]
-    with pytest.raises(ValueError, match="usable probe items"):
-        enforce_plan_rules(a_plan(probe=famous), practiced=set())
-    same = [practice_item(p["target"]) for p in PROBES]
-    with pytest.raises(ValueError, match="repeats a check-in item"):
-        enforce_plan_rules(a_plan(practice=same), practiced=set())
-
+    with pytest.raises(ValueError, match="no usable practice items"):
+        enforce_plan_rules(a_plan(practice=[practice_item("עכו")]), untreated={"עכו"})
+    other_day = a_plan(primary_goal={"type": "discourse", "description": "A story"}, practice=[practice_item("עכו")])
+    assert enforce_plan_rules(other_day, untreated={"עכו"}).practice == []  # fine on other days
 
 
 def test_hebrew_sentences_never_share_a_line_with_english():

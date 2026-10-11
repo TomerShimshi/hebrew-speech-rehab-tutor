@@ -18,19 +18,21 @@ from functools import lru_cache
 import yaml
 from google.genai import types
 
-from app import word_bank
+from app import check_in_set, word_bank
 from app.agent.memory_update import format_memory
 from app.agent.research import personal_terms, research_technique, search_available
 from app.agent.runner import Tool, run_tool_loop
 from app.config import REPO_ROOT, Settings
 from app.games import render_games_for_plan
 from app.llm import generate
-from app.schemas import ClassPlan, MemoryDoc
-from app.store import PLAN_DONE, PLAN_FAILED, SessionStore
+from app.schemas import CheckInItem, CheckInProposal, ClassPlan, MemoryDoc
+from app.store import ENDED, PLAN_DONE, PLAN_FAILED, SessionStore
 
 PROMPT_PATH = REPO_ROOT / "prompts" / "next_class.yaml"
 TECHNIQUES_PATH = REPO_ROOT / "prompts" / "therapy_techniques.yaml"
-MIN_PROBE_ITEMS = 3
+MIN_SET_ITEMS = 4  # a names-game set needs at least this many usable names
+PACE_SESSIONS = 5  # his pace (12b) from this many recent real sessions
+FAST_PACE, SLOW_PACE = 3.2, 2.0  # his answers per minute: a fast talker uses a plan up sooner
 GROUNDING_SESSIONS = 3  # his own lines in this many recent transcripts count as "his data"
 # The question addresses HIM personally ("your friend", "with you"...): then the answer is about
 # his own life and must be grounded, whatever the model's about_his_life says.
@@ -81,7 +83,8 @@ def grounding_text(store: SessionStore, pid: str, memory_raw: dict, profile_text
 
 
 def _about_his_life(item) -> bool:
-    return bool(getattr(item, "about_his_life", False) or PERSONAL.search(f"{item.elicit} {getattr(item, 'bridge', '')}"))
+    asked = getattr(item, "elicit", None) or getattr(item, "question", "")
+    return bool(getattr(item, "about_his_life", False) or PERSONAL.search(f"{asked} {getattr(item, 'bridge', '')}"))
 
 
 def _grounded(target: str, known: str) -> bool:
@@ -91,41 +94,89 @@ def _grounded(target: str, known: str) -> bool:
 
 
 def invented_items(plan: ClassPlan, known: str) -> list[str]:
-    return [i.target for i in [*plan.probe, *plan.practice] if _about_his_life(i) and not _grounded(i.target, known)]
+    return [i.target for i in plan.practice if _about_his_life(i) and not _grounded(i.target, known)]
 
 
-def enforce_plan_rules(plan: ClassPlan, practiced: set[str], known: str | None = None) -> ClassPlan:
-    """Rules the model sometimes ignores (seen with the smallest fallback model), fixed by code:
-    check-in items are classified treated/untreated from the word bank, too-famous NEW items are
-    dropped, and practice never repeats a check-in item (it would spoil the untreated
-    comparison and thin out the session). Items about HIS OWN life whose answer isn't in his own
-    data (`known`, from grounding_text) are dropped: the plan must never invent his people
-    (8.5). Raises if what's left is too thin to use."""
+def enforce_plan_rules(plan: ClassPlan, untreated: set[str], known: str | None = None) -> ClassPlan:
+    """Rules the model sometimes ignores (seen with the smallest fallback model), fixed by code.
+    The names game comes from the stable check-in set (12), so the plan's own check-in list is
+    cleared, and practice never trains an UNTREATED name of the set (it would spoil the
+    comparison). Practice items about HIS OWN life whose answer isn't in his own data (`known`,
+    from grounding_text) are dropped: the plan must never invent his people (8.5). Raises if
+    what's left is too thin to use."""
+    practice = list(plan.practice)
     if known is not None:
-        invented = [i for i in [*plan.probe, *plan.practice] if _about_his_life(i) and not _grounded(i.target, known)]
+        invented = [i for i in practice if _about_his_life(i) and not _grounded(i.target, known)]
         if invented:
             _log(f"dropped {len(invented)} item(s) about his life not found in his data: {[i.target for i in invented]}")
-            plan = plan.model_copy(update={
-                "probe": [i for i in plan.probe if i not in invented],
-                "practice": [i for i in plan.practice if i not in invented],
-            })
-    probe = []
-    for p in plan.probe:
-        treated = _norm(p.target) in practiced
-        if not treated and _norm(p.target) in TOO_FAMOUS:
-            _log(f"dropped too-famous check-in item {p.target!r}")
+            practice = [i for i in practice if i not in invented]
+    kept = [p for p in practice if _norm(p.target) not in untreated]
+    if len(kept) < len(practice):
+        _log(f"dropped {len(practice) - len(kept)} practice item(s) that are untreated names-game names")
+    if plan.primary_goal.type.value == "name_retrieval" and plan.practice and not kept:
+        raise ValueError("no usable practice items left on a names day")
+    # the reserve (12b) follows the same rules, but an empty reserve never fails the plan
+    in_practice = {_norm(p.target) for p in kept}
+    reserve = [p for p in plan.reserve_practice
+               if _norm(p.target) not in untreated and _norm(p.target) not in in_practice
+               and not (known is not None and _about_his_life(p) and not _grounded(p.target, known))]
+    return plan.model_copy(update={"probe": [], "practice": kept, "reserve_practice": reserve})
+
+
+def enforce_set_rules(proposal: CheckInProposal, bank: dict, known: str) -> list[CheckInItem]:
+    """The names-game set, checked by code (12): treated = PRACTICED in the word bank (not just
+    there); names about his life must be in his data; no too-famous new names; no repeats."""
+    items, seen = [], set()
+    for item in proposal.items:
+        name = _norm(item.target)
+        if not name or name in seen or not item.question.strip():
             continue
-        probe.append(p.model_copy(update={"kind": "treated" if treated else "untreated"}))
-    probe_targets = {_norm(p.target) for p in probe} | {_norm(p.target) for p in plan.probe}
-    practice = [p for p in plan.practice if _norm(p.target) not in probe_targets]
-    if len(practice) < len(plan.practice):
-        _log(f"dropped {len(plan.practice) - len(practice)} practice items that repeat check-in items")
-    if len(probe) < MIN_PROBE_ITEMS:
-        # Without check-in items there's no progress measurement: don't accept it.
-        raise ValueError(f"plan has {len(probe)} usable probe items (need {MIN_PROBE_ITEMS}+)")
-    if plan.primary_goal.type.value == "name_retrieval" and plan.practice and not practice:
-        raise ValueError("every practice item repeats a check-in item")
-    return plan.model_copy(update={"probe": probe, "practice": practice})
+        if _about_his_life(item) and not _grounded(item.target, known):
+            _log(f"set: dropped {item.target!r} (about his life, not in his data)")
+            continue
+        treated = word_bank.is_treated(bank.get(name))
+        if not treated and name in TOO_FAMOUS:
+            _log(f"set: dropped too-famous new name {item.target!r}")
+            continue
+        seen.add(name)
+        items.append(item.model_copy(update={"target": name, "kind": "treated" if treated else "untreated"}))
+    if len(items) < MIN_SET_ITEMS:
+        raise ValueError(f"names-game set has {len(items)} usable names (need {MIN_SET_ITEMS}+)")
+    return items[:10]
+
+
+def speaking_pace(store: SessionStore, pid: str) -> list[dict]:
+    """His pace in his last real sessions (12b): minutes, his answers per minute, words per
+    answer. A fast talker gets through a plan sooner -- then the plan must be bigger."""
+    rows = []
+    for s in store.list_sessions(pid, 12):
+        start, end = s.get("started_at"), s.get("ended_at")
+        if s.get("status") != ENDED or (s.get("turn_count") or 0) < 6 or not start or not end:
+            continue
+        minutes = (end - start).total_seconds() / 60
+        if minutes < 2:
+            continue
+        his = [(t.get("text") or t.get("live_text") or "") for t in store.list_turns(pid, s["id"])
+               if t.get("speaker") == "patient"]
+        his = [h for h in his if h.strip()]
+        if not his:
+            continue
+        rows.append({"date": start.date().isoformat(), "minutes": round(minutes, 1),
+                     "answers_per_min": round(len(his) / minutes, 1),
+                     "words_per_answer": round(sum(len(h.split()) for h in his) / len(his), 1)})
+        if len(rows) == PACE_SESSIONS:
+            break
+    return rows
+
+
+def render_pace(rows: list[dict]) -> str:
+    if not rows:
+        return "(no sessions yet: plan for a typical pace)"
+    rate = sum(r["answers_per_min"] for r in rows) / len(rows)
+    label = "FAST" if rate >= FAST_PACE else "SLOW" if rate <= SLOW_PACE else "typical"
+    lines = [f"- {r['date']}: {r['minutes']} min, {r['answers_per_min']} answers/min, "
+             f"{r['words_per_answer']} words per answer" for r in rows]
+    return "\n".join([*lines, f"Overall: {rate:.1f} answers per minute -> {label} pace."])
 
 
 def _models(settings: Settings) -> list[str]:
@@ -198,13 +249,24 @@ def run_research_phase(store, client, settings, pid, context, personal, now, gen
     return outcome
 
 
+def render_check_in_set(current: dict | None) -> str:
+    if not current or not current.get("items"):
+        return "(none yet)"
+    lines = [f"since {current.get('created_on')}, played in {current.get('sessions_played', 0)} session(s)"]
+    for i in current["items"]:
+        last = ", ".join(r.get("result", "?") for r in i.get("results", [])[-3:]) or "not asked yet"
+        lines.append(f"- {i['target']} ({i.get('kind')}): {last}")
+    return "\n".join(lines)
+
+
 def build_context(memory_raw: dict, recent_plans: list[dict], profile_text: str, today: dt.date,
                   games_text: str = "(no games account linked)", notes_text: str = "(none yet)",
-                  caregiver_notes: str = "") -> str:
+                  caregiver_notes: str = "", check_in: dict | None = None,
+                  pace: list[dict] | None = None) -> str:
     memory = MemoryDoc(**memory_raw)
     due = word_bank.due_words(memory.word_bank, today)
     bank = ", ".join(
-        f"{w} (last: {s.last_result.value if s.last_result else '?'}, next due {s.next_due})"
+        f"{w} ({s.source.value}; last: {s.last_result.value if s.last_result else '?'}, next due {s.next_due})"
         for w, s in list(memory.word_bank.items())[-25:]
     ) or "(empty)"
     recent = "\n".join(f"- {r.get('date')}: mood {r.get('mood')}; {r.get('summary')}"
@@ -217,13 +279,50 @@ def build_context(memory_raw: dict, recent_plans: list[dict], profile_text: str,
         f"# MEMORY (what the tutor knows about him)\n{memory.memory_prompt}\n\n"
         f"# MEMORY SECTIONS\n{format_memory(memory)}\n\n"
         f"# FOCUS POINTS FROM THE LAST SESSION\n" + ("\n".join(f"- {f}" for f in memory.focus_next_session) or "(none)") + "\n\n"
-        f"# WORD BANK\ndue for practice today: {', '.join(due) or '(none)'}\nall recent: {bank}\n\n"
+        f"# WORD BANK\ndue for practice today (names he couldn't find on his own first): {', '.join(due) or '(none)'}\n"
+        f"all recent (source: practiced / self_found / not_found / probe): {bank}\n\n"
+        f"# NAMES GAME SET (the stable check-in set; untreated names must NEVER be practiced)\n"
+        f"{render_check_in_set(check_in)}\n\n"
         f"# RECENT SESSIONS (oldest first)\n{recent}\n\n"
+        f"# HIS PACE (newest first; size the plan to fill ~9 minutes at this pace)\n{render_pace(pace or [])}\n\n"
         f"# RECENT PLANS' GOALS (newest first)\n{_recent_plans_text(recent_plans)}\n\n"
         f"# GAMES (the Simon games app; trends computed from his real data)\n{games_text}\n\n"
         f"# RESEARCH NOTES (earlier findings from professional sources, newest first)\n{notes_text}\n\n"
         f"# TECHNIQUES YOU MAY USE\n{techniques_text()}"
     )
+
+
+def propose_check_in_set(store, client, settings, pid, sid, context, memory_raw, known, today,
+                         generate_fn) -> dict | None:
+    """A new names-game set when the current one is due (12): one structured call, checked by
+    code, one retry. Returns the new set (saved, the old one archived) or None -- a failure here
+    never fails the plan: the game just waits for the next build."""
+    bank = {_norm(w): s for w, s in MemoryDoc(word_bank=memory_raw.get("word_bank") or {}).word_bank.items()}
+    prompt = context
+    for attempt in (1, 2):
+        try:
+            result = generate_fn(
+                client, _models(settings), prompt,
+                types.GenerateContentConfig(system_instruction=load_prompt()["check_in_set"],
+                                            response_mime_type="application/json",
+                                            response_schema=CheckInProposal, temperature=0.4),
+            )
+            proposal = result.response.parsed
+            if not isinstance(proposal, CheckInProposal):
+                proposal = CheckInProposal.model_validate_json(result.response.text)
+            items = enforce_set_rules(proposal, bank, known)
+        except Exception as exc:  # noqa: BLE001
+            _log(f"{sid}: names-game set attempt {attempt} failed: {type(exc).__name__}: {exc!s:.200}")
+            prompt = (context + "\n\n# YOUR PREVIOUS SET WAS REJECTED\nUse only names from his data (memory, "
+                      "profile, notes, his own words) or less-famous general places; at least 6, each with one question.")
+            continue
+        store.retire_check_in_set(pid)
+        new = check_in_set.new_set(items, sid, today, proposal.rationale[:300])
+        store.save_check_in_set(pid, new)
+        _log(f"{sid}: new names-game set ({sum(i.kind == 'treated' for i in items)} treated, "
+             f"{sum(i.kind != 'treated' for i in items)} untreated)")
+        return new
+    return None
 
 
 def build_next_plan(
@@ -251,10 +350,21 @@ def build_next_plan(
             return PLAN_DONE
         notes_doc = store.get_notes(pid) or {}
         caregiver_notes = notes_doc.get("text", "")
-        context = build_context(memory_raw, store.recent_session_plans(pid, 5), profile_text, today,
-                                games_text=render_games_for_plan(games),
-                                notes_text=render_notes(store.recent_technique_notes(pid, 3)),
-                                caregiver_notes=caregiver_notes)
+        known = grounding_text(store, pid, memory_raw, profile_text, caregiver_notes)
+        current_set = store.get_check_in_set(pid)
+        recent_plans = store.recent_session_plans(pid, 5)
+        context_args = dict(games_text=render_games_for_plan(games),
+                            notes_text=render_notes(store.recent_technique_notes(pid, 3)),
+                            caregiver_notes=caregiver_notes, pace=speaking_pace(store, pid))
+        if check_in_set.needs_new_set(current_set, today):
+            # The names game's stable set is due (none yet, or ~3 weeks / 10 sessions old): first a
+            # new one, so the plan below sees which names it must not practice (12).
+            set_context = build_context(memory_raw, recent_plans, profile_text, today, check_in=current_set,
+                                        **context_args)
+            current_set = propose_check_in_set(store, client, settings, pid, sid, set_context, memory_raw,
+                                               known, today, generate_fn) or current_set
+        context = build_context(memory_raw, recent_plans, profile_text, today, check_in=current_set,
+                                **context_args)
         research = None
         if research_available(store, settings, pid, now):
             personal = personal_terms(memory_raw, f"{profile_text}\n{caregiver_notes}",
@@ -264,10 +374,8 @@ def build_next_plan(
         if research and research.get("status") in ("ok", "cached") and research.get("techniques"):
             context += (f"\n\n# RESEARCH FOR THIS PLAN (you asked: {research['question']})\n"
                         f"{research.get('summary', '')}\n{_technique_lines(research['techniques'])}")
-        # treated/untreated drives the progress comparison, so it's decided by code, not the
-        # model: an item is "treated" only if it's actually in his word bank.
-        practiced = {_norm(w) for w in (memory_raw.get("word_bank") or {})}
-        known = grounding_text(store, pid, memory_raw, profile_text, caregiver_notes)
+        # The set's untreated names are never practiced (12) -- decided by code, not the model.
+        untreated = check_in_set.untreated_targets(current_set)
         for attempt in (1, 2):
             result = generate_fn(
                 client, _models(settings), context,
@@ -284,7 +392,7 @@ def build_next_plan(
             plan = plan.tidy().model_copy(update={"plan_type": "regular"})
             invented = invented_items(plan, known)
             try:
-                plan = enforce_plan_rules(plan, practiced, known)
+                plan = enforce_plan_rules(plan, untreated, known)
                 break
             except ValueError:
                 if attempt == 2 or not invented:
@@ -298,10 +406,10 @@ def build_next_plan(
                             f"with known items of another kind (see PRIORITY).")
         # Games: keep only homework for games he actually has (no invented ids), with their
         # Hebrew names from the catalog; recommendations are saved separately (de-duplicated).
-        known = {g.id: g for g in (games.games if games and not games.error else [])}
+        his_games = {g.id: g for g in (games.games if games and not games.error else [])}
         plan = plan.model_copy(update={
-            "game_homework": [h.model_copy(update={"name_he": known[h.game_id].name_he or h.game_id})
-                              for h in plan.game_homework if h.game_id in known and known[h.game_id].route],
+            "game_homework": [h.model_copy(update={"name_he": his_games[h.game_id].name_he or h.game_id})
+                              for h in plan.game_homework if h.game_id in his_games and his_games[h.game_id].route],
         })
         for rec in plan.games_app_feedback:
             store.add_games_recommendation(pid, sid, rec.model_dump(mode="json"))
@@ -317,7 +425,7 @@ def build_next_plan(
                          if research else None),
         })
         store.update_session(pid, sid, {"plan_status": PLAN_DONE, "plan_model": result.model, "plan_error": None})
-        _log(f"{sid}: plan built ({plan.primary_goal.type.value}, {len(plan.probe)} probe, "
+        _log(f"{sid}: plan built ({plan.primary_goal.type.value}, {len(plan.reserve_practice)} reserve, "
              f"{len(plan.practice)} practice; research {research.get('status') if research else 'none'}; "
              f"model {result.model})")
         return PLAN_DONE

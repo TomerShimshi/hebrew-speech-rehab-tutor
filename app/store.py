@@ -18,6 +18,8 @@ Layout (see docs/plans/03 and 04):
   patients/{pid}/caregiver/notes          the caregiver's notes for the plan builder (08)
   patients/{pid}/caregiver/settings       per-account session settings: voice, tap-to-talk (09)
   patients/{pid}/sessions/{sid}/prompt/live  the exact system instruction the tutor got (8.5)
+  patients/{pid}/plans/check_in           the active names-game set (12)
+  patients/{pid}/check_in_history/{id}    earlier names-game sets, kept for comparison (12)
 """
 
 import datetime as dt
@@ -118,6 +120,10 @@ class SessionStore(Protocol):
     def set_billing_state(self, state: dict) -> None: ...
     def save_settings(self, pid: str, settings: dict, by: str) -> None: ...
     def get_session_prompt(self, pid: str, sid: str) -> dict | None: ...
+    def get_check_in_set(self, pid: str) -> dict | None: ...
+    def save_check_in_set(self, pid: str, data: dict) -> None: ...
+    def retire_check_in_set(self, pid: str) -> bool: ...
+    def list_check_in_history(self, pid: str, n: int = 10) -> list[dict]: ...
 
 
 def _turn_fields(turn: TurnIn) -> dict:
@@ -143,6 +149,8 @@ class InMemorySessionStore:
         self.push_subs: dict[tuple[str, str], dict] = {}
         self.reminder_settings: dict[str, dict] = {}
         self.reminders: dict[tuple[str, str], dict] = {}
+        self.check_in_sets: dict[str, dict] = {}
+        self.check_in_history: dict[tuple[str, str], dict] = {}
 
     def create_session(self, pid, *, user_email, model, prompt_version):
         sid = uuid.uuid4().hex
@@ -223,6 +231,7 @@ class InMemorySessionStore:
     def forget_memory(self, pid):
         self.memory.pop(pid, None)
         self.next_plans.pop(pid, None)  # the next session is an intro again
+        self.retire_check_in_set(pid)  # its names came from the forgotten memory
 
     def delete_account(self, pid):
         keys = [k for k in self.sessions if k[0] == pid]
@@ -245,6 +254,9 @@ class InMemorySessionStore:
                 store.pop(key)
         for key in [k for k in self.session_prompts if k[0] == pid]:
             self.session_prompts.pop(key)
+        self.check_in_sets.pop(pid, None)
+        for key in [k for k in self.check_in_history if k[0] == pid]:
+            self.check_in_history.pop(key)
         return len(keys)
 
     def get_next_plan(self, pid):
@@ -326,6 +338,23 @@ class InMemorySessionStore:
 
     def get_settings(self, pid):
         return self.settings.get(pid)
+
+    def get_check_in_set(self, pid):
+        return self.check_in_sets.get(pid)
+
+    def save_check_in_set(self, pid, data):
+        self.check_in_sets[pid] = {**data, "updated_at": _now()}
+
+    def retire_check_in_set(self, pid):
+        current = self.check_in_sets.pop(pid, None)
+        if current is None:
+            return False
+        self.check_in_history[(pid, current["id"])] = {**current, "retired_at": _now()}
+        return True
+
+    def list_check_in_history(self, pid, n=10):
+        sets = [v for k, v in self.check_in_history.items() if k[0] == pid]
+        return sorted(sets, key=lambda v: v["retired_at"], reverse=True)[:n]
 
     def get_billing_state(self):
         return self.billing
@@ -496,6 +525,7 @@ class FirestoreSessionStore:
         # memory_history are kept. The next session is an intro again.
         self._patient(pid).collection("memory").document("current").delete()
         self._patient(pid).collection("plans").document("next").delete()
+        self.retire_check_in_set(pid)  # its names came from the forgotten memory
 
     def delete_account(self, pid):
         sessions = int(self._patient(pid).collection("sessions").count().get()[0][0].value)
@@ -605,6 +635,30 @@ class FirestoreSessionStore:
     def get_settings(self, pid):
         snap = self._patient(pid).collection("caregiver").document("settings").get()
         return snap.to_dict() if snap.exists else None
+
+    def get_check_in_set(self, pid):
+        snap = self._patient(pid).collection("plans").document("check_in").get()
+        return snap.to_dict() if snap.exists else None
+
+    def save_check_in_set(self, pid, data):
+        self._patient(pid).collection("plans").document("check_in").set(
+            {**data, "updated_at": self._fs.SERVER_TIMESTAMP})
+
+    def retire_check_in_set(self, pid):
+        current = self.get_check_in_set(pid)
+        if current is None:
+            return False
+        batch = self._db.batch()
+        batch.set(self._patient(pid).collection("check_in_history").document(current["id"]),
+                  {**current, "retired_at": self._fs.SERVER_TIMESTAMP})
+        batch.delete(self._patient(pid).collection("plans").document("check_in"))
+        batch.commit()
+        return True
+
+    def list_check_in_history(self, pid, n=10):
+        query = (self._patient(pid).collection("check_in_history")
+                 .order_by("retired_at", direction=self._fs.Query.DESCENDING).limit(n))
+        return [s.to_dict() for s in query.stream()]
 
     def get_billing_state(self):
         snap = self._db.collection("usage").document("billing").get()

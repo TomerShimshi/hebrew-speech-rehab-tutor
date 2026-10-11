@@ -18,6 +18,7 @@ from app.games import game_link, profile_for
 from app.auth import User, verify_user, verify_sweeper
 from app.config import Settings, get_settings
 from app.live_token import create_live_token
+from app.class_plan import plan_names
 from app.patient_profile import PatientProfileLoader, extract_vocabulary
 from app.prompt_archive import PromptArchive
 from app.schemas import VoiceSettings
@@ -192,7 +193,9 @@ def start_session(
         prompt,
         client,
         resume_handle=resume_handle,
-        vocabulary=extract_vocabulary(profile_text),
+        # his names from the profile + today's names (game, practice, reserve): the short proper
+        # names the transcription mishears most (12b)
+        vocabulary=list(dict.fromkeys([*extract_vocabulary(profile_text), *plan_names(plan)])),
         voice=voice,
     )
     if not session_id:
@@ -228,6 +231,7 @@ def start_session(
         "expires_at": live.expires_at.isoformat(),
         "prompt_version": prompt.version,
         "start_note": built.start_note,  # the greeting cue, with when they last talked
+        "names_game": built.names_game,  # the page cues the names game at ~2 minutes (12)
         # buttons for the end screen: the game homework the tutor will suggest
         "game_homework": homework_buttons(plan, patient_id_for(user), settings),
         "voice": {"tap_to_talk": voice.tap_to_talk, "noise_level": voice.noise_level,

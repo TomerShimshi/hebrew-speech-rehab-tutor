@@ -114,9 +114,12 @@ def test_rebuild_failure_keeps_the_old_plan(env):
     from fake_llm import FakeClient, text
     seed(env, DAD)
     before = env.store.get_next_plan(DAD)
-    env.llm = FakeClient(text("{}", parsed=a_plan(probe=[])))  # invalid: no check-in items
+    # invalid: a names day whose only practice item is an untreated names-game name (12)
+    env.store.save_check_in_set(DAD, {"id": "s", "created_on": "2099-01-01", "items": [
+        {"target": "כנרת", "question": "q", "kind": "untreated"}]})
+    env.llm = FakeClient(text("{}", parsed=a_plan()))
     body = env.client.post(f"/api/caregiver/{DAD}/plan/rebuild", headers=auth("tok-tomer"), json={}).json()
-    assert body["plan_status"] == "failed" and "probe items" in body["error"]
+    assert body["plan_status"] == "failed" and "no usable practice items" in body["error"]
     assert env.store.get_next_plan(DAD) == before
 
 
@@ -361,7 +364,8 @@ def test_progress_numbers():
     assert [pt["date"].day for pt in pts] == [4, 5, 6, 7, 8, 10, 11, 12]  # oldest first, empty one skipped
     assert (pts[-1]["treated"], pts[-1]["untreated"], pts[-1]["mood"]) == (100, 0, 3)
     assert (pts[-2]["treated"], pts[-2]["untreated"]) == (50, 100)
-    assert pts[-3] == {"date": dt.datetime(2026, 10, 10), "treated": None, "untreated": None, "items": 0, "mood": 1}
+    assert pts[-3] == {"date": dt.datetime(2026, 10, 10), "treated": None, "untreated": None, "items": 0, "mood": 1,
+                       "self_found": 0, "not_found": 0}
     # last 5 sessions with check-ins (12, 11, 8, 7, 6) vs the ones before (5, 4)
     assert data["compare"]["recent"] == {"treated": 30, "untreated": 20, "sessions": 5}
     assert data["compare"]["before"] == {"treated": 0, "untreated": 0, "sessions": 2}
@@ -461,3 +465,31 @@ def test_process_picks_up_where_it_stopped_memory_done_plan_failed(env):
     assert (body["memory_status"], body["plan_status"]) == ("done", "done")
     assert len(env.llm.requests) == 1  # only the plan builder ran
     assert env.store.get_memory(DAD) == memory_before  # the memory wasn't updated twice
+
+
+def test_names_found_on_his_own_are_their_own_progress_series():
+    import datetime as dt
+    from app.caregiver_api import progress_series
+    data = progress_series([{"started_at": dt.datetime(2026, 10, 12), "own_names": [
+        {"word": "חמת גדר", "result": "self_found"}, {"word": "עין גב", "result": "not_found"},
+        {"word": "בניאס", "result": "self_found"}]}], {"חמת גדר": {"last_result": "self_found"}})
+    assert (data["points"][0]["self_found"], data["points"][0]["not_found"], data["points"][0]["items"]) == (2, 1, 0)
+    assert data["words"]["own"] == 1
+
+
+def test_names_game_set_on_the_page_new_set_and_remove_a_name(env):
+    from app.check_in_set import new_set
+    from app.schemas import CheckInItem
+    import datetime as dt
+    env.store.save_check_in_set(DAD, new_set([CheckInItem(target="עכו", question="q"),
+                                              CheckInItem(target="צפת", question="q")], "s0", dt.date(2026, 10, 10)))
+    ov = get(env, f"/api/caregiver/{DAD}/overview").json()
+    assert [i["target"] for i in ov["check_in_set"]["items"]] == ["עכו", "צפת"]
+    post = lambda path, body=None, token="tok-tomer": env.client.post(  # noqa: E731
+        f"/api/caregiver/{DAD}/{path}", headers=auth(token), json=body or {})
+    assert post("check-in/remove-item", {"target": "עכו"}, token="tok-dad").status_code == 403
+    assert post("check-in/remove-item", {"target": "עכו"}).json()["items"] == 1
+    assert post("check-in/remove-item", {"target": "עכו"}).status_code == 404
+    assert post("check-in/new").json()["retired"] is True
+    ov = get(env, f"/api/caregiver/{DAD}/overview").json()
+    assert ov["check_in_set"] is None and ov["check_in_history"][0]["items"][0]["target"] == "צפת"
