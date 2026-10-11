@@ -3,9 +3,9 @@
 Part of the [master design](00-master-design.md). After [11](11-whatsapp-reminder.md). Requested by Tomer (2026-10-10).
 
 ## Why
-Tomer noticed that Dad's sessions stopped producing word results. Looking at the sessions (no code changed), the reasons were:
+Tomer noticed that the patient's sessions stopped producing word results. Looking at the sessions (no code changed), the reasons were:
 - **The marking works; the tutor stopped asking.** The memory agent records only words the tutor practiced and check-in items she actually asked. On 4.10 she asked check-ins in both sessions. On 8.10–9.10 (5 sessions) the check-in answers mostly never came up: 2 results in total, both from one session.
-- **She ends the sessions herself, early.** In 7 of the 8 sessions since 2.10, the tutor started the closing (summary, homework, goodbye) between minute **2.9 and 6.2**. The prompt says "do NOT start closing on your own; you'll get a note at ~9 minutes". The "end button" sessions were Dad pressing it *after* her goodbye. She has no clock: she sees the whole conversation at once, so when a story ends or the plan feels covered, it "feels" done.
+- **She ends the sessions herself, early.** In 7 of the 8 sessions since 2.10, the tutor started the closing (summary, homework, goodbye) between minute **2.9 and 6.2**. The prompt says "do NOT start closing on your own; you'll get a note at ~9 minutes". The "end button" sessions were the patient pressing it *after* her goodbye. She has no clock: she sees the whole conversation at once, so when a story ends or the plan feels covered, it "feels" done.
 
   | Session | She started closing at | Ended |
   |---|---|---|
@@ -17,17 +17,17 @@ Tomer noticed that Dad's sessions stopped producing word results. Looking at the
   | 4.10 12:09 | 4.5 min | 5.0 |
   | 4.10 10:49 | 6.2 min | 6.6 |
   | 2.10 | 4.6 min | 5.0 |
-- **Woven-in check-ins wait for a moment that doesn't come.** The prompt allows a check-in only "when the conversation is near its topic, never in the middle of his story". When he steers elsewhere (the Golan, while the items were about Caesarea), the moment never comes.
-- **An interrupted check-in is dropped.** On 9.10 she started the סי סנטר item, he spoke over her, and she never came back to it.
-- **A misheard goodbye.** On 9.10 he said "אני רוצה ללכת" (meaning: walk the new promenade). She moved straight to the closing at 6.3 minutes.
+- **Woven-in check-ins wait for a moment that doesn't come.** The prompt allows a check-in only "when the conversation is near its topic, never in the middle of his story". When he steers elsewhere (to another region, while the items were about places near his home), the moment never comes.
+- **An interrupted check-in is dropped.** On 9.10 she started a check-in item, he spoke over her, and she never came back to it.
+- **A misheard goodbye.** On 9.10 he said "אני רוצה ללכת" (meaning: he wanted to go for a walk somewhere). She moved straight to the closing at 6.3 minutes.
 - **A possible rule conflict (not proven).**
   - Since 8.5, every check-in is about his own life (the grounding guard).
   - Since prompt 1.5, the tutor must "never give him a name from his own life as the answer".
   - The hint ladder's last step is "say the word yourself".
 
   Together these may make her avoid items she can't finish.
-- **Stale items.** Because they're never asked, היכל נעמי, זכרון יעקב and סי סנטר came back in 3–4 plans in a row.
-- **Lost evidence.** On 9.10 he paused, described it ("מרחצאות... ברכות מים חמים") and found **חמת גדר** on his own. That's the best sign of progress there is (naming in real conversation), and today it isn't recorded, because only practiced words count.
+- **Stale items.** Because they're never asked, the same three names came back in 3–4 plans in a row.
+- **Lost evidence.** On 9.10 he paused, described a place instead of naming it, and then found its name on his own. That's the best sign of progress there is (naming in real conversation), and today it isn't recorded, because only practiced words count.
 
 ## Goal
 1. **Record names he finds on his own** (with effort), and names he **tried for and couldn't find**, as their own category. They feed the word bank and the next plans, without mixing into the check-in measure.
@@ -80,7 +80,7 @@ Our woven-in check-ins broke three of these:
 - **What counts.** Only **names** (places, people, landmarks), his core difficulty, and only with **visible effort**:
   - a pause or hesitation before it
   - describing it instead of naming it
-  - a self-correction ("פרחת... בריכת המשושים")
+  - a self-correction ("טבר... טבריה")
   - asking himself "איך קוראים לזה"
 
   Names he says fluently are not recorded: he says many, and they'd bury the signal.
@@ -89,7 +89,7 @@ Our woven-in check-ins broke three of these:
   - `not_found`: he tried and gave up, or talked around it, and the tutor didn't practice it.
 
   If the tutor practiced it afterwards, the existing results apply, as today.
-- **Transcription errors.** Names from free talk have no planned answer to check against. They're marked low-confidence when the two transcript versions (the live captions and the model's own transcription) disagree. Example: the model's version of "בריכת המשושים" was "פרחת המשולשים". A low-confidence `self_found` is shown but doesn't move the schedule.
+- **Transcription errors.** Names from free talk have no planned answer to check against. They're marked low-confidence when the two transcript versions (the live captions and the model's own transcription) disagree. Example: the model's version of a two-word place name came out as two similar-sounding wrong words. A low-confidence `self_found` is shown but doesn't move the schedule.
 - **The word bank keeps where each name came from.** A new `source` field on each word: `practiced` / `self_found` / `not_found`.
   - **Code** decides "treated" from the source, not just from being in the bank. `next_class.py` today treats anything in the bank as treated. A name that was only found or missed in free talk was never practiced, so it's still "untreated" for the comparison.
   - **Schedule** (plain code, as today):
@@ -103,7 +103,7 @@ Our woven-in check-ins broke three of these:
 
   The set stays for **about 3 weeks** (or ~10 sessions), then the plan builder proposes the next set, and the old one is kept for comparison.
 - **Each session asks 2–3 of them, in rotation** (chosen in code: the least recently asked first; treated and untreated mixed). So each name is asked every few sessions, always the same way.
-- **One fixed question per name**, written once when the set is made (a describing question: "איך נקרא בית הכנסת בקיסריה שבנוי בצורת ספר תורה?"). The same words every time.
+- **One fixed question per name**, written once when the set is made (a describing question: "איך נקראת העיר העתיקה בצפון, עם החומות והנמל הצלבני?"). The same words every time.
 - **Untreated names are never practiced** while the set is active. The plan builder's practice items must not include them (checked in code).
 - **Where names come from:**
   - names he **couldn't find** (`not_found`) go to **practice** first, and later into a treated set
@@ -112,11 +112,11 @@ Our woven-in check-ins broke three of these:
 - **The plan builder keeps choosing the practice:** practice items, activity, topics. It no longer picks check-ins for each session.
 
 ### C. The names game in the session (tutor prompt + a cue from the app)
-- **A cue from the app (code).** At about **2 minutes**, the page sends a silent note, which Dad never sees or hears: "[Now is the time for the short names game: at the next natural pause, after he finishes his sentence.]" She doesn't need to judge the moment, and it can't slip away.
+- **A cue from the app (code).** At about **2 minutes**, the page sends a silent note, which the patient never sees or hears: "[Now is the time for the short names game: at the next natural pause, after he finishes his sentence.]" She doesn't need to judge the moment, and it can't slip away.
 - **How she runs it (prompt):**
   - **Introduce it lightly, as a game, never a test:** "בוא נעשה משחק קצר של שמות: אני אתאר, ואתה תגיד לי איך קוראים לזה."
   - **Ask the item's fixed question, word for word.** Then wait: give him real time, at least ~10 seconds of silence is fine.
-  - **No hints during the game.** If he finds it, a short warm "נכון!". If not, she says the name warmly in one sentence ("זה היכל נעמי, בית הכנסת היפה שלכם") and moves on. No hint ladder, no second try.
+  - **No hints during the game.** If he finds it, a short warm "נכון!". If not, she says the name warmly in one sentence ("זו עכו, העיר עם החומות") and moves on. No hint ladder, no second try.
   - 2–3 names, then a natural bridge into the conversation: "יופי, ועכשיו ספר לי…".
   - **If he's tired or low in the opening:** she skips the game and says nothing about it. She calls a `skip_names_game` note so it's recorded. The live model has one tool today (`end_session`); this adds a second, which only logs.
   - **If he interrupts:** she finishes the item at the next pause. The game is short, so it's easy to return to.
@@ -134,7 +134,7 @@ Our woven-in check-ins broke three of these:
   - Before the wrap-up note: no summary, no homework, no "נהניתי לשמוע", no goodbye.
   - When a story or the plan feels finished, that's the moment for the **next thread** (the next plan item, a practice name, one of his interests), not the end.
   - Exceptions, as today: he asks to stop, or he's clearly tired (the fatigue protocol).
-- **Ambiguous goodbyes.** If he says something like "אני רוצה ללכת" in the middle of a topic, she checks gently ("לטייל בטיילת, או שאתה רוצה לסיים להיום?") before closing.
+- **Ambiguous goodbyes.** If he says something like "אני רוצה ללכת" in the middle of a topic, she checks gently ("ללכת לטייל, או שאתה רוצה לסיים להיום?") before closing.
 - **Code backstop:** if she calls `end_session` before ~8 minutes without his goodbye, the page logs it as `tutor_early_goodbye`. It's shown on the caregiver page and counted in the checks. The page doesn't block it: by then she has said goodbye out loud, and holding him on the line would be worse.
 - **Homework moves fully to the closing.** The plan's homework line will say "only after the wrap-up note", since today it may be what triggers her closing.
 
@@ -163,7 +163,7 @@ Our woven-in check-ins broke three of these:
 | `app/live_token.py` | The `skip_names_game` tool (log only). |
 | `static/app.js` | Notes at ~2 (names game), ~4 and ~7 minutes; `skip_names_game`; log `tutor_early_goodbye`. |
 | `app/caregiver_api.py`, `static/caregiver.*` | The names game per session, the check-in set and "new set", found on his own / couldn't find, the word bank source, progress and the export. |
-| `tests/` | The new results and their schedule; treated vs untreated by source; the set's rotation and lifetime; untreated never in practice; the time notes; `tutor_early_goodbye`; fake memory-agent runs on a transcript like 9.10 (חמת גדר → `self_found`; fluent names not recorded). |
+| `tests/` | The new results and their schedule; treated vs untreated by source; the set's rotation and lifetime; untreated never in practice; the time notes; `tutor_early_goodbye`; fake memory-agent runs on a transcript like 9.10 (a name found after describing it → `self_found`; fluent names not recorded). |
 
 ## Progress (2026-10-10)
 - **Built:**
@@ -179,10 +179,10 @@ Our woven-in check-ins broke three of these:
   - **No `skip_names_game` tool for the live model.** The memory agent records the game's status from the transcript (`record_names_game`: played / skipped / not_reached). There's one less live tool that could misfire.
   - **Early goodbyes are found by the memory agent**, as a tutor issue (`early_goodbye`, using the transcript's timestamps). The page can't see it: she can't hang up before he says goodbye anyway, so the earlier "she ends before ~8 minutes" idea would never trigger. It shows with the other tutor issues on the caregiver page.
   - **Names missed in the game are not practiced later in the same session.** The practice items do that, so the untreated names stay untrained.
-  - **The set never includes his closest family's names** (wife, children). The first dry run asked "איך קוראים לבן שלך…": too easy for him, and disrespectful as a game question.
-- **Dry runs on Dad's data (nothing saved):**
-  - **9.10 session:** חמת גדר → `self_found`; רמת הגולן and בריכת המשושים not recorded; the 5.9-minute closing → `early_goodbye`; the old check-in → game "skipped".
-  - **First set:** treated זכרון יעקב, היכל נעמי, גן הנדיב, רוטשילד; untreated בריכת המשושים, חמת גדר, מלון עדן אין, ראש פינה. The plan practiced only treated names.
+  - **The set never includes his closest family's names** (wife, children). The first dry run asked him the name of a close family member: too easy for him, and disrespectful as a game question.
+- **Dry runs on the patient's data (nothing saved):**
+  - **9.10 session:** the name he found after describing the place → `self_found`; names he said fluently, and one garbled in the transcript, not recorded; the 5.9-minute closing → `early_goodbye`; the old check-in → game "skipped".
+  - **First set:** 4 treated (names he had practiced and found hard) and 4 untreated (places from his own trips, and general places of the same difficulty). The plan practiced only treated names.
 - `pytest`: 256 passed.
 
 ## 12b: sessions still ended at ~6 minutes (2026-10-11)
@@ -192,18 +192,18 @@ Tomer's test session on 11.10 (prompt 1.9): the names game went well (0.5–1.3 
   - "No" or "that's it" ends the topic, not the session: she moves to the next item, the activity, the reserve, or a follow-up.
 - **A reserve in every plan:** `reserve_practice` (2–3 items, same rules as practice: grounded, never untreated names-game names, never a repeat) and `reserve_topics` (2–3 threads with a follow-up question). It's shown in TODAY'S PLAN as "use ONLY if everything above is done". An empty reserve never fails a plan.
 - **The plan sized to his pace (plan builder 0.12):** a HIS PACE section from his last 5 real sessions (answers per minute, words per answer): fast at 3.2+ answers/min, slow at 2.0 or below. A fast talker gets more (up to 8 practice items, the activity plus practice); a slow one gets fewer, with more time per item.
-  - Dry run: Tomer 3.6 answers/min → FAST; Dad 1.8 answers/min but 15 words per answer → SLOW (long answers).
+  - Dry run: Tomer 3.6 answers/min → FAST; the patient 1.8 answers/min but 15 words per answer → SLOW (long answers).
 - **Today's names in the transcription:** the names-game, practice and reserve names are added to Gemini's `custom_vocabulary` at session start. On 11.10 Gemini wrote "סנוטיאן" for שדות ים (the browser caption caught "ים") and "אתלט" for עתלית. The tutor heard him correctly; only the written transcript was wrong.
 - **Not built:** plan-aware time notes (naming the items not done yet). Left out for now (Tomer: too ambiguous).
 - `pytest`: 260 passed.
 
 ## Check before deploying
-- **Re-run the memory agent on 9.10's transcript (dry run, nothing saved).** Expected: חמת גדר → `self_found`, בריכת המשושים → `self_found` low-confidence or not recorded, רמת הגולן (said fluently) → not recorded.
-- **Build Dad's first check-in set (dry run, nothing saved).** Tomer reviews the names and questions before it goes live. Expected: everything from his data; untreated names not in practice.
+- **Re-run the memory agent on 9.10's transcript (dry run, nothing saved).** Expected: the name found after describing the place → `self_found`, a garbled name → `self_found` low-confidence or not recorded, names said fluently → not recorded.
+- **Build the patient's first check-in set (dry run, nothing saved).** Tomer reviews the names and questions before it goes live. Expected: everything from his data; untreated names not in practice.
 
 ## Done when
-- [ ] In Dad's next 5 sessions, the names game happened (or was skipped with a reason) in every one, at about minute 2–3.
-- [ ] In Dad's next 5 sessions, the tutor doesn't start the closing before ~8 minutes (unless he asked to stop).
+- [ ] In the patient's next 5 sessions, the names game happened (or was skipped with a reason) in every one, at about minute 2–3.
+- [ ] In the patient's next 5 sessions, the tutor doesn't start the closing before ~8 minutes (unless he asked to stop).
 - [ ] The names game feels light to him (Tomer asks him after a few sessions).
 - [ ] Names he found on his own or couldn't find appear on the caregiver page, separate from the names game.
 - [ ] A name only found in free talk is never counted as "treated"; an untreated name is never practiced.
