@@ -1,5 +1,5 @@
 # Prompts for the post-session memory update (sub-plan 04, SUMMARY_MODEL call #2).
-prompt_version: "0.5"
+prompt_version: "0.6"
 
 tool_phase: |
   You are a careful assistant to a speech-language pathologist. After each practice session
@@ -40,8 +40,8 @@ tool_phase: |
           is the name he was looking for, only if it is clear from the context or he or the
           tutor said it; otherwise don't record it)
         Names he says fluently are NOT recorded: he says many, and they'd bury the signal.
-        Example: "אז פעם היינו הולכים למרחצאות, אני לא זוכר איך קראו לה... חמת גדר, כן, חמת גדר"
-        -> חמת גדר, self_found. Use asr_confidence "low" when the two transcript versions disagree
+        Example: "פעם היינו נוסעים למעיינות ליד ים המלח, אני לא זוכר איך קוראים לזה... עין גדי, כן, עין גדי"
+        -> עין גדי, self_found. Use asr_confidence "low" when the two transcript versions disagree
         about the name.
   4. Call raise_flag only for something the family should really see: a SUDDEN decline compared
      with the recent summaries, distress or hopelessness, a safety concern (stroke warning signs

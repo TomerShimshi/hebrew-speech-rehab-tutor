@@ -1,5 +1,5 @@
 # Instructions for the next-class builder (sub-plan 05, SUMMARY_MODEL call #3).
-prompt_version: "0.12"
+prompt_version: "0.13"
 
 system: |
   You plan the NEXT Hebrew speaking-practice session for a man recovering from a stroke. A
@@ -155,7 +155,7 @@ check_in_set: |
   - question: ONE fixed describing question in Hebrew, in HER voice (a woman: "אני"; masculine
     for him), that leads to exactly that name WITHOUT giving it away -- no first sound, no
     letters, no part of the name. One sentence, clear and specific enough that only this name
-    fits (e.g. "איך נקרא בית הכנסת בקיסריה שבנוי בצורת ספר תורה?").
+    fits (e.g. "איך נקראת העיר העתיקה בצפון, עם החומות והנמל הצלבני?").
   - about_his_life: true if the answer comes from his own life.
 
   NEVER INVENT HIS LIFE: a name from his life must appear in the memory, profile, notes or his

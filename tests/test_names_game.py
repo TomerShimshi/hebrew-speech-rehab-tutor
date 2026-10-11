@@ -38,7 +38,7 @@ def test_names_found_on_his_own_are_scheduled_like_successes_missed_ones_come_fi
     missed = word_bank.record(None, WordResult.not_found, TODAY, source=WordSource.not_found)
     assert missed.next_due == TODAY.isoformat()
     practiced = word_bank.record(None, WordResult.failed, TODAY)
-    bank = {"נמל": practiced, "חמת גדר": found, "עין גב": missed}
+    bank = {"נמל": practiced, "עין גדי": found, "עין גב": missed}
     assert word_bank.due_words(bank, TODAY) == ["עין גב", "נמל"]  # couldn't find on his own -> first
 
 
@@ -65,11 +65,11 @@ def draft_and_tools(probe_kinds=None):
 
 def test_free_talk_names_are_recorded_separately_with_their_source():
     draft, tools = draft_and_tools()
-    tools["record_word_result"]({"word": "חמת גדר", "result": "self_found", "asr_confidence": "high"})
+    tools["record_word_result"]({"word": "עין גדי", "result": "self_found", "asr_confidence": "high"})
     tools["record_word_result"]({"word": "עין גב", "result": "not_found", "asr_confidence": "low"})
-    assert draft.own_names == [{"word": "חמת גדר", "result": "self_found", "low_confidence": False},
+    assert draft.own_names == [{"word": "עין גדי", "result": "self_found", "low_confidence": False},
                                {"word": "עין גב", "result": "not_found", "low_confidence": True}]
-    assert draft.word_bank["חמת גדר"].source is WordSource.self_found
+    assert draft.word_bank["עין גדי"].source is WordSource.self_found
     assert draft.probe_results == []
     with pytest.raises(ValueError, match="never for names-game items"):
         tools["record_word_result"]({"word": "עכו", "result": "self_found", "asr_confidence": "high", "probe": True})
@@ -127,14 +127,14 @@ def test_retiring_keeps_the_old_set_for_comparison_and_forgetting_memory_retires
 
 # ---- the plan builder proposes a set when one is due --------------------------------------------------
 
-MEMORY = {"memory_prompt": "He lives in קיסריה; he loves היכל נעמי.",
-          "sections": {"personal_facts": ["Lives in קיסריה", "His synagogue is היכל נעמי"]},
-          "word_bank": {"זכרון יעקב": {"attempts": 2, "failed": 1, "cued": 1, "last_result": "cued"},
-                        "חמת גדר": {"attempts": 1, "self_found": 1, "source": "self_found"}}}
+MEMORY = {"memory_prompt": "He lives in נהריה; he loves גן השלושה.",
+          "sections": {"personal_facts": ["Lives in נהריה", "His favourite park is גן השלושה"]},
+          "word_bank": {"מצפה רמון": {"attempts": 2, "failed": 1, "cued": 1, "last_result": "cued"},
+                        "עין גדי": {"attempts": 1, "self_found": 1, "source": "self_found"}}}
 
 
 def proposal(*names):
-    return CheckInProposal(items=[CheckInItem(target=n, question=f"q {n}", about_his_life=n == "היכל נעמי")
+    return CheckInProposal(items=[CheckInItem(target=n, question=f"q {n}", about_his_life=n == "גן השלושה")
                                   for n in names], rationale="Half practiced, half new.")
 
 
@@ -144,19 +144,19 @@ def test_builder_proposes_a_set_first_and_keeps_its_untreated_names_out_of_pract
     store.save_memory(DAD, "s0", MEMORY, None)
     sid = store.create_session(DAD, user_email=DAD, model="m", prompt_version="v")
     plan = a_plan(practice=[{"target": t, "elicit": "x", "hint_meaning": "m", "hint_first_syllable": "s",
-                             "sentence_completion": "c"} for t in ("עתלית", "חמת גדר", "נמל קיסריה")])
-    client = FakeClient(text("{}", parsed=proposal("זכרון יעקב", "היכל נעמי", "חמת גדר", "עתלית", "ירושלים",
-                                                   "בנימינה", "דני")),
+                             "sentence_completion": "c"} for t in ("כרמיאל", "עין גדי", "נמל יפו")])
+    client = FakeClient(text("{}", parsed=proposal("מצפה רמון", "גן השלושה", "עין גדי", "כרמיאל", "ירושלים",
+                                                   "קריית שמונה", "דני")),
                         text("{}", parsed=plan))
     assert build_next_plan(store, client, SETTINGS, DAD, sid, today=TODAY, generate_fn=gen) == "done"
     current = store.get_check_in_set(DAD)
     assert [(i["target"], i["kind"]) for i in current["items"]] == [
-        ("זכרון יעקב", "treated"), ("היכל נעמי", "untreated"), ("חמת גדר", "untreated"),
-        ("עתלית", "untreated"), ("בנימינה", "untreated"), ("דני", "untreated")]  # ירושלים: too famous
+        ("מצפה רמון", "treated"), ("גן השלושה", "untreated"), ("עין גדי", "untreated"),
+        ("כרמיאל", "untreated"), ("קריית שמונה", "untreated"), ("דני", "untreated")]  # ירושלים: too famous
     assert current["rationale"] == "Half practiced, half new."
-    assert "NAMES GAME SET" in client.requests[1]["contents"] and "עתלית (untreated)" in client.requests[1]["contents"]
-    # עתלית and חמת גדר are untreated set names: never practiced
-    assert [p["target"] for p in store.get_next_plan(DAD)["practice"]] == ["נמל קיסריה"]
+    assert "NAMES GAME SET" in client.requests[1]["contents"] and "כרמיאל (untreated)" in client.requests[1]["contents"]
+    # כרמיאל and עין גדי are untreated set names: never practiced
+    assert [p["target"] for p in store.get_next_plan(DAD)["practice"]] == ["נמל יפו"]
 
 
 @pytest.mark.names_game_set
@@ -181,26 +181,26 @@ def test_memory_update_records_the_game_in_the_set_and_own_names_on_the_session(
         {"target": "טבריה", "kind": "treated", "elicit": "q טבריה"}]).model_dump(mode="json")})
     store.upsert_turns(DAD, sid, [TurnIn(seq=i, speaker=sp, text=tx, t_start_s=i * 10) for i, (sp, tx) in enumerate([
         ("tutor", "q עכו"), ("patient", "לא יודע"), ("tutor", "q טבריה"), ("patient", "טבריה"),
-        ("patient", "היינו הולכים למרחצאות... איך קראו לזה... חמת גדר")])])
+        ("patient", "היינו נוסעים למעיינות... איך קוראים לזה... עין גדי")])])
     store.end_session(DAD, sid, EndReason.tutor_goodbye)
     client = FakeClient(
         tool_calls(("record_word_result", {"word": "עכו", "result": "failed", "asr_confidence": "high", "probe": True}),
                    ("record_word_result", {"word": "טבריה", "result": "uncued", "asr_confidence": "high", "probe": True}),
-                   ("record_word_result", {"word": "חמת גדר", "result": "self_found", "asr_confidence": "high"}),
+                   ("record_word_result", {"word": "עין גדי", "result": "self_found", "asr_confidence": "high"}),
                    ("record_names_game", {"status": "played", "note": "Asked both."})),
         text("done"),
         text("{}", parsed=ConsolidatedMemory(memory_prompt="m", focus_next_session=[])),
     )
     assert run_memory_update(store, client, SETTINGS, DAD, sid, today=TODAY, generate_fn=gen) == "done"
     session = store.get_session(DAD, sid)
-    assert session["own_names"] == [{"word": "חמת גדר", "result": "self_found", "low_confidence": False}]
+    assert session["own_names"] == [{"word": "עין גדי", "result": "self_found", "low_confidence": False}]
     assert session["names_game"]["status"] == "played"
     current = store.get_check_in_set(DAD)
     assert current["sessions_played"] == 1
     assert {i["target"]: [r["result"] for r in i["results"]] for i in current["items"]} == {
         "עכו": ["failed"], "טבריה": ["uncued"]}
     bank = store.get_memory(DAD)["word_bank"]
-    assert (bank["עכו"]["source"], bank["חמת גדר"]["source"]) == ("probe", "self_found")
+    assert (bank["עכו"]["source"], bank["עין גדי"]["source"]) == ("probe", "self_found")
 
 
 # ---- 12b: a reserve, the plan sized to his pace, today's names in the transcription ---------------

@@ -16,9 +16,9 @@ from test_class_plan import a_plan
 
 PID = "tomer@example.com"
 SETTINGS = Settings(summary_model="primary", summary_fallback_models="fallback")
-MEMORY = {"memory_prompt": "He likes Caesarea beach (חוף קיסריה) and lived in Ramat Gan (רמת גן).",
+MEMORY = {"memory_prompt": "He likes Nahariya beach (חוף נהריה) and lived in Ramat Gan (רמת גן).",
           "sections": {"personal_facts": ["Lived in רמת גן and enjoyed פארק הירקון"]},
-          "word_bank": {"זכרון יעקב": {"attempts": 1}}}
+          "word_bank": {"מצפה רמון": {"attempts": 1}}}
 
 
 def practice(target, elicit, about=False):
@@ -66,11 +66,11 @@ def test_the_names_game_set_follows_the_same_rule():
         item("פארק הירקון", "הפארק שטיילת בו ברמת גן?", about=True),          # in the memory
         item("עכו", "העיר העתיקה עם החומות בצפון?"),
         item("ירושלים", "עיר הבירה?"),                                          # too famous as a new name
-        item("זכרון יעקב", "המושבה על הכרמל עם היקבים?"),                     # practiced: treated
+        item("מצפה רמון", "העיירה על שפת המכתש?"),                            # practiced: treated
     ])
-    items = enforce_set_rules(proposal, {"זכרון יעקב": a_practiced_word()}, known)
+    items = enforce_set_rules(proposal, {"מצפה רמון": a_practiced_word()}, known)
     assert [(i.target, i.kind) for i in items] == [("שיר", "untreated"), ("פארק הירקון", "untreated"),
-                                                    ("עכו", "untreated"), ("זכרון יעקב", "treated")]
+                                                    ("עכו", "untreated"), ("מצפה רמון", "treated")]
 
 
 def a_practiced_word():

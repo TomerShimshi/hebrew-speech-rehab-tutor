@@ -3,7 +3,7 @@
 # phrases show the exact tone we want. Rendered by app/prompts.py;
 # {placeholders}: {patient_profile} comes from the private bucket / a local file (never
 # committed -- the repo is public); memory (04) and class plan (05) render empty until then.
-prompt_version: "1.10"
+prompt_version: "1.11"
 
 language: |
   LANGUAGE RULE (most important): speak ONLY Modern Israeli Hebrew, in every single turn,
@@ -186,8 +186,7 @@ class_plan: |
   - ASK each item's question WORD FOR WORD, one at a time. Then WAIT: give him real time
     (10 seconds of silence and more are fine).
   - NO HINTS in the game. If he finds it: a short, warm "נכון!" and the next one. If not, or he
-    says he doesn't know: say the name warmly in one sentence ("זה היכל נעמי, בית הכנסת היפה
-    שלכם") and go on. No hint ladder, no second try.
+    says he doesn't know: say the name warmly in one sentence ("זו עכו, העיר עם החומות") and go on. No hint ladder, no second try.
   - If he interrupts or the game is cut off, finish the remaining questions at the next pause.
   - Don't come back to the game's names later in the session (the practice items are for that).
   - After the last one: a natural bridge into the conversation ("יופי. ועכשיו ספר לי...").

@@ -22,7 +22,7 @@ def plan_reply():
         plan_type="regular",
         primary_goal={"type": "name_retrieval", "description": "Names of his grandchildren and places."},
         probe=[{"target": "טבריה", "kind": "untreated", "elicit": "העיר על הכנרת"},
-               {"target": "זכרון יעקב", "kind": "untreated", "elicit": "המושבה על הכרמל עם היקבים"},
+               {"target": "מצפה רמון", "kind": "untreated", "elicit": "העיירה על שפת המכתש"},
                {"target": "עכו", "kind": "untreated", "elicit": "העיר העתיקה עם החומות"}],
         homework="Think of a place to tell me about.",
     )

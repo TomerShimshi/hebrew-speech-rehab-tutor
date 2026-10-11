@@ -471,8 +471,8 @@ def test_names_found_on_his_own_are_their_own_progress_series():
     import datetime as dt
     from app.caregiver_api import progress_series
     data = progress_series([{"started_at": dt.datetime(2026, 10, 12), "own_names": [
-        {"word": "חמת גדר", "result": "self_found"}, {"word": "עין גב", "result": "not_found"},
-        {"word": "בניאס", "result": "self_found"}]}], {"חמת גדר": {"last_result": "self_found"}})
+        {"word": "עין גדי", "result": "self_found"}, {"word": "עין גב", "result": "not_found"},
+        {"word": "בניאס", "result": "self_found"}]}], {"עין גדי": {"last_result": "self_found"}})
     assert (data["points"][0]["self_found"], data["points"][0]["not_found"], data["points"][0]["items"]) == (2, 1, 0)
     assert data["words"]["own"] == 1
 
