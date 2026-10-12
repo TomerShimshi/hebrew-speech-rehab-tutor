@@ -20,13 +20,19 @@ const SILENCE_NUDGE_MS = 30 * 1000;
 // She can't feel time passing (12): silent notes tell her. Sent as context that doesn't make her
 // speak (clientContent, turnComplete false) -- she takes them into account at her next turn.
 const NAMES_GAME_AT_MS = 2 * 60 * 1000;
+// Steps mode (13): once the planned steps are done, she may close -- but not before this.
+const MIN_SESSION_MS = 8 * 60 * 1000;
+const STEP_MAY_CLOSE =
+  "The plan for today is complete and the session has been long enough: at the next natural pause, move to " +
+  "the closing (a short summary, the homework, a warm goodbye).";
 const NOTE_NAMES_GAME =
   "[About 2 minutes have passed: time for the short NAMES GAME of TODAY'S PLAN. Start it at your " +
   "next turn, at a natural pause after he finishes his sentence -- or skip it if he seems tired or low.]";
 const TIME_NOTES = [
   { at: 4 * 60 * 1000, text: "[Time note: about 4 minutes have passed, about 5 to go. It is NOT time to " +
-    "close: keep the conversation going.]" },
-  { at: 7 * 60 * 1000, text: "[Time note: about 7 minutes have passed, about 2 to go. Not time to close yet.]" },
+    "close: keep the conversation going -- unless he asked to stop.]" },
+  { at: 7 * 60 * 1000, text: "[Time note: about 7 minutes have passed, about 2 to go. Not time to close yet -- " +
+    "unless he asked to stop.]" },
 ];
 const PAUSED_TEXT = "האימון מושהה כרגע, נחזור בקרוב 🙏";
 
@@ -340,7 +346,13 @@ async function fetchToken(resumeHandle) {
   if (!res.ok) throw new Error("לא הצלחנו להתחיל את האימון. נסה שוב בעוד רגע.");
   const t = await res.json();
   s.sessionId = t.session_id;
-  if (!resumeHandle) s.namesGame = !!t.names_game; // today's plan has a names game (12)
+  if (!resumeHandle) {
+    s.namesGame = !!t.names_game; // today's plan has a names game (12)
+    // Steps mode (13): the page hands her one step at a time, after each next_step call.
+    s.agenda = t.agenda || null;
+    s.stepIndex = 0;
+    s.stepsDone = [];
+  }
   if (t.start_note) s.startNote = t.start_note; // the greeting cue, with when they last talked
   if (t.game_homework) s.gameHomework = t.game_homework; // buttons for the end screen (06)
   setTapToTalk(!!t.voice?.tap_to_talk); // per-account setting (09)
@@ -390,7 +402,8 @@ async function finishRemote(sess, reason) {
   await flushTurns(sess, { keepalive: true });
   try {
     log("save", `session ended (${reason}); updating memory…`);
-    const res = await api(`api/session/${sess.sessionId}/end`, { reason }, { keepalive: true });
+    const res = await api(`api/session/${sess.sessionId}/end`, { reason, steps_done: sess.stepsDone || [] },
+                          { keepalive: true });
     const body = await res.json().catch(() => ({}));
     log("save", `memory update: ${body.memory_status ?? res.status}`);
   } catch (err) {
@@ -483,6 +496,26 @@ function handleToolCall(toolCall) {
   const responses = [];
   for (const fc of toolCall.functionCalls || []) {
     let response = { ok: true };
+    if (fc.name === "next_step") {
+      // Steps mode (13): record what she finished, reply with the next step. The tool is BLOCKING:
+      // she waits a moment for this reply and goes on in the same turn (live-tested). After the last
+      // planned step she keeps getting the follow-up step -- never "the steps are done".
+      s.stepsDone.push({ done: String(fc.args?.done || "").slice(0, 200),
+                         how_it_went: String(fc.args?.how_it_went || "").slice(0, 400),
+                         at_s: Math.round((performance.now() - s.startedAt) / 100) / 10 });
+      s.stepIndex += 1;
+      const steps = s.agenda?.steps || [];
+      const left = steps.length - s.stepIndex;
+      const longEnough = performance.now() - s.startedAt >= MIN_SESSION_MS;
+      // Only the step itself: extra words in the reply were read aloud (12.10).
+      const next = left > 0 || !longEnough
+        ? `CURRENT STEP: ${left > 0 ? steps[s.stepIndex] : (s.agenda?.after || "")}`
+        : STEP_MAY_CLOSE; // the plan is done and ~8 minutes have passed (Tomer, 12.10)
+      if (!(left > 0 || !longEnough)) s.closing = true;
+      log("tool", `next_step: "${fc.args?.done || ""}" -> step ${s.stepIndex + 1} of ${steps.length}`);
+      responses.push({ id: fc.id, name: fc.name, response: { result: next } });
+      continue;
+    }
     if (fc.name === "end_session") {
       const heSaidBye = GOODBYE_RE.test(s.lastUserText || "");
       if (heSaidBye || s.nudged) {
@@ -568,6 +601,16 @@ async function startSession() {
   const silentNotes = [...(s.namesGame ? [{ at: NAMES_GAME_AT_MS, text: NOTE_NAMES_GAME }] : []), ...TIME_NOTES];
   s.noteTimers = silentNotes.map((n) => setTimeout(() => {
     if (!s || s.hangingUp || !s.ready) return;
+    if (n.text === NOTE_NAMES_GAME) {  // without steps mode: the filter is off for the game's ~2.5 minutes
+      s.namesGameCued = true;
+      setTimeout(() => { if (s) s.namesGameOver = true; }, 150 * 1000);
+    }
+    // No time notes once a closing has started: on 12.10 "not time to close yet" made her refuse
+    // the goodbye he had asked for.
+    if (s.closing || GOODBYE_RE.test(`${s.lastUserText || ""} ${s.userLine?.live || ""}`)) {
+      log("ui", `silent note skipped (closing): ${n.text.slice(1, 40)}…`);
+      return;
+    }
     log("ui", `silent note: ${n.text.slice(1, 40)}…`);
     sendSilentNote(n.text);
   }, n.at));
@@ -580,6 +623,7 @@ async function startSession() {
     if (s.speaking) { s.lastUserAt = performance.now(); return; } // tap-to-talk: he holds the turn
     if (s.wrapDue && performance.now() - Math.max(s.lastUserAt, s.lastAudioAt) > 2000) {
       s.wrapDue = false;
+      s.closing = true;
       log("ui", "wrap-up note sent");
       sendNote(NOTE_WRAP_UP);
       return;
@@ -682,8 +726,13 @@ const NOISE_GATE_HOLD_MS = 300;
 function sendSilence(buf) {
   sendJson({ realtimeInput: { audio: { data: b64FromBuffer(new ArrayBuffer(buf.byteLength)), mimeType: MIC_MIME } } });
 }
+// The names game (13): short quick answers right as she finishes -- the filter is off then.
+function namesGameNow() {
+  if (s.agenda?.kinds) return s.agenda.kinds[s.stepIndex] === "names_game";
+  return s.namesGame && s.namesGameCued && !s.namesGameOver;
+}
 function noiseGate(buf) {
-  if (!s?.noiseLevel || s.tapToTalk || !s.tutorAudio || s.gateOpen) return false; // pass through
+  if (!s?.noiseLevel || s.tapToTalk || !s.tutorAudio || s.gateOpen || namesGameNow()) return false; // pass through
   const now = performance.now();
   if (micRms(buf) >= NOISE_GATE_RMS[s.noiseLevel]) {
     if (!s.loudSince) s.loudSince = now;

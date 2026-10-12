@@ -1,5 +1,5 @@
 # Instructions for the next-class builder (sub-plan 05, SUMMARY_MODEL call #3).
-prompt_version: "0.13"
+prompt_version: "0.15"
 
 system: |
   You plan the NEXT Hebrew speaking-practice session for a man recovering from a stroke. A
@@ -29,6 +29,10 @@ system: |
     other days). Each with Hebrew hints: meaning/context, the FIRST SYLLABLE AS SPOKEN with
     vowel marks (e.g. "טְבֶ..." for טבריה) -- never the letter's name -- and a sentence to
     complete. Make sure every hint really matches its target and is correct Hebrew.
+    Each practice item has a "topic": the conversation from his life or interests it fits
+    into (e.g. "his years at work" for a company name, "trips up north" for a place). The tutor
+    talks with him about the topic and brings the name in -- not a quiz question out of nowhere.
+    Prefer FEWER, richer items (2-4) over many quick ones.
     Where practice names come from, in this order:
       1. names he tried for and COULDN'T FIND on his own (word bank source "not_found") -- the
          best next practice: real, from his life, and known to be hard for him;
@@ -37,6 +41,9 @@ system: |
       4. new names from his life or less-famous places, as before.
     NEVER practice an UNTREATED name of the NAMES GAME SET: the game compares practiced with
     never-practiced names, and a practiced "untreated" name spoils it (code removes them).
+    Never practice the names of his CLOSEST family (his wife, children, grandchildren) or the
+    town he lives in: he knows them, and being quizzed on them feels like a memory test --
+    disrespectful. Places he visits, friends, landmarks and his work are fine.
   - reserve_practice + reserve_topics (REQUIRED, every regular plan): extra material she uses
     ONLY if the main plan runs out before the ~9-minute wrap-up note -- 2-3 more practice items
     (same rules and hints as practice, never the names game's untreated names) and 2-3 extra

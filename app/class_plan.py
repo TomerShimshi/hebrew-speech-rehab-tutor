@@ -24,7 +24,11 @@ def with_names_game(plan: ClassPlan | None, current_set: dict | None) -> ClassPl
     if plan is None or plan.plan_type == "intro":
         return plan
     chosen = check_in_set.choose_items(current_set)
-    return plan.model_copy(update={"probe": check_in_set.probe_items(chosen)})
+    # Today's game names are not practiced again in the same session (12.10: a name asked twice).
+    asked = {" ".join(c["target"].split()) for c in chosen}
+    keep = lambda items: [p for p in items if " ".join(p.target.split()) not in asked]  # noqa: E731
+    return plan.model_copy(update={"probe": check_in_set.probe_items(chosen), "practice": keep(plan.practice),
+                                   "reserve_practice": keep(plan.reserve_practice)})
 
 
 def plan_for_session(store, pid: str) -> ClassPlan | None:
@@ -73,10 +77,15 @@ def plan_names(plan: ClassPlan | None) -> list[str]:
     return list(dict.fromkeys(i.target for i in [*plan.probe, *plan.practice, *plan.reserve_practice]))
 
 
-def render_class_plan(plan: ClassPlan | None) -> str:
-    """The TODAY'S PLAN section of the tutor's system instruction."""
+def render_class_plan(plan: ClassPlan | None, *, steps_mode: bool = False) -> str:
+    """The TODAY'S PLAN section of the tutor's system instruction. In steps mode (13) the items she
+    asks (names game, practice, activity, reserve, topics) come ONLY from the page, one step at a
+    time: with them here she jumped ahead to the next question, and then asked it again."""
     if plan is None:
         return ""
+    if steps_mode:
+        plan = plan.model_copy(update={"probe": [], "practice": [], "reserve_practice": [], "reserve_topics": [],
+                                       "activity": "", "games_link_activity": "", "conversation_topics": []})
     lines = [f"Plan type: {plan.plan_type}",
              f"Main goal ({plan.primary_goal.type.value}): {plan.primary_goal.description}"]
     if plan.recall_from_last_time:

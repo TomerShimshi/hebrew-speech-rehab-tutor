@@ -34,6 +34,24 @@ END_SESSION_TOOL = types.FunctionDeclaration(
 )
 
 
+# Sub-plan 13: the session as steps. BLOCKING, and called FIRST: when his answer completes the
+# step she calls it before saying anything, then speaks ONE turn -- her reaction and the next step
+# (live-tested 12.10.26, ~0.7 s). Reacting first made her end on a question of her own, and the
+# step then added a second one.
+NEXT_STEP_TOOL = types.FunctionDeclaration(
+    name="next_step",
+    description=(
+        "Call when his answer has just finished the CURRENT STEP -- FIRST, before you say anything. Then, in "
+        "ONE turn, react to what he said and continue with the step the reply gives you. Never ask a question "
+        "of your own before calling it."
+    ),
+    parameters=types.Schema(type="OBJECT", properties={
+        "done": types.Schema(type="STRING", description="Which step you finished (English, a few words)."),
+        "how_it_went": types.Schema(type="STRING", description="One short English sentence."),
+    }, required=["done"]),
+)
+
+
 @dataclass(frozen=True)
 class LiveToken:
     token: str
@@ -91,9 +109,10 @@ def build_live_config(
         context_window_compression=types.ContextWindowCompressionConfig(
             sliding_window=types.SlidingWindow()
         ),
-        # The live model only talks -- its single tool is hanging up, so he never has to
-        # work out how to end the call. All other tool use lives in the agent calls.
-        tools=[types.Tool(function_declarations=[END_SESSION_TOOL])],
+        # The live model only talks -- its tools are hanging up, so he never has to work out how
+        # to end the call, and (steps mode, 13) moving to the next step. All other tool use lives
+        # in the agent calls.
+        tools=[types.Tool(function_declarations=[END_SESSION_TOOL, *([NEXT_STEP_TOOL] if voice.steps_mode else [])])],
     )
 
 

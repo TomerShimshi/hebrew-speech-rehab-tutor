@@ -111,7 +111,8 @@ def run_memory_update(
         models = _models(settings)
         # The plan this session used (05): lets the agent score its check-in items.
         plan = None
-        raw_plan = (store.get_session(pid, sid) or {}).get("class_plan")
+        session = store.get_session(pid, sid) or {}
+        raw_plan = session.get("class_plan")
         if raw_plan:
             try:
                 plan = ClassPlan(**raw_plan)
@@ -119,6 +120,11 @@ def run_memory_update(
             except Exception:  # noqa: BLE001 -- an old/odd plan must not break the update
                 plan = None
         plan_text = render_class_plan(plan) if plan else "(no plan: a free session)"
+        # Steps mode (13): what she reported finished, in order -- a record next to the transcript.
+        steps_done = session.get("steps_done") or []
+        if steps_done:
+            plan_text += "\n\nSteps she reported finished (next_step):\n" + "\n".join(
+                f"- [{st.get('at_s', 0):.0f}s] {st.get('done', '')}: {st.get('how_it_went', '')}" for st in steps_done)
 
         # ---- phase 1: tools ---------------------------------------------------------
         context = (

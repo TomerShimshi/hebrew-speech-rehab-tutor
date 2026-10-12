@@ -6,6 +6,7 @@ import datetime as dt
 from dataclasses import dataclass
 from zoneinfo import ZoneInfo
 
+from app import agenda
 from app.class_plan import plan_for_session, render_class_plan, with_names_game
 from app.config import Settings
 from app.deps import games_for
@@ -25,6 +26,8 @@ class SessionPrompt:
     plan: ClassPlan | None
     games: object  # GamesSnapshot | None
     start_note: str  # the first note she gets on the Live socket (the greeting cue)
+    steps: list[dict] | None = None  # steps mode (13): the agenda, run by the page
+    after_steps: str = ""  # what to do once every step is done
 
     @property
     def names_game(self) -> bool:
@@ -123,7 +126,8 @@ def start_note(timing: SessionTiming) -> str:
 
 
 def build_session_prompt(store: SessionStore, settings: Settings, pid: str, profile_text: str,
-                         games_reader, *, exclude_sid: str | None = None) -> SessionPrompt:
+                         games_reader, *, exclude_sid: str | None = None,
+                         steps_mode: bool = False) -> SessionPrompt:
     # Today's lesson plan (05): the built plan, the intro plan for a new/reset account, or none;
     # with today's names-game items from the stable check-in set, in rotation (12).
     plan = with_names_game(plan_for_session(store, pid), store.get_check_in_set(pid))
@@ -131,11 +135,19 @@ def build_session_prompt(store: SessionStore, settings: Settings, pid: str, prof
     games = games_for(pid, settings, games_reader)
     # On a reconnect the session already exists: it is "now", not the last conversation.
     timing = session_timing(store, pid, exclude_sid=exclude_sid)
+    # Steps mode (13): the plan as steps; the system prompt gets only the overview (stable across
+    # reconnects), the first step comes in the start note, the next ones from the page.
+    steps = agenda.build_agenda(plan) if steps_mode else None
+    note = start_note(timing)
+    if steps:
+        note = note[:-1] + f" CURRENT STEP: {steps[0]['text']}]"
     prompt = render_tutor_prompt(
         patient_profile=profile_text,
         session_timing=timing.block,
         memory_prompt=memory_block(store.get_memory(pid)),
-        class_plan=render_class_plan(plan),
+        class_plan=render_class_plan(plan, steps_mode=bool(steps)),
         games_recent=recent_games_line(games),
+        steps=agenda.overview(steps) if steps else "",
     )
-    return SessionPrompt(prompt=prompt, plan=plan, games=games, start_note=start_note(timing))
+    return SessionPrompt(prompt=prompt, plan=plan, games=games, start_note=note, steps=steps,
+                         after_steps=agenda.after_last(plan) if steps else "")

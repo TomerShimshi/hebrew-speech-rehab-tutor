@@ -22,6 +22,7 @@ _SECTIONS = (
     ("memory_prompt", "WHAT YOU REMEMBER FROM PREVIOUS SESSIONS"),
     ("games_recent", "HIS GAMES APP"),
     ("class_plan", "TODAY'S PLAN"),
+    ("steps", "WORKING STEP BY STEP"),
 )
 
 
@@ -44,6 +45,7 @@ def render_tutor_prompt(
     memory_prompt: str = "",
     games_recent: str = "",
     class_plan: str = "",
+    steps: str = "",
     template_path: Path = TUTOR_PROMPT_PATH,
 ) -> TutorPrompt:
     template = yaml.safe_load(template_path.read_text(encoding="utf-8"))
@@ -53,6 +55,7 @@ def render_tutor_prompt(
         "memory_prompt": memory_prompt,
         "games_recent": games_recent,
         "class_plan": class_plan,
+        "steps": steps,
     }
     parts = []
     for key, title in _SECTIONS:

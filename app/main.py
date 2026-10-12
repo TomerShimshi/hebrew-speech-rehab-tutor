@@ -182,12 +182,12 @@ def start_session(
         # (before the prompt, so "when you last spoke" counts it).
         store.mark_abandoned(patient_id_for(user))
     profile_text = profile.get()
+    # Per-account voice settings from the caregiver page (09): silence length, tap-to-talk, steps mode (13).
+    voice = voice_settings(store, settings, patient_id_for(user))
     # The same function builds the caregiver page's "prompt for the next session" (8.5).
     built = build_session_prompt(store, settings, patient_id_for(user), profile_text, games_reader,
-                                 exclude_sid=session_id)
+                                 exclude_sid=session_id, steps_mode=voice.steps_mode)
     prompt, plan = built.prompt, built.plan
-    # Per-account voice settings from the caregiver page (09): silence length, tap-to-talk.
-    voice = voice_settings(store, settings, patient_id_for(user))
     live = create_live_token(
         settings,
         prompt,
@@ -218,6 +218,9 @@ def start_session(
         store.save_session_prompt(patient_id_for(user), session_id, prompt.text, prompt.version)
         session_fields = {"prompt_uri": prompt_uri} if prompt_uri else {}
         session_fields["voice_used"] = voice.model_dump()  # what this session ran with (09)
+        if built.steps:  # steps mode (13): the agenda it ran -- the exact texts she got -- for the caregiver page
+            session_fields["agenda"] = built.steps
+            session_fields["agenda_after"] = built.after_steps
         if plan:
             # The memory update scores the check-in items against exactly this plan.
             session_fields.update(class_plan=plan.model_dump(mode="json"), plan_type=plan.plan_type)
@@ -232,6 +235,10 @@ def start_session(
         "prompt_version": prompt.version,
         "start_note": built.start_note,  # the greeting cue, with when they last talked
         "names_game": built.names_game,  # the page cues the names game at ~2 minutes (12)
+        # steps mode (13): the page hands her the next step after each next_step call
+        "agenda": ({"steps": [s["text"] for s in built.steps], "kinds": [s["kind"] for s in built.steps],
+                    "after": built.after_steps}
+                   if built.steps else None),
         # buttons for the end screen: the game homework the tutor will suggest
         "game_homework": homework_buttons(plan, patient_id_for(user), settings),
         "voice": {"tap_to_talk": voice.tap_to_talk, "noise_level": voice.noise_level,
@@ -298,6 +305,8 @@ def end_session(
     pid = patient_id_for(user)
     _own_active_session(store, settings, user, session_id)
     store.end_session(pid, session_id, body.reason)
+    if body.steps_done:  # steps mode (13): what she reported finished, in order
+        store.update_session(pid, session_id, {"steps_done": [s.model_dump() for s in body.steps_done]})
     # Update the tutor's memory now, inside this request (Cloud Run throttles CPU after the
     # response). The browser doesn't wait: it sent this with keepalive and moved on.
     # Failures are recorded and retried by the hourly sweep.

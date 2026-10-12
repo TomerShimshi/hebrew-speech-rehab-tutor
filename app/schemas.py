@@ -128,6 +128,9 @@ class VoiceSettings(BaseModel):
     noise_auto: bool = True
     tap_to_talk: bool = False  # he taps to start / end his turn instead of automatic detection
     record_audio: bool = True  # record the session (both voices) for the caregiver page (09)
+    # The session runs as steps from TODAY'S PLAN, one at a time, with a next_step tool (13).
+    # Off by default: tried on one account first.
+    steps_mode: bool = False
 
 
 # ---- research findings (sub-plan 07) -------------------------------------------------------
@@ -192,6 +195,10 @@ class PracticeItem(BaseModel):
     about_his_life: bool = Field(default=False, description=(
         "true if the answer comes from HIS OWN life (his family, friends, his places, his events) -- "
         "then it MUST be a name found in the memory/profile/notes/word bank or said by him; never invented."))
+    # 13: the name comes up inside a short conversation about this, not as a quiz question
+    topic: str = Field(default="", description=(
+        "ENGLISH: the conversation topic from his life or interests that this name fits into naturally "
+        "(e.g. 'his years at work', 'trips up north'); the tutor talks about it and brings the name in."))
 
 
 class CheckInItem(BaseModel):

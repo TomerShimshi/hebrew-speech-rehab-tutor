@@ -28,6 +28,7 @@ from app import billing_guard
 from app.agent.next_class import _models, build_next_plan
 from app.agent.research import personal_terms
 from app.auth import User, require_caregiver
+from app import agenda
 from app.class_plan import plan_for_session, render_class_plan, with_names_game
 from app.config import REPO_ROOT, Settings, get_settings
 from app.games import profile_for
@@ -58,6 +59,7 @@ class Translations(BaseModel):
 SESSION_FIELDS = ("id", "status", "started_at", "ended_at", "end_reason", "turn_count", "prompt_version",
                   "summary", "topics", "mood", "highlights", "difficulties", "probe_results",
                   "own_names", "names_game",  # names found / missed in free talk; the names game (12)
+                  "agenda", "agenda_after", "steps_done",  # steps mode (13): the steps it ran (exact texts), and her reports
                   "memory_status", "memory_error", "plan_status", "plan_error",
                   "memory_model", "plan_model",  # which model did the work (09)
                   "voice_used", "voice_decision",  # the settings it ran with, and the automatic decision after it
@@ -221,6 +223,7 @@ def overview(pid: str = Depends(account), settings: Settings = Depends(get_setti
     check_in = store.get_check_in_set(pid)
     # what the next session will really get (built or intro), with the names it would ask now (12)
     plan = with_names_game(plan_for_session(store, pid), check_in)
+    voice = current_settings(store, settings, pid)[0]
     return {
         "email": pid,
         "games_profile": games_profile,
@@ -229,7 +232,7 @@ def overview(pid: str = Depends(account), settings: Settings = Depends(get_setti
         "reminder": {**ReminderSettings(**(store.get_reminder_settings(pid) or {})).model_dump(),
                      "devices": len(store.list_push_subscriptions(pid)),
                      "history": store.list_reminders(pid, 7)},
-        "settings": {**current_settings(store, settings, pid)[0].model_dump(),
+        "settings": {**voice.model_dump(),
                      "auto_state": (store.get_settings(pid) or {}).get("auto_state") or {}},
         "flags": store.list_flags(pid),
         "memory": {k: memory.get(k) for k in ("memory_prompt", "sections", "focus_next_session",
@@ -248,6 +251,10 @@ def overview(pid: str = Depends(account), settings: Settings = Depends(get_setti
             "notes_used_at": stored_plan.get("notes_used_at"),
             "model": plan_model,
             "notes_applied": stored_plan.get("notes_applied", ""),
+            # 13: the steps the next session would run (the exact texts), and whether steps mode is on
+            "steps": agenda.build_agenda(plan),
+            "steps_after": agenda.after_last(plan),
+            "steps_mode": voice.steps_mode,
         },
         "research_notes": store.recent_technique_notes(pid, 20),
         "recommendations": [{**r, "github_url": github_issue_url(r, settings.simon_repo, terms)}
@@ -286,7 +293,8 @@ def next_prompt(pid: str = Depends(account), settings: Settings = Depends(get_se
                 games_reader=Depends(get_games_reader)) -> dict:
     """What the tutor would get if this account started a session right now -- built by the
     same function as /api/session/start."""
-    built = build_session_prompt(store, settings, pid, profile.get(), games_reader)
+    steps_mode = current_settings(store, settings, pid)[0].steps_mode
+    built = build_session_prompt(store, settings, pid, profile.get(), games_reader, steps_mode=steps_mode)
     return {"text": built.prompt.text, "prompt_version": built.prompt.version}
 
 

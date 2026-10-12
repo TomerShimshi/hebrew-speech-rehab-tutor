@@ -38,8 +38,16 @@ class TurnsBatch(BaseModel):
     turns: list[TurnIn] = Field(max_length=MAX_TURNS_PER_BATCH)
 
 
+class StepDone(BaseModel):
+    """A step the tutor reported finished with next_step (13)."""
+    done: str = Field(default="", max_length=200)
+    how_it_went: str = Field(default="", max_length=400)
+    at_s: float = Field(default=0, ge=0)
+
+
 class EndRequest(BaseModel):
     reason: EndReason = EndReason.end_button
+    steps_done: list[StepDone] = Field(default=[], max_length=40)  # steps mode (13)
 
 
 def turn_doc_id(seq: int) -> str:

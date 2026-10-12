@@ -1,8 +1,8 @@
-# Sub-plan 13.5: Hearing the names right, a clean goodbye, and leaving a conversation out
+# Sub-plan 15: Steps by default, hearing the names right, a clean goodbye, and leaving a conversation out
 
-Part of the [master design](00-master-design.md). After [13](13-session-agenda.md). Requested by Tomer (2026-10-11).
+Part of the [master design](00-master-design.md). After [14](14-sequencing-stories.md). (Was 13.5, then 14, until 2026-10-12.) Requested by Tomer (2026-10-11).
 
-> **Revisit after 13 is done.** 13 changes how a session runs (steps, a record of what was done, and maybe an optional gate on `end_session`). Parts of this plan depend on it: the noise filter off during the names game needs 13's "current step"; the goodbye rules must fit 13's `end_session` (gated or not). Re-read and adjust this plan before building it.
+> **Revisit after 13, 13.5 and 14 are done.** 13 changes how a session runs (steps, a record of what was done, and maybe an optional gate on `end_session`). Parts of this plan depend on it: the noise filter off during the names game needs 13's "current step"; the goodbye rules must fit 13's `end_session` (gated or not). Re-read and adjust this plan before building it.
 
 ## Why
 - **A names-game answer misheard live (a patient session, 11.10).** He said a name correctly. Gemini, listening to the session's recording afterwards, heard it clearly (95%+ sure). But the live model answered as if he hadn't found it, and the live transcript wrote something else. So the game recorded "failed" for a name he found.
@@ -14,11 +14,20 @@ Part of the [master design](00-master-design.md). After [13](13-session-agenda.m
 - **No way to leave one conversation out.** A test session on the patient's account, a session that went wrong (noise, a misunderstanding, a technical problem), or someone else speaking can teach the memory wrong facts. Today the only tools are removing memory items one by one, restoring the whole memory to an earlier version, or a full reset. Tomer wants a button on the session itself.
 
 ## Goal
+0. **Steps mode (13) is the default** for every account, with no toggle on the caregiver page.
 1. **The names game is scored right**, even when the live model mishears him.
 2. **No goodbye loops.** When he says goodbye, she hangs up after her own goodbye, even if one transcript mishears him.
 3. **"Leave this conversation out"** (not a delete): a button next to each conversation on the caregiver page. The conversation stays visible, marked, and can be put back, but nothing learns from it any more.
 
 ## Design
+
+### 0. Steps mode by default (Tomer, 2026-10-12)
+- **Before:** a few of the patient's sessions in steps mode (one checkbox on his account), since only Tomer has tested it so far, and the patient's pace is different (long answers).
+- **Then:**
+  - steps mode on for everyone;
+  - the "שיחה לפי שלבים" checkbox removed from the caregiver page;
+  - `VoiceSettings.steps_mode` replaced by an app-wide setting (`STEPS_MODE`, default on), an emergency switch on the server, not in the UI.
+- The non-steps code path stays for that switch only. Its tests stay.
 
 ### A. Hearing the names game right
 - **Live (prompt):** in the names game, if his answer is unclear, or sounds only similar to the name, she asks once ("סליחה, לא שמעתי טוב, תגיד שוב?") before saying the name. A misheard right answer then gets a second chance, and the second try still counts as "on his own".
@@ -77,4 +86,4 @@ Part of the [master design](00-master-design.md). After [13](13-session-agenda.m
 - [ ] `pytest` passes.
 
 ## Commit
-`Sub-plan 13.5: hearing the names right, a clean goodbye, and leaving a conversation out`
+`Sub-plan 15: steps by default, hearing the names right, a clean goodbye, and leaving a conversation out`
