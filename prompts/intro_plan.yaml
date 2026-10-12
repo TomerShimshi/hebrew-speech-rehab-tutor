@@ -1,29 +1,34 @@
 # The fixed plan for an account's FIRST session (or the first after "forget memory").
 # No LLM involved. Goal: get to know him -- and seed the memory with HIS people and places,
 # which later name-retrieval sessions practice. Nothing should feel like a test.
+# Steps (13.5): each step's fixed rules come from app/steps.py; this file holds only the content.
 plan_type: intro
 primary_goal:
   type: intro
-  description: >
+  description: >-
     Get to know him as a person, warmly and without any feeling of a test. Collect the
     names that matter in his life: family members (and grandchildren), friends, the town
     he lives in and grew up in, places he loves to visit, his work, his hobbies.
-recall_from_last_time: ""
-warmup: >
-  Introduce yourself briefly as his speaking-practice partner, then ask how he is today.
-probe: []
-practice: []
-activity: >
-  Ask him, one question at a time, to tell you about: the people closest to him (ask for
-  their names, naturally: "איך קוראים לה?"), where he lives and where he grew up, a place
-  in Israel he loves, what he did for work, and what he enjoys doing. Follow up on what he
-  says and let him talk. If a name doesn't come, help gently with a hint and move on.
-conversation_topics:
-  - his family and grandchildren
-  - places in Israel he loves
-  - his work and hobbies
-homework: >
+steps:
+  - kind: opening
+    opener: "נעים מאוד, אני כאן כדי לדבר ולתרגל איתך דיבור. איך אתה מרגיש היום?"
+  - kind: activity
+    instructions: >-
+      Ask him, one question at a time, to tell you about the people closest to him (ask for
+      their names, naturally: "איך קוראים לה?") and where he lives and where he grew up. Follow
+      up on what he says and let him talk. If a name doesn't come, help gently with a hint and
+      move on.
+    why: Seeds the memory with the names of his people and places.
+  - kind: thread
+    topic: a place in Israel he loves
+    question: "יש מקום בארץ שאתה במיוחד אוהב לבקר בו?"
+    follow_ups: What he does there; who he goes with.
+  - kind: thread
+    topic: his work and hobbies
+    question: "ספר לי, במה עבדת, ומה אתה אוהב לעשות בזמן הפנוי?"
+    follow_ups: What he enjoyed most; a story from those years.
+homework: >-
   Ask him to think, until next time, of one place he would like to tell you about.
-fatigue_fallback: >
+fatigue_fallback: >-
   Switch to an easy, pleasant topic he clearly enjoys, and keep your questions simple.
 avoid: []

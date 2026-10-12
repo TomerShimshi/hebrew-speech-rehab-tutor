@@ -1,29 +1,25 @@
 """8.5: the plan must never invent his people -- the case from Tomer's session on 6.10.26.
-Since 12 the check-in is the names game's stable set, so the rule covers practice items and
-the set's names."""
+Since 12 the check-in is the names game's stable set; since 13.5 each practice step is checked
+the moment the plan builder adds it, and the builder fixes it on the spot."""
 
 import datetime as dt
 
 from app import llm
 from app.agent.memory_tools import MemoryDraft, build_memory_tools
-from app.agent.next_class import build_next_plan, enforce_plan_rules, enforce_set_rules, grounding_text
+from app.agent.next_class import build_next_plan, enforce_set_rules, grounding_text, practice_checker
 from app.config import Settings
 from app.schemas import CheckInProposal
+from app.steps import PracticeStep
 from app.store import InMemorySessionStore
 from app.transcripts import EndReason, TurnIn
-from fake_llm import FakeClient, text
-from test_class_plan import a_plan
+from fake_llm import FakeClient, text, tool_calls
+from plan_helpers import build_calls, practice
 
 PID = "tomer@example.com"
 SETTINGS = Settings(summary_model="primary", summary_fallback_models="fallback")
 MEMORY = {"memory_prompt": "He likes Nahariya beach (חוף נהריה) and lived in Ramat Gan (רמת גן).",
           "sections": {"personal_facts": ["Lived in רמת גן and enjoyed פארק הירקון"]},
           "word_bank": {"מצפה רמון": {"attempts": 1}}}
-
-
-def practice(target, elicit, about=False):
-    return {"target": target, "elicit": elicit, "hint_meaning": "m", "hint_first_syllable": "s",
-            "sentence_completion": "c", "about_his_life": about}
 
 
 def item(target, question, about=False):
@@ -43,18 +39,19 @@ def gen(c, m, ct, cf=None):
     return llm.generate(c, m, ct, cf, sleep=lambda s: None)
 
 
-def test_invented_people_are_dropped_known_ones_kept():
-    store, _ = store_with_his_words("יש לי אישה קוראים לה שיר")
+def check(store, name, question, about=False, untreated=()):
     known = grounding_text(store, PID, MEMORY, "", "")
-    plan = a_plan(practice=[
-        practice("דני", "איך קוראים לחבר שקרוב אליך במיוחד?"),                 # personal by wording -> invented
-        practice("רונית", "מי מארגנת את החגים במשפחה?", about=True),              # marked personal -> invented
-        practice("שיר", "איך קוראים לאשתך?"),                                       # he said it himself
-        practice("פארק הירקון", "באיזה פארק טיילת כשגרת ברמת גן?", about=True),  # in the memory
-        practice("עכו", "העיר העתיקה עם החומות בצפון"),                           # general knowledge
-    ])
-    kept = enforce_plan_rules(plan, untreated=set(), known=known)
-    assert [p.target for p in kept.practice] == ["שיר", "פארק הירקון", "עכו"]
+    return practice_checker(known, set(untreated))(PracticeStep(**practice(name, question=question, about=about)))
+
+
+def test_invented_people_are_rejected_known_ones_accepted():
+    store, _ = store_with_his_words("יש לי אישה קוראים לה שיר")
+    assert "not in his data" in check(store, "דני", "איך קוראים לחבר שקרוב אליך במיוחד?")  # personal by wording
+    assert "not in his data" in check(store, "רונית", "מי מארגנת את החגים במשפחה?", about=True)
+    assert check(store, "שיר", "איך קוראים לאשתך?") is None                       # he said it himself
+    assert check(store, "פארק הירקון", "באיזה פארק טיילת?", about=True) is None    # in the memory
+    assert check(store, "עכו", "העיר העתיקה עם החומות בצפון") is None              # general knowledge
+    assert "untreated names-game name" in check(store, "עכו", "x", untreated={"עכו"})
 
 
 def test_the_names_game_set_follows_the_same_rule():
@@ -80,27 +77,27 @@ def a_practiced_word():
 
 def test_vowel_marks_and_punctuation_dont_matter():
     store, _ = store_with_his_words("גרתי בְּרָמַת גַּן, ליד הפארק.")
-    known = grounding_text(store, PID, {}, "", "")
-    plan = a_plan(practice=[practice("רמת גן", "איפה גרת?", about=True), practice("עכו", "x")])
-    assert [p.target for p in enforce_plan_rules(plan, set(), known).practice] == ["רמת גן", "עכו"]
+    assert check(store, "רמת גן", "איפה גרת?", about=True) is None
 
 
 def test_the_6_10_failure_case_now_fails_safely():
-    """Notes ask for family names; the model invents them -> dropped -> nothing left to practice
-    on a names day -> rejected, and the previous plan stays (the sweep rebuilds it later)."""
+    """Notes ask for family names; the model invents them -> each rejected on the spot -> it never
+    finishes a usable plan -> rejected, and the previous plan stays (the sweep rebuilds it later)."""
     store, sid = store_with_his_words("שלום")
     store.save_notes(PID, "Family and friends names only, no places.", "tomer")
-    store.save_next_plan(PID, "old", a_plan().model_dump(mode="json"))
-    invented = a_plan(practice=[practice("דני", "איך קוראים לחבר הכי קרוב שלך?"),
-                                practice("מיכל", "מי החברה שאתה בקשר איתה?", about=True),
-                                practice("אבי", "יש חבר ותיק שלך מהצבא?", about=True)])
-    client = FakeClient(text("{}", parsed=invented), text("{}", parsed=invented))  # invents twice
+    store.save_next_plan(PID, "old", {"steps": [{"kind": "opening"}], "primary_goal": {"type": "conversation",
+                                                                                      "description": "x"}})
+    invented = [("set_goal", {"type": "name_retrieval", "description": "Family names."}),
+                ("add_practice", practice("דני", question="איך קוראים לחבר הכי קרוב שלך?")),
+                ("add_practice", practice("מיכל", about=True)), ("finish", {})]
+    client = FakeClient(tool_calls(*invented), tool_calls(*invented), text("I can't."))
     status = build_next_plan(store, client, SETTINGS, PID, sid, generate_fn=gen, today=dt.date(2026, 10, 6))
-    assert status == "failed" and "no usable practice items" in store.get_session(PID, sid)["plan_error"]
+    assert status == "failed" and "didn't finish a usable plan" in store.get_session(PID, sid)["plan_error"]
     assert store.get_next_plan(PID)["built_after_session"] == "old"
-    # the prompt tells the builder to collect names instead, and the retry says what was invented
+    # the prompt tells the builder to collect names instead; the tool told it exactly what was wrong
     assert "COLLECT" in client.requests[0]["config"].system_instruction
-    assert "you invented them: דני, מיכל, אבי" in client.requests[1]["contents"]
+    replies = [p.function_response.response for p in client.requests[1]["contents"][-1].parts]
+    assert "דני is not in his data" in replies[1]["error"]
 
 
 def test_report_tutor_issue_becomes_a_low_flag():
@@ -120,28 +117,28 @@ def test_word_bank_is_not_proof_of_his_life():
     store, _ = store_with_his_words("שלום")
     memory = {**MEMORY, "word_bank": {"רונית": {"attempts": 1, "failed": 1}}}
     known = grounding_text(store, PID, memory, "", "")
-    plan = a_plan(practice=[practice("רונית", "בת המשפחה שמארגנת את החגים שלך"), practice("עכו", "x")])
-    assert [p.target for p in enforce_plan_rules(plan, set(), known).practice] == ["עכו"]
+    step = PracticeStep(**practice("רונית", question="בת המשפחה שמארגנת את החגים שלך"))
+    assert "not in his data" in practice_checker(known, set())(step)
 
 
-def test_a_retry_that_stops_inventing_is_accepted():
+def test_a_rejected_step_is_fixed_on_the_spot():
     store, sid = store_with_his_words("שלום")
-    invented = a_plan(practice=[practice("דני", "החבר הכי קרוב שלך"), practice("מיכל", "החברה שלך", about=True)])
-    honest = a_plan(practice=[practice("עכו", "העיר העתיקה עם החומות"),
-                              practice("פארק הירקון", "הפארק שטיילת בו כשגרת ברמת גן", about=True)])
-    client = FakeClient(text("{}", parsed=invented), text("{}", parsed=honest))
+    calls = build_calls(names=("דני", "עכו"))  # דני is invented: rejected, the rest goes on
+    calls[2] = ("add_practice", practice("דני", question="החבר הכי קרוב שלך"))
+    calls.insert(3, ("add_practice", practice("פארק הירקון", about=True)))  # the fix
+    client = FakeClient(tool_calls(*calls), text("done"))
     status = build_next_plan(store, client, SETTINGS, PID, sid, generate_fn=gen, today=dt.date(2026, 10, 6))
     assert status == "done"
-    assert [p["target"] for p in store.get_next_plan(PID)["practice"]] == ["עכו", "פארק הירקון"]
+    names = [s["name"] for s in store.get_next_plan(PID)["steps"] if s["kind"] == "practice"]
+    assert names == ["פארק הירקון", "עכו"]
+    assert store.get_session(PID, sid)["plan_tool_errors"] == 1
 
 
 def test_failed_plans_are_retried_by_the_sweep_at_most_three_times():
     store, sid = store_with_his_words("שלום")
     store.update_session(PID, sid, {"plan_status": "pending"})
-    bad = a_plan(practice=[practice("דני", "החבר הכי קרוב שלך")])  # invented: nothing left on a names day
     for attempt in range(1, 4):
         assert store.pending_plan_sessions(PID) == [sid]
-        build_next_plan(store, FakeClient(text("{}", parsed=bad), text("{}", parsed=bad)), SETTINGS, PID, sid,
-                        generate_fn=gen)
+        build_next_plan(store, FakeClient(text("no plan")), SETTINGS, PID, sid, generate_fn=gen)
         assert store.get_session(PID, sid)["plan_attempts"] == attempt
     assert store.pending_plan_sessions(PID) == []  # stops: the quota isn't burned hourly forever

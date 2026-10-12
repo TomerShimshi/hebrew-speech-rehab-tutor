@@ -17,16 +17,9 @@ def consolidated(prompt):
 
 
 def plan_reply():
-    from app.schemas import ClassPlan
-    plan = ClassPlan(
-        plan_type="regular",
-        primary_goal={"type": "name_retrieval", "description": "Names of his grandchildren and places."},
-        probe=[{"target": "טבריה", "kind": "untreated", "elicit": "העיר על הכנרת"},
-               {"target": "מצפה רמון", "kind": "untreated", "elicit": "העיירה על שפת המכתש"},
-               {"target": "עכו", "kind": "untreated", "elicit": "העיר העתיקה עם החומות"}],
-        homework="Think of a place to tell me about.",
-    )
-    return text("{}", parsed=plan)
+    """The plan builder's replies (13.5): a tool round building a full plan, then a note."""
+    from plan_helpers import builder_rounds
+    return builder_rounds(names=("טבריה", "עכו"))
 
 
 def talk(env, token="tok-dad", turns=TALK):
@@ -71,7 +64,7 @@ def test_starting_a_session_only_abandons_your_own_open_sessions(env):
 # ---- /end runs the memory update -----------------------------------------------------------
 
 def test_end_runs_the_memory_update_then_builds_the_next_plan(env):
-    env.llm = FakeClient(text("nothing to add"), consolidated("He talked about his grandchildren."), plan_reply())
+    env.llm = FakeClient(text("nothing to add"), consolidated("He talked about his grandchildren."), *plan_reply())
     env.configure()
     sid = talk(env)
     r = env.client.post(f"/api/session/{sid}/end", headers=auth(), json={"reason": "tutor_goodbye"})
@@ -110,7 +103,7 @@ def test_sweep_processes_abandoned_and_failed_sessions(env):
     env.configure()
     assert sweep(env).json()["processed"] == {abandoned: "failed"}
 
-    env.llm = FakeClient(text("ok"), consolidated("Recovered memory."), plan_reply())  # an hour later
+    env.llm = FakeClient(text("ok"), consolidated("Recovered memory."), *plan_reply())  # an hour later
     env.configure()
     assert sweep(env).json()["processed"] == {abandoned: "done", f"plan:{abandoned}": "done"}
     assert env.store.get_memory(DAD)["memory_prompt"] == "Recovered memory."

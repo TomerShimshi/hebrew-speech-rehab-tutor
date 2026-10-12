@@ -1,7 +1,7 @@
 """Caregiver page API (08): reading every allowlisted account and the caregiver actions."""
 
 from conftest import DAD, TOMER, auth
-from test_class_plan import a_plan
+from plan_helpers import a_plan
 
 from app.transcripts import EndReason, TurnIn
 
@@ -102,11 +102,11 @@ def test_rebuild_the_next_plan_now(env):
     sid = seed(env, DAD)
     seed(env, TOMER)
     tomer_plan = env.store.get_next_plan(TOMER)
-    new_plan = a_plan(primary_goal={"type": "discourse", "description": "Rebuilt: tell a story"})
-    env.llm = FakeClient(text("{}", parsed=new_plan))
+    from plan_helpers import builder_rounds
+    env.llm = FakeClient(*builder_rounds(goal="discourse"))
     r = env.client.post(f"/api/caregiver/{DAD}/plan/rebuild", headers=auth("tok-tomer"), json={})
     assert r.status_code == 200 and r.json() == {"plan_status": "done", "built_after_session": sid, "error": None}
-    assert "Rebuilt: tell a story" in get(env, f"/api/caregiver/{DAD}/overview").json()["next_plan"]["rendered"]
+    assert "Main goal (discourse)" in get(env, f"/api/caregiver/{DAD}/overview").json()["next_plan"]["rendered"]
     assert env.store.get_next_plan(TOMER) == tomer_plan  # other account untouched
 
 
@@ -114,12 +114,10 @@ def test_rebuild_failure_keeps_the_old_plan(env):
     from fake_llm import FakeClient, text
     seed(env, DAD)
     before = env.store.get_next_plan(DAD)
-    # invalid: a names day whose only practice item is an untreated names-game name (12)
-    env.store.save_check_in_set(DAD, {"id": "s", "created_on": "2099-01-01", "items": [
-        {"target": "כנרת", "question": "q", "kind": "untreated"}]})
-    env.llm = FakeClient(text("{}", parsed=a_plan()))
+    # the builder never finishes a usable plan (e.g. the models give up)
+    env.llm = FakeClient(text("I can't plan today."))
     body = env.client.post(f"/api/caregiver/{DAD}/plan/rebuild", headers=auth("tok-tomer"), json={}).json()
-    assert body["plan_status"] == "failed" and "no usable practice items" in body["error"]
+    assert body["plan_status"] == "failed" and "didn't finish a usable plan" in body["error"]
     assert env.store.get_next_plan(DAD) == before
 
 
@@ -193,9 +191,10 @@ def test_notes_are_saved_per_account_and_reach_the_builder(env):
     assert get(env, f"/api/caregiver/{DAD}/overview").json()["notes"]["updated_by"] == TOMER
     too_long = env.client.put(f"/api/caregiver/{DAD}/notes", headers=auth("tok-tomer"), json={"text": "x" * 1501})
     assert too_long.status_code == 422
-    env.llm = FakeClient(text("{}", parsed=a_plan()))
+    from plan_helpers import builder_rounds, plan_context
+    env.llm = FakeClient(*builder_rounds())
     post(env, f"/api/caregiver/{DAD}/plan/rebuild")
-    context = env.llm.requests[0]["contents"]
+    context = plan_context(env.llm)
     assert "# NOTES FROM THE FAMILY / THERAPIST" in context and "Focus on family names." in context
 
 
@@ -248,7 +247,10 @@ def test_plan_records_which_notes_it_used(env):
     from fake_llm import FakeClient, text
     seed(env, DAD)
     env.client.put(f"/api/caregiver/{DAD}/notes", headers=auth("tok-tomer"), json={"text": "Family names only."})
-    env.llm = FakeClient(text("{}", parsed=a_plan(notes_applied="Check-ins use family names, per the notes.")))
+    from plan_helpers import build_calls
+    from fake_llm import tool_calls
+    calls = build_calls(finish=False) + [("finish", {"notes_applied": "Check-ins use family names, per the notes."})]
+    env.llm = FakeClient(tool_calls(*calls), text("done"))
     post(env, f"/api/caregiver/{DAD}/plan/rebuild")
     ov = get(env, f"/api/caregiver/{DAD}/overview").json()
     assert ov["next_plan"]["notes_used_at"] == ov["notes"]["updated_at"]
@@ -426,7 +428,7 @@ def test_process_an_unprocessed_session_now(env):
     env.llm = FakeClient(*[server_error() for _ in range(12)])  # models down at the end of the session
     env.client.post(f"/api/session/{sid}/end", headers=auth("tok-dad"), json={"reason": "end_button"})
     assert env.store.get_session(DAD, sid)["memory_status"] == "failed"
-    env.llm = FakeClient(text("done"), consolidated("He talked about his grandchildren."), plan_reply())
+    env.llm = FakeClient(text("done"), consolidated("He talked about his grandchildren."), *plan_reply())
     body = post(env, f"/api/caregiver/{DAD}/sessions/{sid}/process").json()
     assert (body["memory_status"], body["plan_status"]) == ("done", "done")
     assert env.store.get_memory(DAD)["memory_prompt"] == "He talked about his grandchildren."
@@ -443,7 +445,7 @@ def test_process_refuses_a_session_that_may_still_be_running_but_ends_a_stuck_on
     sid = talk(env)
     assert post(env, f"/api/caregiver/{DAD}/sessions/{sid}/process").status_code == 409  # started just now
     env.store.update_session(DAD, sid, {"started_at": dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=45)})
-    env.llm = FakeClient(text("done"), consolidated("m"), plan_reply())
+    env.llm = FakeClient(text("done"), consolidated("m"), *plan_reply())
     assert post(env, f"/api/caregiver/{DAD}/sessions/{sid}/process").json()["memory_status"] == "done"
     assert env.store.get_session(DAD, sid)["end_reason"] == "abandoned"
     assert post(env, f"/api/caregiver/{DAD}/sessions/{sid}/process", token="tok-dad").status_code == 403
@@ -460,10 +462,10 @@ def test_process_picks_up_where_it_stopped_memory_done_plan_failed(env):
     session = env.store.get_session(DAD, sid)
     assert (session["memory_status"], session["plan_status"]) == ("done", "failed")
     memory_before = env.store.get_memory(DAD)
-    env.llm = FakeClient(plan_reply())  # ONE reply: a memory-update call would run out of script
+    env.llm = FakeClient(*plan_reply())  # only the builder's replies: a memory-update call would run out of script
     body = post(env, f"/api/caregiver/{DAD}/sessions/{sid}/process").json()
     assert (body["memory_status"], body["plan_status"]) == ("done", "done")
-    assert len(env.llm.requests) == 1  # only the plan builder ran
+    assert len(env.llm.requests) == 2  # only the plan builder ran (its two rounds)
     assert env.store.get_memory(DAD) == memory_before  # the memory wasn't updated twice
 
 

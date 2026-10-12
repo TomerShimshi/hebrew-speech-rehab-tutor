@@ -1,11 +1,12 @@
 """Next-class builder (SUMMARY_MODEL call #3): updated memory -> the next session's ClassPlan.
 
-Two phases (07):
-  1. optional research: a short tool loop with one tool, research_technique(question), offered
-     only when research is possible (Tavily key, daily/monthly budget). At most one research
-     run per plan; any failure here is ignored -- research is an extra.
-  2. one structured-output call: everything in the context (plus the research, and recent
-     research notes), output a validated plan.
+Phases:
+  0. a new names-game set when one is due (12): one structured call, checked by code.
+  1. optional research (07): a short tool loop with one tool, research_technique(question),
+     offered only when research is possible (Tavily key, daily/monthly budget). At most one
+     research run per plan; any failure here is ignored -- research is an extra.
+  2. the plan, built STEP BY STEP with tools (13.5, app/agent/plan_tools.py): each step checked
+     when it's added, in the builder's order, to a time budget at his pace.
 Runs right after a successful memory update (and from the hourly sweep). Never raises:
 failures are recorded as plan_status.
 """
@@ -21,16 +22,18 @@ from google.genai import types
 from app import check_in_set, word_bank
 from app.agent.memory_update import format_memory
 from app.agent.research import personal_terms, research_technique, search_available
+from app.agent.plan_tools import BUDGET_MINUTES, MIN_ACCEPT, PACE_FACTOR, PlanDraft, build_plan_tools
 from app.agent.runner import Tool, run_tool_loop
 from app.config import REPO_ROOT, Settings
 from app.games import render_games_for_plan
 from app.llm import generate
-from app.schemas import CheckInItem, CheckInProposal, ClassPlan, MemoryDoc
+from app.schemas import CheckInItem, CheckInProposal, MemoryDoc
 from app.store import ENDED, PLAN_DONE, PLAN_FAILED, SessionStore
 
 PROMPT_PATH = REPO_ROOT / "prompts" / "next_class.yaml"
 TECHNIQUES_PATH = REPO_ROOT / "prompts" / "therapy_techniques.yaml"
 MIN_SET_ITEMS = 4  # a names-game set needs at least this many usable names
+PLAN_MAX_ROUNDS = 16  # the plan builder's tool loop (13.5)
 PACE_SESSIONS = 5  # his pace (12b) from this many recent real sessions
 FAST_PACE, SLOW_PACE = 3.2, 2.0  # his answers per minute: a fast talker uses a plan up sooner
 GROUNDING_SESSIONS = 3  # his own lines in this many recent transcripts count as "his data"
@@ -93,34 +96,17 @@ def _grounded(target: str, known: str) -> bool:
     return bool(name) and re.search(rf"(?<!\w)[בהולמשכ]{{0,2}}{re.escape(name)}(?!\w)", known) is not None
 
 
-def invented_items(plan: ClassPlan, known: str) -> list[str]:
-    return [i.target for i in plan.practice if _about_his_life(i) and not _grounded(i.target, known)]
-
-
-def enforce_plan_rules(plan: ClassPlan, untreated: set[str], known: str | None = None) -> ClassPlan:
-    """Rules the model sometimes ignores (seen with the smallest fallback model), fixed by code.
-    The names game comes from the stable check-in set (12), so the plan's own check-in list is
-    cleared, and practice never trains an UNTREATED name of the set (it would spoil the
-    comparison). Practice items about HIS OWN life whose answer isn't in his own data (`known`,
-    from grounding_text) are dropped: the plan must never invent his people (8.5). Raises if
-    what's left is too thin to use."""
-    practice = list(plan.practice)
-    if known is not None:
-        invented = [i for i in practice if _about_his_life(i) and not _grounded(i.target, known)]
-        if invented:
-            _log(f"dropped {len(invented)} item(s) about his life not found in his data: {[i.target for i in invented]}")
-            practice = [i for i in practice if i not in invented]
-    kept = [p for p in practice if _norm(p.target) not in untreated]
-    if len(kept) < len(practice):
-        _log(f"dropped {len(practice) - len(kept)} practice item(s) that are untreated names-game names")
-    if plan.primary_goal.type.value == "name_retrieval" and plan.practice and not kept:
-        raise ValueError("no usable practice items left on a names day")
-    # the reserve (12b) follows the same rules, but an empty reserve never fails the plan
-    in_practice = {_norm(p.target) for p in kept}
-    reserve = [p for p in plan.reserve_practice
-               if _norm(p.target) not in untreated and _norm(p.target) not in in_practice
-               and not (known is not None and _about_his_life(p) and not _grounded(p.target, known))]
-    return plan.model_copy(update={"probe": [], "practice": kept, "reserve_practice": reserve})
+def practice_checker(known: str, untreated: set[str]):
+    """Why a practice step is rejected, said back to the builder at once (13.5): a name about his
+    life must be in his data (8.5); an untreated names-game name is never practiced (12)."""
+    def check(step) -> str | None:
+        if _about_his_life(step) and not _grounded(step.name, known):
+            return (f"rejected: {step.name} is not in his data (memory, profile, notes, his own words) -- never "
+                    f"invent his life. Use a name from his data, or a less-famous general place.")
+        if _norm(step.name) in untreated:
+            return f"rejected: {step.name} is an untreated names-game name -- those are never practiced."
+        return None
+    return check
 
 
 def enforce_set_rules(proposal: CheckInProposal, bank: dict, known: str) -> list[CheckInItem]:
@@ -169,11 +155,18 @@ def speaking_pace(store: SessionStore, pid: str) -> list[dict]:
     return rows
 
 
+def pace_label(rows: list[dict]) -> str:
+    if not rows:
+        return "typical"
+    rate = sum(r["answers_per_min"] for r in rows) / len(rows)
+    return "FAST" if rate >= FAST_PACE else "SLOW" if rate <= SLOW_PACE else "typical"
+
+
 def render_pace(rows: list[dict]) -> str:
     if not rows:
         return "(no sessions yet: plan for a typical pace)"
     rate = sum(r["answers_per_min"] for r in rows) / len(rows)
-    label = "FAST" if rate >= FAST_PACE else "SLOW" if rate <= SLOW_PACE else "typical"
+    label = pace_label(rows)
     lines = [f"- {r['date']}: {r['minutes']} min, {r['answers_per_min']} answers/min, "
              f"{r['words_per_answer']} words per answer" for r in rows]
     return "\n".join([*lines, f"Overall: {rate:.1f} answers per minute -> {label} pace."])
@@ -374,46 +367,27 @@ def build_next_plan(
         if research and research.get("status") in ("ok", "cached") and research.get("techniques"):
             context += (f"\n\n# RESEARCH FOR THIS PLAN (you asked: {research['question']})\n"
                         f"{research.get('summary', '')}\n{_technique_lines(research['techniques'])}")
-        # The set's untreated names are never practiced (12) -- decided by code, not the model.
-        untreated = check_in_set.untreated_targets(current_set)
-        for attempt in (1, 2):
-            result = generate_fn(
-                client, _models(settings), context,
-                types.GenerateContentConfig(
-                    system_instruction=load_prompt()["system"],
-                    response_mime_type="application/json",
-                    response_schema=ClassPlan,
-                    temperature=0.4,
-                ),
-            )
-            plan = result.response.parsed
-            if not isinstance(plan, ClassPlan):
-                plan = ClassPlan.model_validate_json(result.response.text)
-            plan = plan.tidy().model_copy(update={"plan_type": "regular"})
-            invented = invented_items(plan, known)
-            try:
-                plan = enforce_plan_rules(plan, untreated, known)
-                break
-            except ValueError:
-                if attempt == 2 or not invented:
-                    raise
-                # One more try, told exactly what was invented (8.5).
-                _log(f"{sid}: plan invented {invented}; retrying once")
-                context += (f"\n\n# YOUR PREVIOUS PLAN WAS REJECTED\nThese answers are not in his data -- you "
-                            f"invented them: {', '.join(invented)}. Never use them. Use only names that appear in "
-                            f"the memory, profile or notes, or well-known general items; if names of his people "
-                            f"are missing, make the activity COLLECT them by asking him, and fill the remaining check-ins "
-                            f"with known items of another kind (see PRIORITY).")
-        # Games: keep only homework for games he actually has (no invented ids), with their
-        # Hebrew names from the catalog; recommendations are saved separately (de-duplicated).
+        # The plan, built step by step with tools (13.5): each step checked when it's added, in the
+        # builder's order, to a time budget at his pace.
         his_games = {g.id: g for g in (games.games if games and not games.error else [])}
-        plan = plan.model_copy(update={
-            "game_homework": [h.model_copy(update={"name_he": his_games[h.game_id].name_he or h.game_id})
-                              for h in plan.game_homework if h.game_id in his_games and his_games[h.game_id].route],
-        })
-        for rec in plan.games_app_feedback:
+        draft = PlanDraft(pace_factor=PACE_FACTOR[pace_label(context_args["pace"])])
+        tools = build_plan_tools(
+            draft, check_practice=practice_checker(known, check_in_set.untreated_targets(current_set)),
+            his_games={gid for gid, g in his_games.items() if g.route},
+            set_names={i["target"] for i in (current_set or {}).get("items") or []})
+        run = run_tool_loop(client, _models(settings), load_prompt()["system"], context, tools,
+                            max_rounds=PLAN_MAX_ROUNDS, generate_fn=generate_fn)
+        if not draft.finished:
+            if draft.usable() or draft.minutes() < MIN_ACCEPT * BUDGET_MINUTES:
+                raise ValueError(f"the builder didn't finish a usable plan ({draft.usable() or f'~{draft.minutes()} min'};"
+                                 f" {run.rounds} rounds)")
+            _log(f"{sid}: plan not finished but usable (~{draft.minutes()} min, {run.rounds} rounds)")
+        plan = draft.to_plan()
+        # Games: homework with the Hebrew names from the catalog; suggestions saved separately (de-duplicated).
+        plan = plan.model_copy(update={"game_homework": [
+            h.model_copy(update={"name_he": his_games[h.game_id].name_he or h.game_id}) for h in plan.game_homework]})
+        for rec in draft.games_feedback:
             store.add_games_recommendation(pid, sid, rec.model_dump(mode="json"))
-        plan = plan.model_copy(update={"games_app_feedback": []})
         store.save_next_plan(pid, sid, {
             **plan.model_dump(mode="json"),
             "prompt_version": str(load_prompt().get("prompt_version")),
@@ -424,10 +398,13 @@ def build_next_plan(
                           "techniques": [t.get("name") for t in research.get("techniques", [])]}
                          if research else None),
         })
-        store.update_session(pid, sid, {"plan_status": PLAN_DONE, "plan_model": result.model, "plan_error": None})
-        _log(f"{sid}: plan built ({plan.primary_goal.type.value}, {len(plan.reserve_practice)} reserve, "
-             f"{len(plan.practice)} practice; research {research.get('status') if research else 'none'}; "
-             f"model {result.model})")
+        model = run.models[-1] if run.models else None
+        store.update_session(pid, sid, {"plan_status": PLAN_DONE, "plan_model": model, "plan_error": None,
+                                        "plan_tool_calls": len(run.calls),
+                                        "plan_tool_errors": sum(not c.ok for c in run.calls)})
+        _log(f"{sid}: plan built ({plan.primary_goal.type.value}, {len(plan.steps)} steps, ~{plan.estimated_minutes} "
+             f"min, {len(run.calls)} tool calls / {run.rounds} rounds; research "
+             f"{research.get('status') if research else 'none'}; model {model})")
         return PLAN_DONE
     except Exception as exc:  # noqa: BLE001 -- recorded, retried by the sweep
         _log(f"{sid}: FAILED {type(exc).__name__}: {exc!s:.300}")

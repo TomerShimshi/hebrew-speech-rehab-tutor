@@ -4,6 +4,8 @@ from enum import Enum
 
 from pydantic import BaseModel, Field
 
+from app.steps import NamesGameStep, PlanStep, ProbeItem  # noqa: F401 -- ProbeItem re-exported
+
 SECTION_NAMES = (
     "personal_facts",  # people, places and life events he shared
     "interests",  # topics he enjoys talking about
@@ -128,9 +130,6 @@ class VoiceSettings(BaseModel):
     noise_auto: bool = True
     tap_to_talk: bool = False  # he taps to start / end his turn instead of automatic detection
     record_audio: bool = True  # record the session (both voices) for the caregiver page (09)
-    # The session runs as steps from TODAY'S PLAN, one at a time, with a next_step tool (13).
-    # Off by default: tried on one account first.
-    steps_mode: bool = False
 
 
 # ---- research findings (sub-plan 07) -------------------------------------------------------
@@ -175,32 +174,6 @@ class PrimaryGoal(BaseModel):
     description: str = Field(description="ENGLISH: what this session works on, and why.")
 
 
-class ProbeItem(BaseModel):
-    target: str = Field(description="HEBREW: the name/word he should come up with.")
-    kind: str = Field(description="'treated' (practiced before, from the word bank) or 'untreated' (new, same kind)")
-    elicit: str = Field(description="HEBREW: exactly how she asks for it, WITHOUT hints (a description).")
-    bridge: str = Field(default="", description="HEBREW: the natural lead-in she says, linking it to a topic he talks about.")
-    about_his_life: bool = Field(default=False, description=(
-        "true if the answer comes from HIS OWN life (his family, friends, his places, his events) -- "
-        "then it MUST be a name found in the memory/profile/notes/word bank or said by him; never invented."))
-
-
-class PracticeItem(BaseModel):
-    target: str = Field(description="HEBREW: the name/word to practice.")
-    elicit: str = Field(description="HEBREW: exactly how she asks for it.")
-    hint_meaning: str = Field(description="HEBREW: hint 1, its meaning/context, as she says it.")
-    # as spoken, e.g. "טְבֶ..." -- never the letter's name
-    hint_first_syllable: str = Field(description="HEBREW: hint 2, the first syllable as spoken, with vowel marks (e.g. 'טְבֶ...').")
-    sentence_completion: str = Field(description="HEBREW: hint 3, a sentence for him to complete.")
-    about_his_life: bool = Field(default=False, description=(
-        "true if the answer comes from HIS OWN life (his family, friends, his places, his events) -- "
-        "then it MUST be a name found in the memory/profile/notes/word bank or said by him; never invented."))
-    # 13: the name comes up inside a short conversation about this, not as a quiz question
-    topic: str = Field(default="", description=(
-        "ENGLISH: the conversation topic from his life or interests that this name fits into naturally "
-        "(e.g. 'his years at work', 'trips up north'); the tutor talks about it and brings the name in."))
-
-
 class CheckInItem(BaseModel):
     """One name in the names game (12): asked the same way every time."""
     target: str = Field(description="HEBREW: the name he should come up with.")
@@ -232,61 +205,26 @@ class GamesAppFeedback(BaseModel):
 
 
 class ClassPlan(BaseModel):
-    plan_type: str = Field(description="'intro' or 'regular'")
+    """The lesson plan (05): session-level parts + an ORDERED list of steps (13.5). Built by the
+    plan builder with tools (app/agent/plan_tools.py); the intro plan is fixed (prompts/intro_plan.yaml)."""
+    plan_type: str = "regular"  # 'intro' or 'regular'
     primary_goal: PrimaryGoal
-    recall_from_last_time: str = Field(default="", description="HEBREW: one sentence she says in her greeting, recalling last time.")
-    warmup: str = Field(default="", description="HEBREW: the easy opener she says.")
-    # The names game (12): filled by CODE at session start from the stable check-in set
-    # (app/check_in_set.py) -- the plan builder leaves it empty. Older plans had their own items.
-    probe: list[ProbeItem] = Field(default=[], description="Leave EMPTY: filled by code from the check-in set.")
-    practice: list[PracticeItem] = []
-    # Extra material (12b), used ONLY if the main plan runs out before the wrap-up note -- so a
-    # fast speaker never meets an "empty" plan and the tutor doesn't close early.
-    reserve_practice: list[PracticeItem] = Field(default=[], description=(
-        "2-3 EXTRA practice items (same rules as practice), used only if the main plan runs out early."))
-    reserve_topics: list[str] = Field(default=[], description=(
-        "ENGLISH: 2-3 extra conversation threads from his life or interests (a follow-up question each), "
-        "used only if the main plan runs out early."))
-    activity: str = Field(default="", description="ENGLISH: the main activity, as instructions to her (a quoted Hebrew word is fine).")
-    conversation_topics: list[str] = Field(default=[], description="ENGLISH: up to 3 topics.")
-    homework: str = Field(default="", description="ENGLISH: the small task for next time (she says it in Hebrew).")
-    fatigue_fallback: str = Field(default="", description="ENGLISH: an easy activity he will surely succeed at.")
-    avoid: list[str] = Field(default=[], description="ENGLISH: topics or approaches to avoid.")
-    # games (sub-plan 06)
-    game_homework: list[GameHomework] = []
-    games_note: str = Field(default="", description="ENGLISH: one fact about his recent games she may mention naturally.")
-    # an in-session activity built on what he actually played (its category / words) -- turns
-    # the game into talking practice, e.g. "tell me about a time you fixed something: which tools?"
-    games_link_activity: str = Field(default="", description="ENGLISH: a short talking activity built on what he played.")
-    games_app_feedback: list[GamesAppFeedback] = []
+    steps: list[PlanStep] = []
+    homework: str = ""  # ENGLISH: the small task for next time (she says it, in the closing only)
+    fatigue_fallback: str = ""  # ENGLISH: an easy activity he will surely succeed at
+    avoid: list[str] = []  # ENGLISH: topics or approaches to avoid
+    game_homework: list[GameHomework] = []  # games (06)
+    games_note: str = ""  # ENGLISH: one fact about his recent games she may mention naturally
     # For the caregiver page only (never rendered for the tutor).
-    notes_applied: str = Field(default="", description=(
-        "ENGLISH, one sentence: how this plan applies the NOTES FROM THE FAMILY / THERAPIST; "
-        "empty if there are no notes."))
+    notes_applied: str = ""
+    estimated_minutes: float = 0  # the builder's time estimate at his pace (13.5)
 
-    def tidy(self) -> "ClassPlan":
-        """Trim to sane sizes (the model occasionally over-delivers)."""
-        def cut(text: str, n: int = 400) -> str:
-            return " ".join((text or "").split())[:n]
+    @property
+    def names_game(self) -> "NamesGameStep | None":
+        return next((s for s in self.steps if s.kind == "names_game"), None)
 
-        return self.model_copy(update={
-            "plan_type": "intro" if self.plan_type == "intro" else "regular",
-            "primary_goal": self.primary_goal.model_copy(update={"description": cut(self.primary_goal.description, 600)}),
-            "recall_from_last_time": cut(self.recall_from_last_time),
-            "warmup": cut(self.warmup),
-            "probe": [p.model_copy(update={"kind": "treated" if p.kind == "treated" else "untreated"})
-                      for p in self.probe[:5]],
-            "practice": self.practice[:8],
-            "reserve_practice": self.reserve_practice[:3],
-            "reserve_topics": [cut(t, 200) for t in self.reserve_topics[:3]],
-            "activity": cut(self.activity, 600),
-            "conversation_topics": [cut(t, 150) for t in self.conversation_topics[:3]],
-            "homework": cut(self.homework),
-            "fatigue_fallback": cut(self.fatigue_fallback),
-            "avoid": [cut(a, 150) for a in self.avoid[:8]],
-            "game_homework": self.game_homework[:2],
-            "games_note": cut(self.games_note, 300),
-            "games_link_activity": cut(self.games_link_activity, 500),
-            "games_app_feedback": self.games_app_feedback[:2],
-            "notes_applied": cut(self.notes_applied, 300),
-        })
+    @property
+    def probe(self) -> list[ProbeItem]:
+        """The names game's items (filled at session start), as scored by the memory update."""
+        game = self.names_game
+        return list(game.items) if game else []

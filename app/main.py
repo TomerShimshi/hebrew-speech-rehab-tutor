@@ -186,7 +186,7 @@ def start_session(
     voice = voice_settings(store, settings, patient_id_for(user))
     # The same function builds the caregiver page's "prompt for the next session" (8.5).
     built = build_session_prompt(store, settings, patient_id_for(user), profile_text, games_reader,
-                                 exclude_sid=session_id, steps_mode=voice.steps_mode)
+                                 exclude_sid=session_id)
     prompt, plan = built.prompt, built.plan
     live = create_live_token(
         settings,
@@ -218,9 +218,9 @@ def start_session(
         store.save_session_prompt(patient_id_for(user), session_id, prompt.text, prompt.version)
         session_fields = {"prompt_uri": prompt_uri} if prompt_uri else {}
         session_fields["voice_used"] = voice.model_dump()  # what this session ran with (09)
-        if built.steps:  # steps mode (13): the agenda it ran -- the exact texts she got -- for the caregiver page
-            session_fields["agenda"] = built.steps
-            session_fields["agenda_after"] = built.after_steps
+        # the steps it ran -- the exact texts she got -- for the caregiver page (13)
+        session_fields["agenda"] = built.steps
+        session_fields["agenda_after"] = built.after_steps
         if plan:
             # The memory update scores the check-in items against exactly this plan.
             session_fields.update(class_plan=plan.model_dump(mode="json"), plan_type=plan.plan_type)
@@ -234,11 +234,10 @@ def start_session(
         "expires_at": live.expires_at.isoformat(),
         "prompt_version": prompt.version,
         "start_note": built.start_note,  # the greeting cue, with when they last talked
-        "names_game": built.names_game,  # the page cues the names game at ~2 minutes (12)
+        "names_game": built.names_game,  # today's plan has a names game (12)
         # steps mode (13): the page hands her the next step after each next_step call
-        "agenda": ({"steps": [s["text"] for s in built.steps], "kinds": [s["kind"] for s in built.steps],
-                    "after": built.after_steps}
-                   if built.steps else None),
+        "agenda": {"steps": [s["text"] for s in built.steps], "kinds": [s["kind"] for s in built.steps],
+                   "after": built.after_steps},
         # buttons for the end screen: the game homework the tutor will suggest
         "game_homework": homework_buttons(plan, patient_id_for(user), settings),
         "voice": {"tap_to_talk": voice.tap_to_talk, "noise_level": voice.noise_level,

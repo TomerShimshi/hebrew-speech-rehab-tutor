@@ -14,7 +14,7 @@ from app.store import InMemorySessionStore
 from app.transcripts import EndReason, TurnIn
 from conftest import DAD
 from fake_llm import FakeClient, text, tool_calls
-from test_class_plan import a_plan
+from plan_helpers import a_plan, builder_rounds, plan_context, practice
 
 TODAY = dt.date(2026, 10, 10)
 SETTINGS = Settings(summary_model="primary", summary_fallback_models="fallback")
@@ -143,20 +143,21 @@ def test_builder_proposes_a_set_first_and_keeps_its_untreated_names_out_of_pract
     store = InMemorySessionStore()
     store.save_memory(DAD, "s0", MEMORY, None)
     sid = store.create_session(DAD, user_email=DAD, model="m", prompt_version="v")
-    plan = a_plan(practice=[{"target": t, "elicit": "x", "hint_meaning": "m", "hint_first_syllable": "s",
-                             "sentence_completion": "c"} for t in ("כרמיאל", "עין גדי", "נמל יפו")])
+    # the builder tries two untreated set names: rejected on the spot; נמל יפו is fine
     client = FakeClient(text("{}", parsed=proposal("מצפה רמון", "גן השלושה", "עין גדי", "כרמיאל", "ירושלים",
                                                    "קריית שמונה", "דני")),
-                        text("{}", parsed=plan))
+                        *builder_rounds(names=("כרמיאל", "עין גדי", "נמל יפו", "טבריה")))
     assert build_next_plan(store, client, SETTINGS, DAD, sid, today=TODAY, generate_fn=gen) == "done"
     current = store.get_check_in_set(DAD)
     assert [(i["target"], i["kind"]) for i in current["items"]] == [
         ("מצפה רמון", "treated"), ("גן השלושה", "untreated"), ("עין גדי", "untreated"),
         ("כרמיאל", "untreated"), ("קריית שמונה", "untreated"), ("דני", "untreated")]  # ירושלים: too famous
     assert current["rationale"] == "Half practiced, half new."
-    assert "NAMES GAME SET" in client.requests[1]["contents"] and "כרמיאל (untreated)" in client.requests[1]["contents"]
+    context = plan_context(client)
+    assert "NAMES GAME SET" in context and "כרמיאל (untreated)" in context
     # כרמיאל and עין גדי are untreated set names: never practiced
-    assert [p["target"] for p in store.get_next_plan(DAD)["practice"]] == ["נמל יפו"]
+    practiced = [s["name"] for s in store.get_next_plan(DAD)["steps"] if s["kind"] == "practice"]
+    assert practiced == ["נמל יפו", "טבריה"]
 
 
 @pytest.mark.names_game_set
@@ -165,7 +166,7 @@ def test_a_failed_set_proposal_never_fails_the_plan():
     store.save_memory(DAD, "s0", MEMORY, None)
     sid = store.create_session(DAD, user_email=DAD, model="m", prompt_version="v")
     thin = proposal("ירושלים", "תל אביב")
-    client = FakeClient(text("{}", parsed=thin), text("{}", parsed=thin), text("{}", parsed=a_plan()))
+    client = FakeClient(text("{}", parsed=thin), text("{}", parsed=thin), *builder_rounds())
     assert build_next_plan(store, client, SETTINGS, DAD, sid, today=TODAY, generate_fn=gen) == "done"
     assert store.get_check_in_set(DAD) is None  # no game until the next build manages one
 
@@ -176,9 +177,9 @@ def test_memory_update_records_the_game_in_the_set_and_own_names_on_the_session(
     store = InMemorySessionStore()
     store.save_check_in_set(DAD, a_set(("עכו", "untreated"), ("טבריה", "treated")))
     sid = store.create_session(DAD, user_email=DAD, model="m", prompt_version="v")
-    store.update_session(DAD, sid, {"class_plan": a_plan(probe=[
+    store.update_session(DAD, sid, {"class_plan": a_plan(steps=[{"kind": "opening"}, {"kind": "names_game", "items": [
         {"target": "עכו", "kind": "untreated", "elicit": "q עכו"},
-        {"target": "טבריה", "kind": "treated", "elicit": "q טבריה"}]).model_dump(mode="json")})
+        {"target": "טבריה", "kind": "treated", "elicit": "q טבריה"}]}]).model_dump(mode="json")})
     store.upsert_turns(DAD, sid, [TurnIn(seq=i, speaker=sp, text=tx, t_start_s=i * 10) for i, (sp, tx) in enumerate([
         ("tutor", "q עכו"), ("patient", "לא יודע"), ("tutor", "q טבריה"), ("patient", "טבריה"),
         ("patient", "היינו נוסעים למעיינות... איך קוראים לזה... עין גדי")])])
@@ -205,26 +206,6 @@ def test_memory_update_records_the_game_in_the_set_and_own_names_on_the_session(
 
 # ---- 12b: a reserve, the plan sized to his pace, today's names in the transcription ---------------
 
-def practice_item(target, about=False):
-    return {"target": target, "elicit": "x", "hint_meaning": "m", "hint_first_syllable": "s",
-            "sentence_completion": "c", "about_his_life": about}
-
-
-def test_the_reserve_follows_the_practice_rules_but_never_fails_the_plan():
-    from app.agent.next_class import enforce_plan_rules
-    from app.class_plan import render_class_plan
-    plan = a_plan(practice=[practice_item("כרמיאל")],
-                  reserve_practice=[practice_item("עכו"), practice_item("כרמיאל"), practice_item("דני", about=True),
-                                    practice_item("נהריה")],
-                  reserve_topics=["Ask about his side project: what would the first screen show?"])
-    kept = enforce_plan_rules(plan, untreated={"עכו"}, known=" עכו נהריה ")
-    assert [p.target for p in kept.reserve_practice] == ["נהריה"]  # untreated, a repeat, invented: dropped
-    out = render_class_plan(kept)
-    assert "RESERVE -- use ONLY if everything above is done" in out and "answer: נהריה" in out
-    assert "Extra threads: Ask about his side project" in out
-    assert enforce_plan_rules(a_plan(reserve_practice=[practice_item("עכו")]), untreated={"עכו"}).reserve_practice == []
-
-
 def test_his_pace_is_measured_from_his_real_sessions():
     from app.agent.next_class import render_pace, speaking_pace
     store = InMemorySessionStore()
@@ -246,8 +227,9 @@ def test_his_pace_is_measured_from_his_real_sessions():
 def test_todays_names_go_into_the_transcription_vocabulary(env):
     from conftest import FakeAuthTokens, auth
     env.store.save_memory(DAD, "s0", {"memory_prompt": "He loves the Galilee."}, None)
-    env.store.save_next_plan(DAD, "s0", a_plan(practice=[practice_item("כרמיאל")],
-                                               reserve_practice=[practice_item("נהריה")]).model_dump(mode="json"))
+    env.store.save_next_plan(DAD, "s0", a_plan(steps=[
+        {"kind": "opening"}, {"kind": "names_game"}, {"kind": "practice", **practice("כרמיאל")},
+        {"kind": "practice", **practice("נהריה")}]).model_dump(mode="json"))
     env.store.save_check_in_set(DAD, a_set(("עכו", "untreated")))
     env.client.post("/api/session/start", headers=auth())
     vocabulary = FakeAuthTokens.last_config.live_connect_constraints.config.input_audio_transcription.custom_vocabulary
@@ -256,5 +238,5 @@ def test_todays_names_go_into_the_transcription_vocabulary(env):
 
 def test_the_tutor_is_told_no_wrap_up_questions():
     from app.prompts import render_tutor_prompt
-    text = render_tutor_prompt().text
-    assert "No WRAP-UP QUESTIONS before the wrap-up note" in text and "ends the TOPIC, not the" in text
+    text = " ".join(render_tutor_prompt().text.split())
+    assert "no wrap-up questions" in text and "end a TOPIC, not the session" in text

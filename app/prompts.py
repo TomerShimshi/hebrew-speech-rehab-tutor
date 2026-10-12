@@ -10,11 +10,13 @@ from app.config import REPO_ROOT
 TUTOR_PROMPT_PATH = REPO_ROOT / "prompts" / "tutor.yaml"
 
 # Rendered in this order; each becomes a titled section of the system instruction.
+# 3.0 (13.5): how the session works (the steps) comes right after the role, before everything else.
 _SECTIONS = (
     ("language", "LANGUAGE"),
     ("role", "ROLE"),
-    ("style_rules", "STYLE RULES"),
-    ("session_structure", "SESSION STRUCTURE"),
+    ("steps", "HOW THE SESSION WORKS"),
+    ("style_rules", "HOW YOU TALK"),
+    ("session_structure", "OPENING, TIMING AND CLOSING"),
     ("fatigue_protocol", "FATIGUE AND FRUSTRATION"),
     ("safety", "SAFETY"),
     ("patient_profile", "PATIENT PROFILE"),
@@ -22,7 +24,6 @@ _SECTIONS = (
     ("memory_prompt", "WHAT YOU REMEMBER FROM PREVIOUS SESSIONS"),
     ("games_recent", "HIS GAMES APP"),
     ("class_plan", "TODAY'S PLAN"),
-    ("steps", "WORKING STEP BY STEP"),
 )
 
 

@@ -19,15 +19,11 @@ const NOTE_SILENCE =
 const SILENCE_NUDGE_MS = 30 * 1000;
 // She can't feel time passing (12): silent notes tell her. Sent as context that doesn't make her
 // speak (clientContent, turnComplete false) -- she takes them into account at her next turn.
-const NAMES_GAME_AT_MS = 2 * 60 * 1000;
 // Steps mode (13): once the planned steps are done, she may close -- but not before this.
 const MIN_SESSION_MS = 8 * 60 * 1000;
 const STEP_MAY_CLOSE =
   "The plan for today is complete and the session has been long enough: at the next natural pause, move to " +
   "the closing (a short summary, the homework, a warm goodbye).";
-const NOTE_NAMES_GAME =
-  "[About 2 minutes have passed: time for the short NAMES GAME of TODAY'S PLAN. Start it at your " +
-  "next turn, at a natural pause after he finishes his sentence -- or skip it if he seems tired or low.]";
 const TIME_NOTES = [
   { at: 4 * 60 * 1000, text: "[Time note: about 4 minutes have passed, about 5 to go. It is NOT time to " +
     "close: keep the conversation going -- unless he asked to stop.]" },
@@ -139,13 +135,32 @@ function onTutorOutput() {
     s.modelActive = true;
     s.recBase = s.recCount;
     log("turn", "tutor turn started");
+    // The question gate (13.5): she already asked him something since he last spoke, and this new
+    // turn isn't an answer to one of our notes -- then it would be a second question in a row.
+    // Decided here, at the start of the NEXT turn: by now her previous words have been transcribed
+    // (checking her text at the tool call came too early -- the transcript lags behind the audio).
+    s.suppressTurn = !!(s.turnsSinceUser > 0 && /[?؟]/.test(s.tutorTextSinceUser || "")
+                        && (s.lastNoteAt || 0) < (s.lastTutorEndAt || 0));
+    if (s.suppressTurn) {
+      log("gate", "turn not played: she already asked him a question he hasn't answered");
+      sendSilentNote("[Your last turn was NOT played to him: he hasn't answered your previous question yet. " +
+                     "Say nothing more now and wait for his answer. Then react to it, and ask again what you " +
+                     "said in the turn he didn't hear.]");
+    }
   }
 }
 
 function addTutorText(text) {
   onTutorOutput();
-  if (!s.tutorLine) s.tutorLine = newLine("tutor");
+  if (!s.tutorLine) {
+    s.tutorLine = newLine("tutor");
+    if (s.suppressTurn) { // kept in the transcript, marked: he never heard it
+      s.tutorLine.notPlayed = true;
+      s.tutorLine.line.classList.add("not-played");
+    }
+  }
   s.tutorLine.textEl.textContent += text;
+  if (!s.suppressTurn) s.tutorTextSinceUser = (s.tutorTextSinceUser || "") + text;
   markDirty(s.tutorLine);
   $("captions").scrollTop = $("captions").scrollHeight;
 }
@@ -157,13 +172,25 @@ function endTutorTurn(reason) {
     markDirty(s.tutorLine);
   }
   s.modelActive = false;
+  s.turnAudioS = 0;
+  if (!s.suppressTurn) {
+    s.turnsSinceUser = (s.turnsSinceUser || 0) + 1;
+    s.lastTutorEndAt = performance.now();
+  }
+  s.suppressTurn = false;
   s.tutorLine = null;
   s.userLine = null; // his next words start a new line
   s.recBase = s.recCount;
 }
 
+function heSpoke() {
+  s.turnsSinceUser = 0;
+  s.tutorTextSinceUser = "";
+}
+
 function setUserLive(text) {
   s.lastUserAt = performance.now();
+  heSpoke();
   const u = ensureUserLine();
   u.live = text;
   s.lastUserText = u.gem || u.live;
@@ -172,6 +199,7 @@ function setUserLive(text) {
 
 function addUserFinal(text) {
   s.lastUserAt = performance.now();
+  heSpoke();
   log("in", `gemini heard: ${text}`);
   const u = ensureUserLine();
   u.gem += text;
@@ -312,6 +340,7 @@ function sendJson(msg) {
 }
 
 function sendNote(text) {
+  s.lastNoteAt = performance.now(); // a turn answering our note is never held by the question gate
   sendJson({ realtimeInput: { text } });
 }
 
@@ -347,8 +376,7 @@ async function fetchToken(resumeHandle) {
   const t = await res.json();
   s.sessionId = t.session_id;
   if (!resumeHandle) {
-    s.namesGame = !!t.names_game; // today's plan has a names game (12)
-    // Steps mode (13): the page hands her one step at a time, after each next_step call.
+    // The session's steps (13, 13.5): the page hands her one step at a time, after each next_step call.
     s.agenda = t.agenda || null;
     s.stepIndex = 0;
     s.stepsDone = [];
@@ -372,7 +400,7 @@ function turnPayload(line) {
   return {
     seq: line.seq,
     speaker: line.speaker,
-    text: line.speaker === "tutor" ? line.textEl.textContent : line.gem,
+    text: line.speaker === "tutor" ? `${line.notPlayed ? "(not played) " : ""}${line.textEl.textContent}` : line.gem,
     live_text: line.speaker === "patient" ? line.live : "",
     t_start_s: Math.max(0, line.t),
     interrupted: !!line.interrupted,
@@ -475,14 +503,29 @@ function handleServerMessage(msg, isResume) {
   for (const part of sc.modelTurn?.parts || []) {
     if (part.inlineData?.data) {
       onTutorOutput();
+      if (s.suppressTurn) continue; // the question gate: not played
       s.lastAudioAt = performance.now();
       const buf = bufferFromB64(part.inlineData.data);
+      s.turnAudioS = (s.turnAudioS || 0) + buf.byteLength / 48000;
       s.audio.playNode.port.postMessage(buf, [buf]);
     }
   }
   if (sc.inputTranscription?.text) addUserFinal(sc.inputTranscription.text);
   if (sc.outputTranscription?.text) addTutorText(sc.outputTranscription.text);
   if (sc.turnComplete) endTutorTurn("complete");
+}
+
+// The guard (13.5): next_step right after she asked him something in the same turn -- not yet.
+// Her transcript lags behind her audio (12.10: the "?" arrived after the call), so it also holds
+// when she has already spoken more than a short reaction (~2.5 s) in this turn: a reaction is
+// "נכון, כל הכבוד!" (~1.5 s); a question is longer. At most twice per step: a step never gets stuck.
+const REACTION_MAX_S = 2.5;
+function nextStepTooSoon() {
+  const herTurn = s.tutorLine?.textEl?.textContent || "";
+  const heldHere = s.guardedStep === s.stepIndex ? (s.guardCount || 0) : 0;
+  if (s.guardedStep !== s.stepIndex) s.guardCount = 0;
+  const spokeAlready = /[?؟]/.test(herTurn) || (s.turnAudioS || 0) > REACTION_MAX_S;
+  return spokeAlready && heldHere < 2;
 }
 
 // Words that mean he is saying goodbye / wants to stop (Hebrew, plus common loanwords).
@@ -496,6 +539,17 @@ function handleToolCall(toolCall) {
   const responses = [];
   for (const fc of toolCall.functionCalls || []) {
     let response = { ok: true };
+    if (fc.name === "next_step" && nextStepTooSoon()) {
+      // The guard (13.5): she already asked him something in this turn -- the next step now would
+      // be a second question in a row (12.10). Don't advance; she calls again after his answer.
+      s.guardedStep = s.stepIndex;
+      s.guardCount = (s.guardCount || 0) + 1;
+      log("tool", `next_step held: she asked a question in this turn (step ${s.stepIndex + 1})`);
+      responses.push({ id: fc.id, name: fc.name, response: { result:
+        "Noted. You just asked him a question: stop talking now and wait for his answer. After his answer, " +
+        "call next_step again." } });
+      continue;
+    }
     if (fc.name === "next_step") {
       // Steps mode (13): record what she finished, reply with the next step. The tool is BLOCKING:
       // she waits a moment for this reply and goes on in the same turn (live-tested). After the last
@@ -598,13 +652,8 @@ async function startSession() {
   // The tutor never starts closing on her own (prompt); this note tells her when. It waits for a
   // quiet moment -- not while she talks or right after he spoke -- so it never cuts a thread.
   s.wrapTimer = setTimeout(() => { if (s) s.wrapDue = true; }, SESSION_WRAP_UP_MS);
-  const silentNotes = [...(s.namesGame ? [{ at: NAMES_GAME_AT_MS, text: NOTE_NAMES_GAME }] : []), ...TIME_NOTES];
-  s.noteTimers = silentNotes.map((n) => setTimeout(() => {
+  s.noteTimers = TIME_NOTES.map((n) => setTimeout(() => {
     if (!s || s.hangingUp || !s.ready) return;
-    if (n.text === NOTE_NAMES_GAME) {  // without steps mode: the filter is off for the game's ~2.5 minutes
-      s.namesGameCued = true;
-      setTimeout(() => { if (s) s.namesGameOver = true; }, 150 * 1000);
-    }
     // No time notes once a closing has started: on 12.10 "not time to close yet" made her refuse
     // the goodbye he had asked for.
     if (s.closing || GOODBYE_RE.test(`${s.lastUserText || ""} ${s.userLine?.live || ""}`)) {
@@ -728,8 +777,7 @@ function sendSilence(buf) {
 }
 // The names game (13): short quick answers right as she finishes -- the filter is off then.
 function namesGameNow() {
-  if (s.agenda?.kinds) return s.agenda.kinds[s.stepIndex] === "names_game";
-  return s.namesGame && s.namesGameCued && !s.namesGameOver;
+  return s.agenda?.kinds?.[s.stepIndex] === "names_game";
 }
 function noiseGate(buf) {
   if (!s?.noiseLevel || s.tapToTalk || !s.tutorAudio || s.gateOpen || namesGameNow()) return false; // pass through

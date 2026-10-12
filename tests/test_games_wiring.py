@@ -9,7 +9,8 @@ from app.games import games_snapshot
 from app.schemas import ClassPlan
 from app.store import InMemorySessionStore
 from conftest import DAD, TOMER, FakeAuthTokens, auth
-from fake_llm import FakeClient, text
+from fake_llm import FakeClient, text, tool_calls
+from plan_helpers import a_plan, build_calls
 from test_games import FakeUpstash
 
 NOW = dt.datetime.now(dt.timezone.utc)
@@ -22,9 +23,6 @@ GAMES = {
     "tomer:change_word_progress_v1": {"sessions": [
         {"id": "t", "date": NOW.isoformat(), "changes_solved": 9}]},
 }
-PROBES = [{"target": "עכו", "kind": "untreated", "elicit": "העיר העתיקה"},
-          {"target": "צפת", "kind": "untreated", "elicit": "עיר המקובלים"},
-          {"target": "טבריה", "kind": "untreated", "elicit": "העיר על הכנרת"}]
 
 
 def gen(client, models, contents, config=None):
@@ -32,15 +30,19 @@ def gen(client, models, contents, config=None):
 
 
 def plan(**over):
-    fields = dict(plan_type="regular", primary_goal={"type": "name_retrieval", "description": "Places."},
-                  probe=PROBES,
-                  game_homework=[{"game_id": "scramble", "why": "places category, names practice"},
-                                 {"game_id": "made_up_game", "why": "invented by the model"}],
-                  games_note="He played scrambled words yesterday.",
-                  games_app_feedback=[{"game_id": "scramble", "kind": "tune_difficulty", "title": "Harder places",
-                                       "rationale": "1 hint only", "evidence": "hints_used 1"}])
-    fields.update(over)
-    return ClassPlan(**fields)
+    return a_plan(game_homework=[{"game_id": "scramble", "why": "names", "name_he": "מילים מבולגנות"}],
+                  games_note="He played scrambled words yesterday.", **over)
+
+
+def builder_with_games(games_note="He played scrambled words yesterday."):
+    """The builder's games tools: real homework, an invented id (rejected by the tool), a suggestion."""
+    games = [("add_game_homework", {"game_id": "scramble", "why": "places category, names practice"}),
+             ("add_game_homework", {"game_id": "made_up_game", "why": "invented by the model"}),
+             ("suggest_games_app_change", {"game_id": "scramble", "kind": "tune_difficulty", "title": "Harder places",
+                                           "rationale": "1 hint only", "evidence": "hints_used 1"})]
+    calls = build_calls(extra=games)
+    calls[-2] = ("set_closing", {"homework": "x", "fatigue_fallback": "y", "avoid": [], "games_note": games_note})
+    return [tool_calls(*calls), text("done")]
 
 
 def with_games(env, **over):
@@ -56,7 +58,7 @@ def test_start_tells_the_tutor_what_he_played_lately(env):
     with_games(env)
     env.client.post("/api/session/start", headers=auth())
     assert "## HIS GAMES APP" in instruction() and "מילים מבולגנות (yesterday)" in instruction()
-    assert "bring it INTO the conversation" in instruction() and 'category "places"' in instruction()
+    assert "Bring it into the conversation" in " ".join(instruction().split()) and 'category "places"' in instruction()
     assert "החלפת מילה" not in instruction()  # Tomer's games never reach Dad's tutor
 
 
@@ -68,8 +70,7 @@ def test_no_games_config_means_no_games_section(env):
 def test_start_returns_homework_buttons_built_in_code(env):
     with_games(env)
     env.store.save_memory(DAD, "s0", {"memory_prompt": "x"}, None)
-    p = plan(game_homework=[{"game_id": "scramble", "why": "names", "name_he": "מילים מבולגנות"}])
-    env.store.save_next_plan(DAD, "s0", p.model_dump(mode="json"))
+    env.store.save_next_plan(DAD, "s0", plan().model_dump(mode="json"))
     body = env.client.post("/api/session/start", headers=auth()).json()
     assert body["game_homework"] == [{"name_he": "מילים מבולגנות", "why": "names",
                                       "url": "https://simon.example/scramble?user=efraim"}]
@@ -80,17 +81,18 @@ def test_builder_gets_games_keeps_real_homework_and_saves_recommendations():
     store = InMemorySessionStore()
     store.save_memory(DAD, "s0", {"memory_prompt": "He loves the Galilee."}, None)
     sid = store.create_session(DAD, user_email=DAD, model="m", prompt_version="v")
-    client = FakeClient(text("{}", parsed=plan()))
+    client = FakeClient(*builder_with_games())
     games = games_snapshot(FakeUpstash(GAMES), "efraim")
     settings = Settings(summary_model="primary", summary_fallback_models="fallback")
     assert build_next_plan(store, client, settings, DAD, sid, games=games, generate_fn=gen) == "done"
-    assert "# GAMES" in client.requests[0]["contents"] and "scramble (מילים מבולגנות)" in client.requests[0]["contents"]
+    from plan_helpers import plan_context
+    assert "# GAMES" in plan_context(client) and "scramble (מילים מבולגנות)" in plan_context(client)
     saved = store.get_next_plan(DAD)
     assert [h["game_id"] for h in saved["game_homework"]] == ["scramble"]  # invented id dropped
     assert saved["game_homework"][0]["name_he"] == "מילים מבולגנות"
-    assert saved["games_app_feedback"] == []  # stored separately
+    assert "games_app_feedback" not in saved  # stored separately
     # the same recommendation again -> one record, counted twice
-    build_next_plan(store, FakeClient(text("{}", parsed=plan())), settings, DAD, sid, games=games, generate_fn=gen)
+    build_next_plan(store, FakeClient(*builder_with_games()), settings, DAD, sid, games=games, generate_fn=gen)
     recs = [r for (pid, _), r in store.recommendations.items() if pid == DAD]
     assert len(recs) == 1 and recs[0]["times_suggested"] == 2 and recs[0]["status"] == "new"
 
@@ -101,7 +103,7 @@ def test_sweep_rebuilds_a_plan_that_is_stale_after_new_games(env):
     sid = env.store.create_session(DAD, user_email=DAD, model="m", prompt_version="v")
     env.store.save_next_plan(DAD, sid, plan().model_dump(mode="json"))
     env.store.next_plans[DAD]["built_at"] = NOW - dt.timedelta(days=3)  # built before he played
-    env.llm = FakeClient(text("{}", parsed=plan(games_note="Rebuilt with fresh games.")))
+    env.llm = FakeClient(*builder_with_games("Rebuilt with fresh games."))
     env.configure(simon_profiles=PROFILES, simon_app_url="https://simon.example")
     r = env.client.post("/internal/memory/sweep", headers={"Authorization": "Bearer oidc-scheduler"})
     assert r.json()["processed"] == {f"replan:{sid}": "done"}

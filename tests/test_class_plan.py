@@ -1,4 +1,4 @@
-"""Lesson plans (sub-plan 05): intro, rendering, the builder, probes, and wiring."""
+"""Lesson plans (05, 13.5): the intro, rendering, the tool-based builder, probes, and wiring."""
 
 import datetime as dt
 import re
@@ -6,36 +6,23 @@ import re
 from app import llm
 from app.agent.memory_update import run_memory_update
 from app.agent.next_class import build_next_plan
-from app.class_plan import intro_plan, plan_for_session, render_class_plan
+from app.class_plan import intro_plan, plan_for_session, render_class_plan, render_plan_full
 from app.config import Settings
-from app.schemas import ClassPlan, ConsolidatedMemory
+from app.schemas import ConsolidatedMemory
 from app.store import InMemorySessionStore
 from app.transcripts import EndReason, TurnIn
 from conftest import DAD, FakeAuthTokens, auth
 from fake_llm import FakeClient, text, tool_calls
+from plan_helpers import a_plan, builder_rounds, plan_context
 
 TODAY = dt.date(2026, 10, 2)
 SETTINGS = Settings(summary_model="primary", summary_fallback_models="fallback")
-PROBES = [{"target": "טבריה", "kind": "treated", "elicit": "העיר על הכנרת"},
-          {"target": "עכו", "kind": "untreated", "elicit": "העיר העתיקה עם החומות"},
-          {"target": "צפת", "kind": "untreated", "elicit": "עיר המקובלים"}]
+GAME = {"kind": "names_game", "items": [{"target": "טבריה", "kind": "treated", "elicit": "העיר על הכנרת"},
+                                        {"target": "צפת", "kind": "untreated", "elicit": "עיר המקובלים"}]}
 
 
 def gen(client, models, contents, config=None):
     return llm.generate(client, models, contents, config, sleep=lambda s: None)
-
-
-def a_plan(**over) -> ClassPlan:
-    fields = dict(plan_type="regular",
-                  primary_goal={"type": "name_retrieval", "description": "Names of places he loves."},
-                  recall_from_last_time="Last time he told you about his trip to the Galilee.",
-                  probe=PROBES,
-                  practice=[{"target": "כנרת", "elicit": "האגם בצפון", "hint_meaning": "מקור מים",
-                             "hint_first_syllable": "כִּנֶּ...", "sentence_completion": "בקיץ שוחים ב..."}],
-                  homework="Think of a place to tell me about.", fatigue_fallback="Talk about his garden.",
-                  avoid=["politics"])
-    fields.update(over)
-    return ClassPlan(**fields)
 
 
 def system_instruction():
@@ -48,57 +35,52 @@ def test_intro_plan_for_a_new_account_and_none_once_there_is_memory_but_no_plan(
     store = InMemorySessionStore()
     assert plan_for_session(store, DAD).plan_type == "intro"
     store.save_memory(DAD, "s", {"memory_prompt": "He loves the Galilee."}, None)
-    assert plan_for_session(store, DAD) is None  # generic structure, never blocks
+    assert plan_for_session(store, DAD) is None  # a free conversation, never blocks
     store.save_next_plan(DAD, "s", a_plan().model_dump(mode="json"))
     assert plan_for_session(store, DAD).primary_goal.type.value == "name_retrieval"
+    # a plan saved before 13.5 (no steps) counts as no plan: it's rebuilt
+    store.save_next_plan(DAD, "s", {"plan_type": "regular", "primary_goal": {"type": "discourse", "description": "x"},
+                                    "practice": [{"target": "כנרת"}]})
+    assert plan_for_session(store, DAD) is None
 
 
-def test_render_lists_the_names_game_without_hints_and_the_practice_hints():
-    out = render_class_plan(a_plan())
-    assert "Names game (when the note to start it comes; each question word for word, NO hints):" in out
-    assert "  1.\n      ask: העיר על הכנרת\n      answer: טבריה" in out  # ask first, answer last
-    assert "first syllable: כִּנֶּ..." in out
-    assert "Homework (say it ONLY in the closing" in out and "Avoid: politics" in out
-    assert render_class_plan(None) == ""
+def test_tutor_gets_only_the_session_level_parts_the_family_gets_everything():
+    plan = a_plan()
+    out = render_class_plan(plan)
+    assert "Main goal (name_retrieval)" in out and "Homework (say it ONLY in the closing" in out
+    assert "Avoid: politics" in out and "כנרת" not in out  # the steps come from the page, one at a time
+    full = render_plan_full(plan)
+    assert "Steps:" in full and 'Ask: "איך נקרא כנרת?" (answer: כנרת)' in full
+    assert render_class_plan(None) == "" == render_plan_full(None)
 
 
-def test_intro_plan_template_is_clean():
+def test_intro_plan_is_steps():
     plan = intro_plan()
     assert plan.plan_type == "intro" and plan.probe == [] and "names" in plan.primary_goal.description
-    assert "\n" not in plan.activity  # folded YAML is normalized
-
-
-def test_tidy_trims_oversized_plans():
-    plan = a_plan(probe=PROBES * 3, conversation_topics=["a", "b", "c", "d"], plan_type="weird").tidy()
-    assert len(plan.probe) == 5 and len(plan.conversation_topics) == 3 and plan.plan_type == "regular"
+    assert [s.kind for s in plan.steps] == ["opening", "activity", "thread", "thread"]
+    assert "\n" not in plan.steps[1].instructions  # folded YAML is normalized
 
 
 # ---- the builder ------------------------------------------------------------------------------
 
-def test_builder_saves_a_valid_plan_with_recent_goals_in_context():
+def test_builder_saves_a_plan_of_steps_with_recent_goals_in_context():
     store = InMemorySessionStore()
     store.save_memory(DAD, "s0", {"memory_prompt": "He loves the Galilee.", "word_bank": {
         "טבריה": {"attempts": 1, "failed": 1, "last_result": "failed", "next_due": "2026-10-01"}}}, None)
     old = store.create_session(DAD, user_email=DAD, model="m", prompt_version="v")
-    store.update_session(DAD, old, {"class_plan": a_plan(primary_goal={"type": "discourse", "description": "Tell a story"}).model_dump(mode="json")})
-    client = FakeClient(text("{}", parsed=a_plan()))
+    store.update_session(DAD, old, {"class_plan": a_plan(goal="discourse").model_dump(mode="json")})
+    client = FakeClient(*builder_rounds())
     assert build_next_plan(store, client, SETTINGS, DAD, old, today=TODAY, generate_fn=gen) == "done"
     saved = store.get_next_plan(DAD)
     assert saved["plan_type"] == "regular" and saved["built_after_session"] == old
-    context = client.requests[0]["contents"]
-    assert "- discourse: Tell a story" in context  # recent goals, for rotation
+    assert [s["kind"] for s in saved["steps"]] == ["opening", "practice", "practice", "activity", "thread",
+                                                     "thread", "thread"]
+    assert saved["estimated_minutes"] == 9.8 and saved["homework"] == "Think of a place."
+    context = plan_context(client)
+    assert "- discourse: Names of places he loves." in context  # recent goals, for rotation
     assert "first): טבריה" in context  # the word bank's due words
-    assert store.get_session(DAD, old)["plan_status"] == "done"
-
-
-def test_builder_leaves_the_check_in_to_the_names_game_set():
-    """12: the plan's own check-in items are ignored (the names game comes from the stable set)."""
-    store = InMemorySessionStore()
-    store.save_memory(DAD, "s0", {"memory_prompt": "x"}, None)
-    sid = store.create_session(DAD, user_email=DAD, model="m", prompt_version="v")
-    client = FakeClient(text("{}", parsed=a_plan()))  # the model filled probe anyway
-    assert build_next_plan(store, client, SETTINGS, DAD, sid, today=TODAY, generate_fn=gen) == "done"
-    assert store.get_next_plan(DAD)["probe"] == []
+    session = store.get_session(DAD, old)
+    assert (session["plan_status"], session["plan_tool_calls"], session["plan_tool_errors"]) == ("done", 10, 0)
 
 
 def test_builder_without_memory_leaves_the_intro_for_next_time():
@@ -110,10 +92,11 @@ def test_builder_without_memory_leaves_the_intro_for_next_time():
 
 # ---- probes recorded by the memory update -------------------------------------------------------
 
-def test_memory_update_scores_the_sessions_checkin_items():
+def test_memory_update_scores_the_sessions_names_game():
     store = InMemorySessionStore()
     sid = store.create_session(DAD, user_email=DAD, model="m", prompt_version="v")
-    store.update_session(DAD, sid, {"class_plan": a_plan().model_dump(mode="json")})
+    plan = a_plan(steps=[{"kind": "opening"}, GAME])
+    store.update_session(DAD, sid, {"class_plan": plan.model_dump(mode="json")})
     store.upsert_turns(DAD, sid, [TurnIn(seq=i, speaker=sp, text=tx, t_start_s=i)
                                   for i, (sp, tx) in enumerate([("tutor", "העיר על הכנרת?"), ("patient", "טבריה"),
                                                                 ("tutor", "עיר המקובלים?"), ("patient", "צפת")])])
@@ -130,17 +113,19 @@ def test_memory_update_scores_the_sessions_checkin_items():
     assert session["probe_results"] == [
         {"word": "טבריה", "result": "uncued", "kind": "treated", "low_confidence": False},
         {"word": "צפת", "result": "cued", "kind": "untreated", "low_confidence": False},
-    ]  # כנרת was practice, not a check-in
+    ]  # כנרת was practice, not the names game
     assert session["plan_status"] == "pending"  # next: build the next plan
-    assert "TODAY'S PLAN" in client.requests[0]["contents"][0].parts[0].text
+    context = client.requests[0]["contents"][0].parts[0].text
+    assert "TODAY'S PLAN" in context and 'Names game, 2 questions' in context
 
 
 # ---- wiring through the API --------------------------------------------------------------------------
 
 def test_first_session_gets_the_intro_and_the_session_keeps_its_plan(env):
-    sid = env.client.post("/api/session/start", headers=auth()).json()["session_id"]
+    body = env.client.post("/api/session/start", headers=auth()).json()
     assert "## TODAY'S PLAN" in system_instruction() and "Plan type: intro" in system_instruction()
-    assert env.store.get_session(DAD, sid)["class_plan"]["plan_type"] == "intro"
+    assert env.store.get_session(DAD, body["session_id"])["class_plan"]["plan_type"] == "intro"
+    assert body["agenda"]["kinds"] == ["opening", "activity", "thread", "thread"]
 
 
 def test_next_session_follows_the_built_plan_with_the_names_game_from_the_set(env):
@@ -148,26 +133,29 @@ def test_next_session_follows_the_built_plan_with_the_names_game_from_the_set(en
     from app.schemas import CheckInItem
     env.store.save_memory(DAD, "s0", {"memory_prompt": "He loves the Galilee."}, None)
     env.store.save_next_plan(DAD, "s0", a_plan().model_dump(mode="json"))
-    # without a set there is no names game today (the plan's old check-ins aren't used)
+    # without a set there is no names game today
     body = env.client.post("/api/session/start", headers=auth()).json()
-    assert body["names_game"] is False and "Names game (when the note" not in system_instruction()
+    assert body["names_game"] is False and "names_game" not in body["agenda"]["kinds"]
     env.store.save_check_in_set(DAD, new_set([CheckInItem(target="עכו", question="העיר העתיקה עם החומות?"),
                                               CheckInItem(target="טבריה", question="העיר על הכנרת?", kind="treated")],
                                              "s0", TODAY))
     body = env.client.post("/api/session/start", headers=auth()).json()
+    assert body["names_game"] is True and body["agenda"]["kinds"][1] == "names_game"
+    assert '"העיר על הכנרת?" (answer: טבריה)' in body["agenda"]["steps"][1]
+    # today's game name טבריה is not practiced again in the same session
+    assert not any("answer: טבריה)" in s and s.startswith("Practice") for s in body["agenda"]["steps"])
     instruction = system_instruction()
-    assert body["names_game"] is True
-    assert "Main goal (name_retrieval)" in instruction and "ask: העיר על הכנרת?" in instruction
-    assert "Never read the plan aloud" in " ".join(instruction.split())
-    probe = env.store.get_session(DAD, body["session_id"])["class_plan"]["probe"]
+    assert "Main goal (name_retrieval)" in instruction and "Never read the plan aloud" in " ".join(instruction.split())
+    probe = env.store.get_session(DAD, body["session_id"])["class_plan"]["steps"][1]["items"]
     assert {(p["target"], p["kind"]) for p in probe} == {("עכו", "untreated"), ("טבריה", "treated")}
 
 
-def test_memory_but_no_plan_means_no_plan_section_at_all(env):
+def test_memory_but_no_plan_means_a_free_conversation(env):
     env.store.save_memory(DAD, "s0", {"memory_prompt": "He loves the Galilee."}, None)
-    sid = env.client.post("/api/session/start", headers=auth()).json()["session_id"]
+    body = env.client.post("/api/session/start", headers=auth()).json()
     assert "## TODAY'S PLAN" not in system_instruction() and "Never read the plan" not in system_instruction()
-    assert "class_plan" not in env.store.get_session(DAD, sid)
+    assert "class_plan" not in env.store.get_session(DAD, body["session_id"])
+    assert body["agenda"]["kinds"] == ["opening", "conversation"]
 
 
 def test_forget_memory_makes_the_next_session_an_intro_again(env):
@@ -179,40 +167,12 @@ def test_forget_memory_makes_the_next_session_an_intro_again(env):
     assert "Plan type: intro" in system_instruction()
 
 
-def test_checkin_lead_ins_are_rendered():
-    plan = a_plan(probe=[dict(PROBES[0], bridge="מדברים על הכנרת...")] + PROBES[1:])
-    assert ("      lead-in: מדברים על הכנרת...\n      ask: העיר על הכנרת\n"
-            "      answer: טבריה") in render_class_plan(plan)
-
-
-def practice_item(target):
-    return {"target": target, "elicit": "x", "hint_meaning": "m", "hint_first_syllable": "s", "sentence_completion": "c"}
-
-
-def test_plan_rules_never_practice_an_untreated_names_game_name():
-    from app.agent.next_class import enforce_plan_rules
-    practice = [practice_item("עכו"), practice_item("כרמיאל"), practice_item("טבריה")]
-    plan = enforce_plan_rules(a_plan(practice=practice), untreated={"עכו"})
-    assert [p.target for p in plan.practice] == ["כרמיאל", "טבריה"]  # treated names may be practiced
-    assert plan.probe == []
-
-
-def test_plan_rules_reject_a_names_day_without_practice():
-    import pytest
-    from app.agent.next_class import enforce_plan_rules
-    with pytest.raises(ValueError, match="no usable practice items"):
-        enforce_plan_rules(a_plan(practice=[practice_item("עכו")]), untreated={"עכו"})
-    other_day = a_plan(primary_goal={"type": "discourse", "description": "A story"}, practice=[practice_item("עכו")])
-    assert enforce_plan_rules(other_day, untreated={"עכו"}).practice == []  # fine on other days
-
-
 def test_hebrew_sentences_never_share_a_line_with_english():
     from app.class_plan import HEBREW
-    plan = a_plan(recall_from_last_time="אני זוכרת שסיפרת לי על הטיול לכנרת.",
-                  activity="Ask him to describe the trip, using the word \"כנרת\".")
-    out = render_class_plan(plan)
-    assert "Recall from last time (one natural sentence in your greeting):\n      אני זוכרת" in out
-    assert 'Activity: Ask him to describe the trip, using the word "כנרת".' in out  # one quoted word is fine
+    out = render_class_plan(a_plan(homework="אני רוצה שתחשוב על מקום שאתה אוהב לטייל בו.",
+                                   fatigue_fallback='Talk about his garden, using the word "גינה".'))
+    assert "Homework (say it ONLY in the closing, after the wrap-up note):\n      אני רוצה" in out
+    assert 'If he is tired or frustrated: Talk about his garden, using the word "גינה".' in out
     for line in out.splitlines():
         hebrew_words = sum(1 for w in line.split() if HEBREW.search(w))
         english_words = sum(1 for w in line.split() if re.fullmatch(r"[A-Za-z]{3,}[:,.]?", w))
@@ -221,9 +181,3 @@ def test_hebrew_sentences_never_share_a_line_with_english():
 
 def test_notes_applied_is_for_caregivers_only():
     assert "per the notes" not in render_class_plan(a_plan(notes_applied="Family names only, per the notes."))
-
-
-def test_practice_items_show_the_answer_last():
-    out = render_class_plan(a_plan())
-    block = out[out.index("Practice items"):]
-    assert block.index("ask: האגם בצפון") < block.index("first syllable: כִּנֶּ...") < block.index("answer: כנרת")

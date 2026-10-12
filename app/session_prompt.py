@@ -6,13 +6,13 @@ import datetime as dt
 from dataclasses import dataclass
 from zoneinfo import ZoneInfo
 
-from app import agenda
-from app.class_plan import plan_for_session, render_class_plan, with_names_game
+from app.class_plan import plan_for_session, prepare_for_session, render_class_plan, session_steps
 from app.config import Settings
 from app.deps import games_for
 from app.games import recent_games_line
 from app.prompts import TutorPrompt, render_tutor_prompt
 from app.schemas import ClassPlan
+from app.steps import FOLLOW_UP, overview
 from app.store import ENDED, SessionStore
 
 TZ = ZoneInfo("Asia/Jerusalem")  # his local time: "yesterday" and "this morning" are his
@@ -26,12 +26,12 @@ class SessionPrompt:
     plan: ClassPlan | None
     games: object  # GamesSnapshot | None
     start_note: str  # the first note she gets on the Live socket (the greeting cue)
-    steps: list[dict] | None = None  # steps mode (13): the agenda, run by the page
-    after_steps: str = ""  # what to do once every step is done
+    steps: list[dict]  # the plan's steps (13, 13.5), handed out by the page one at a time
+    after_steps: str = FOLLOW_UP  # handed out once every step is done
 
     @property
     def names_game(self) -> bool:
-        """Today's plan has a names game (12): the page then cues it at ~2 minutes."""
+        """Today's plan has a names game (12)."""
         return bool(self.plan and self.plan.probe)
 
 
@@ -126,28 +126,24 @@ def start_note(timing: SessionTiming) -> str:
 
 
 def build_session_prompt(store: SessionStore, settings: Settings, pid: str, profile_text: str,
-                         games_reader, *, exclude_sid: str | None = None,
-                         steps_mode: bool = False) -> SessionPrompt:
+                         games_reader, *, exclude_sid: str | None = None) -> SessionPrompt:
     # Today's lesson plan (05): the built plan, the intro plan for a new/reset account, or none;
-    # with today's names-game items from the stable check-in set, in rotation (12).
-    plan = with_names_game(plan_for_session(store, pid), store.get_check_in_set(pid))
+    # prepared for today: the names game's names from the stable set, in rotation (12, 13.5).
+    plan = prepare_for_session(plan_for_session(store, pid), store.get_check_in_set(pid))
     # What he played in the Simon app lately -- fresh at every start, computed in code (06).
     games = games_for(pid, settings, games_reader)
     # On a reconnect the session already exists: it is "now", not the last conversation.
     timing = session_timing(store, pid, exclude_sid=exclude_sid)
-    # Steps mode (13): the plan as steps; the system prompt gets only the overview (stable across
+    # The plan's steps (13, 13.5): the system prompt gets only the overview (stable across
     # reconnects), the first step comes in the start note, the next ones from the page.
-    steps = agenda.build_agenda(plan) if steps_mode else None
-    note = start_note(timing)
-    if steps:
-        note = note[:-1] + f" CURRENT STEP: {steps[0]['text']}]"
+    steps = session_steps(plan)
+    note = start_note(timing)[:-1] + f" CURRENT STEP: {steps[0]['text']}]"
     prompt = render_tutor_prompt(
         patient_profile=profile_text,
         session_timing=timing.block,
         memory_prompt=memory_block(store.get_memory(pid)),
-        class_plan=render_class_plan(plan, steps_mode=bool(steps)),
+        class_plan=render_class_plan(plan),
         games_recent=recent_games_line(games),
-        steps=agenda.overview(steps) if steps else "",
+        steps=overview(steps),
     )
-    return SessionPrompt(prompt=prompt, plan=plan, games=games, start_note=note, steps=steps,
-                         after_steps=agenda.after_last(plan) if steps else "")
+    return SessionPrompt(prompt=prompt, plan=plan, games=games, start_note=note, steps=steps)

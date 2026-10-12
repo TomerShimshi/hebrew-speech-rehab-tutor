@@ -112,7 +112,7 @@ def build_live_config(
         # The live model only talks -- its tools are hanging up, so he never has to work out how
         # to end the call, and (steps mode, 13) moving to the next step. All other tool use lives
         # in the agent calls.
-        tools=[types.Tool(function_declarations=[END_SESSION_TOOL, *([NEXT_STEP_TOOL] if voice.steps_mode else [])])],
+        tools=[types.Tool(function_declarations=[END_SESSION_TOOL, NEXT_STEP_TOOL])],
     )
 
 

@@ -28,8 +28,8 @@ from app import billing_guard
 from app.agent.next_class import _models, build_next_plan
 from app.agent.research import personal_terms
 from app.auth import User, require_caregiver
-from app import agenda
-from app.class_plan import plan_for_session, render_class_plan, with_names_game
+from app.class_plan import plan_for_session, prepare_for_session, render_plan_full, session_steps
+from app.steps import FOLLOW_UP
 from app.config import REPO_ROOT, Settings, get_settings
 from app.games import profile_for
 from app.deps import (
@@ -222,7 +222,7 @@ def overview(pid: str = Depends(account), settings: Settings = Depends(get_setti
     plan_model = (store.get_session(pid, built_after) or {}).get("plan_model") if built_after else None
     check_in = store.get_check_in_set(pid)
     # what the next session will really get (built or intro), with the names it would ask now (12)
-    plan = with_names_game(plan_for_session(store, pid), check_in)
+    plan = prepare_for_session(plan_for_session(store, pid), check_in)
     voice = current_settings(store, settings, pid)[0]
     return {
         "email": pid,
@@ -242,7 +242,7 @@ def overview(pid: str = Depends(account), settings: Settings = Depends(get_setti
         "check_in_history": [{k: h.get(k) for k in ("id", "created_on", "retired_at", "sessions_played", "items")}
                              for h in store.list_check_in_history(pid, 5)],
         "next_plan": {
-            "rendered": render_class_plan(plan),
+            "rendered": render_plan_full(plan),
             "plan_type": plan.plan_type if plan else None,
             "built_at": stored_plan.get("built_at"),
             "built_after_session": stored_plan.get("built_after_session"),
@@ -252,9 +252,9 @@ def overview(pid: str = Depends(account), settings: Settings = Depends(get_setti
             "model": plan_model,
             "notes_applied": stored_plan.get("notes_applied", ""),
             # 13: the steps the next session would run (the exact texts), and whether steps mode is on
-            "steps": agenda.build_agenda(plan),
-            "steps_after": agenda.after_last(plan),
-            "steps_mode": voice.steps_mode,
+            "steps": session_steps(plan),
+            "steps_after": FOLLOW_UP,
+            "estimated_minutes": stored_plan.get("estimated_minutes"),
         },
         "research_notes": store.recent_technique_notes(pid, 20),
         "recommendations": [{**r, "github_url": github_issue_url(r, settings.simon_repo, terms)}
@@ -293,8 +293,7 @@ def next_prompt(pid: str = Depends(account), settings: Settings = Depends(get_se
                 games_reader=Depends(get_games_reader)) -> dict:
     """What the tutor would get if this account started a session right now -- built by the
     same function as /api/session/start."""
-    steps_mode = current_settings(store, settings, pid)[0].steps_mode
-    built = build_session_prompt(store, settings, pid, profile.get(), games_reader, steps_mode=steps_mode)
+    built = build_session_prompt(store, settings, pid, profile.get(), games_reader)
     return {"text": built.prompt.text, "prompt_version": built.prompt.version}
 
 

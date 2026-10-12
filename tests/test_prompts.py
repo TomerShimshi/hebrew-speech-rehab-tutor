@@ -4,7 +4,7 @@ from app.prompts import read_optional_text, render_tutor_prompt
 def test_renders_all_fixed_sections_and_version():
     prompt = render_tutor_prompt()
     assert prompt.version
-    for title in ("## ROLE", "## STYLE RULES", "## SESSION STRUCTURE", "## SAFETY"):
+    for title in ("## ROLE", "## HOW YOU TALK", "## OPENING, TIMING AND CLOSING", "## SAFETY"):
         assert title in prompt.text
 
 
@@ -27,7 +27,6 @@ def test_key_rules_present():
     assert text.startswith("## LANGUAGE\nLANGUAGE RULE")  # Hebrew rule comes first
     assert "speak ONLY Modern Israeli Hebrew" in text
     assert "101" in text  # emergency number
-    assert "something special he'd like to talk about" in " ".join(text.split())
     assert "ALWAYS refer to yourself in the feminine" in text
 
 
@@ -40,9 +39,12 @@ def test_read_optional_text_handles_missing_file(tmp_path):
 
 
 def test_conversation_flow_rules_present():
-    text = render_tutor_prompt().text
-    assert "ONE THREAD AT A TIME" in text and "BRIDGE every change of topic" in text
-    assert "NO summary, NO homework" in text and "never the end" in text  # no early goodbyes (12)
-    with_plan = render_tutor_prompt(class_plan="Plan type: regular").text
-    assert "NAMES GAME" in with_plan and "NO HINTS in the game" in with_plan
-    assert "say again" not in text.split("Closing")[1].split("Ending the call")[0].replace("Don't ask him to repeat or \"say again\" anything", "")
+    text = " ".join(render_tutor_prompt().text.split())
+    # 3.0: at most one question per turn, and it's the last thing she says (12.10)
+    assert "AT MOST ONE question -- the LAST thing you say" in text and "Never two questions in one turn" in text
+    assert "NO summary, NO homework" in text and "end a TOPIC, not the session" in text  # no early goodbyes (12)
+    # how the session works comes right after the role, and the steps stay behind the scenes
+    with_steps = render_tutor_prompt(steps="Today's steps, in order: 1. opening.").text
+    assert with_steps.index("## ROLE") < with_steps.index("## HOW THE SESSION WORKS") < with_steps.index("## HOW YOU TALK")
+    flat = " ".join(with_steps.split())
+    assert "He must never notice" in flat and "follow the HOW exactly" in flat and "FIRST call next_step" in flat

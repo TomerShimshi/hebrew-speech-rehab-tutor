@@ -51,11 +51,11 @@ def test_config_locks_prompt_audio_transcription_and_vad():
     assert live_config.session_resumption is not None
 
 
-def test_live_models_only_tool_is_end_session():
+def test_live_models_tools_are_hanging_up_and_the_next_step():
     _, config = _mint()
     tools = config.live_connect_constraints.config.tools
     names = [fd.name for tool in tools for fd in tool.function_declarations]
-    assert names == ["end_session"]
+    assert names == ["end_session", "next_step"]  # the session always runs as steps (13.5)
 
 
 def test_voice_is_pinned_and_optional():

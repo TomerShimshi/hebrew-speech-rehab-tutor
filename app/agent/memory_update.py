@@ -17,7 +17,7 @@ from google.genai import types
 from app import check_in_set
 from app.agent.memory_tools import MemoryDraft, build_memory_tools
 from app.agent.runner import run_tool_loop
-from app.class_plan import render_class_plan
+from app.class_plan import render_plan_full
 from app.config import REPO_ROOT, Settings
 from app.llm import generate
 from app.schemas import SECTION_NAMES, ClassPlan, ConsolidatedMemory, MemoryDoc, MemorySections
@@ -119,7 +119,7 @@ def run_memory_update(
                 draft.probe_kinds = {p.target: p.kind for p in plan.probe}
             except Exception:  # noqa: BLE001 -- an old/odd plan must not break the update
                 plan = None
-        plan_text = render_class_plan(plan) if plan else "(no plan: a free session)"
+        plan_text = render_plan_full(plan) if plan else "(no plan: a free session)"
         # Steps mode (13): what she reported finished, in order -- a record next to the transcript.
         steps_done = session.get("steps_done") or []
         if steps_done:

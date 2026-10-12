@@ -214,7 +214,8 @@ function stepsLine(s) {
 function nextSteps(plan) {
   if (!plan.steps?.length) return null;
   return el("details", { class: "kv" },
-    el("summary", { text: `השלבים לשיחה הבאה (${plan.steps.length})${plan.steps_mode ? "" : " · מצב שלבים כבוי בחשבון הזה"}` }),
+    el("summary", { text: `השלבים לשיחה הבאה (${plan.steps.length})` +
+                          (plan.estimated_minutes ? ` · כ־${Math.round(plan.estimated_minutes)} דקות בקצב שלו` : "") }),
     ...plan.steps.map((a, i) => stepItem(a, i)),
     el("details", { class: "step" }, el("summary", { text: "אחרי השלבים: שאלת המשך, שוב ושוב עד הודעת הסיום" }),
        el("p", { class: "muted kv", dir: "ltr", text: plan.steps_after || "" })));
@@ -630,7 +631,6 @@ function renderVoice(v) {
       fact("שקט לפני שהיא עונה", silenceText(v.silence_ms), v.silence_auto),
       fact("מסנן רעשים", `${v.noise_level} · ${NOISE_NAME[v.noise_level]}`, v.noise_auto),
       v.tap_to_talk ? null : el("span", {}, "לחיצה לדיבור: ", el("b", { text: "כבויה" })),
-      el("span", {}, "שיחה לפי שלבים: ", el("b", { text: v.steps_mode ? "פועלת" : "כבויה" })),
       el("span", {}, "הקלטה: ", el("b", { text: v.record_audio === false ? "כבויה" : "פועלת" }),
          audioUsage ? el("span", { class: "mode", text: ` (${audioUsage})` }) : null)),
     last ? p(`החלטה אוטומטית אחרונה (${when(last.at)}): ${last.changes?.length ? last.changes.map(changeText).join(" · ") : "ללא שינוי"}` +
@@ -656,7 +656,6 @@ function fillVoiceForm(v) {
   $("noise-level").value = String(v.noise_level);
   $("tap-to-talk").checked = !!v.tap_to_talk;
   $("record-audio").checked = v.record_audio !== false;
-  $("steps-mode").checked = !!v.steps_mode;
   $("voice-status").textContent = "";
 }
 
@@ -669,8 +668,7 @@ $("voice-save").addEventListener("click", async () => {
     await api(acct("/settings"), { voice: {
       silence_ms: Math.round(Number($("silence").value) * 1000), silence_auto: $("silence-mode").value === "auto",
       noise_level: Number($("noise-level").value), noise_auto: $("noise-mode").value === "auto",
-      tap_to_talk: $("tap-to-talk").checked, record_audio: $("record-audio").checked,
-      steps_mode: $("steps-mode").checked } }, "PUT");
+      tap_to_talk: $("tap-to-talk").checked, record_audio: $("record-audio").checked } }, "PUT");
     await api(acct("/reminder"), { reminder: {
       enabled: $("reminder-on").checked, hour: Number($("reminder-hour").value),
       days: [...document.querySelectorAll(".reminder-day")].filter((c) => c.checked).map((c) => Number(c.value)) } }, "PUT");
