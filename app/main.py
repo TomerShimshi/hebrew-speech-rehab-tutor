@@ -19,6 +19,7 @@ from app.auth import User, verify_user, verify_sweeper
 from app.config import Settings, get_settings
 from app.live_token import create_live_token
 from app.class_plan import plan_names
+from app.steps import min_answers
 from app.patient_profile import PatientProfileLoader, extract_vocabulary
 from app.prompt_archive import PromptArchive
 from app.schemas import VoiceSettings
@@ -237,7 +238,7 @@ def start_session(
         "names_game": built.names_game,  # today's plan has a names game (12)
         # steps mode (13): the page hands her the next step after each next_step call
         "agenda": {"steps": [s["text"] for s in built.steps], "kinds": [s["kind"] for s in built.steps],
-                   "after": built.after_steps},
+                   "min_answers": [min_answers(s["kind"]) for s in built.steps], "after": built.after_steps},
         # buttons for the end screen: the game homework the tutor will suggest
         "game_homework": homework_buttons(plan, patient_id_for(user), settings),
         "voice": {"tap_to_talk": voice.tap_to_talk, "noise_level": voice.noise_level,

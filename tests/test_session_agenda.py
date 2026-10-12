@@ -20,8 +20,9 @@ def test_a_step_is_its_content_plus_its_fixed_rules():
     text = step.instruction()
     assert text.startswith("Practice, inside a conversation about the Sea of Galilee.")
     assert 'Ask: "איך נקרא טבריה?" (answer: טבריה)' in text
-    assert "HOW: A short conversation about the topic" in text and "After the name, one follow-up" in text
-    assert "follow-up on his own words" in ThreadStep(**thread()).instruction()
+    assert "HOW: A real short conversation about the topic -- a few exchanges, not a quiz" in text
+    assert "After the name, talk about it with him" in text
+    assert "follow up at least twice on his OWN words" in ThreadStep(**thread()).instruction()
     game = NamesGameStep(items=[{"target": "עכו", "kind": "untreated", "elicit": "העיר עם החומות?"}])
     assert '1) "העיר עם החומות?" (answer: עכו)' in game.instruction() and "NO hints" in game.instruction()
 
@@ -46,9 +47,8 @@ def test_session_start_fills_the_game_drops_its_names_from_practice_and_starts_w
 
 def test_without_a_plan_the_steps_are_opening_and_his_topic():
     assert [s["kind"] for s in session_steps(None)] == ["opening", "conversation"]
-    # kinds only: with the names in it she guessed the next question and asked it early (12.10)
-    assert overview(session_steps(PLAN)) == ("Today's steps, in order: 1. opening, 2. names game, 3. practice, "
-                                             "4. practice, 5. activity, 6. conversation thread.")
+    # no agenda at all: with a numbered list she saw where the plan ended and closed there (12.10)
+    assert "always a next step" in overview(session_steps(PLAN)) and "1." not in overview(session_steps(PLAN))
     assert all(s["text"].endswith("never right after you asked something.") for s in session_steps(PLAN))
 
 
@@ -61,17 +61,17 @@ def tools_for(draft, **kw):
     return {t.name: t.handler for t in build_plan_tools(draft, **kw)}
 
 
-def test_the_builder_cannot_finish_under_the_time_budget_and_a_fast_talker_needs_more():
-    draft = PlanDraft(pace_factor=0.8)  # FAST
+def test_the_builder_cannot_finish_under_the_time_budget_measured_from_his_sessions():
+    draft = PlanDraft(measured={"practice": 0.5})  # he gets through a practice step in half a minute
     tools = tools_for(draft)
     tools["set_goal"]({"type": "name_retrieval", "description": "Names."})
     tools["set_opening"]({"recall": "", "opener": "מה שלומך?"})
     tools["place_names_game"]({})
     reply = tools["add_practice"](practice("כנרת"))
-    assert reply["plan_minutes"] == round((1 + 1.5 + 1.25) * 0.8, 1) and reply["budget_minutes"] == BUDGET_MINUTES
+    assert reply["plan_minutes"] == round(0.6 + 1.0 + 0.5, 1) and reply["budget_minutes"] == BUDGET_MINUTES
     with pytest.raises(ValueError, match="add more steps"):
         tools["finish"]({})
-    for i in range(6):
+    for i in range(7):
         tools["add_thread"](thread(f"topic {i}", "שאלה?"))
     assert tools["finish"]({"notes_applied": ""})["done"] is True
     plan = draft.to_plan()
@@ -114,7 +114,7 @@ def test_every_session_runs_as_steps(env):
     assert body["start_note"].endswith(f"CURRENT STEP: {body['agenda']['steps'][0]}]")
     assert tool_names() == ["end_session", "next_step"]
     text = instruction()
-    assert "## HOW THE SESSION WORKS" in text and "Today's steps, in order: 1. opening" in text
+    assert "## HOW THE SESSION WORKS" in text and "always a next step" in text and "1. opening" not in text
     assert "FIRST call next_step" in " ".join(text.split())
     for gone in ("איך נקרא כנרת?", "Practice items", "RESERVE -- use ONLY"):  # the steps come from the page
         assert gone not in text, gone
@@ -132,3 +132,30 @@ def test_every_session_runs_as_steps(env):
     assert "Steps:" in nxt["rendered"]
     prompt = env.client.get(f"/api/caregiver/{DAD}/next-prompt", headers=auth("tok-tomer")).json()["text"]
     assert "## HOW THE SESSION WORKS" in prompt
+
+
+def test_step_lengths_are_measured_from_his_own_sessions():
+    """12.10: a guessed pace factor got it backwards -- his long answers finished each step sooner.
+    The builder's time budget uses how long each step kind really takes him (her step reports)."""
+    from app.agent.next_class import step_minutes
+    from app.store import InMemorySessionStore
+    store = InMemorySessionStore()
+    agenda = [{"kind": "opening"}, {"kind": "names_game"}, {"kind": "activity"}, {"kind": "practice"},
+              {"kind": "thread"}]
+    for version, reports in (("3.0", [32, 88, 208, 266, 280]), ("3.0", [30, 95, 200, 250, 270]),
+                             ("1.16", [5, 10, 15, 20, 25])):  # before 3.0 she rushed: ignored
+        sid = store.create_session(DAD, user_email=DAD, model="m", prompt_version=version)
+        store.update_session(DAD, sid, {"agenda": agenda, "steps_done": [{"done": "x", "at_s": a} for a in reports]})
+    # the thread took ~0.3 min: she rushed -- planned as a real conversation (its 1-minute floor)
+    assert step_minutes(store, DAD) == {"opening": 0.53, "names_game": 1.08, "activity": 2.0, "practice": 0.97,
+                                         "thread": 1.0}
+    assert step_minutes(InMemorySessionStore(), DAD) == {}  # no data: the defaults apply
+
+
+def test_the_page_gets_how_many_answers_each_step_needs(env):
+    """A talking step is a real short conversation: the page holds next_step until he has answered
+    enough times in it (names game: its own questions; practice 2; a conversation topic 3)."""
+    env.store.save_memory(DAD, "s0", {"memory_prompt": "He loves the Galilee."}, None)
+    env.store.save_next_plan(DAD, "s0", PLAN.model_dump(mode="json"))
+    body = env.client.post("/api/session/start", headers=auth()).json()
+    assert body["agenda"]["min_answers"] == [1, 2, 2, 2, 3]  # opening, practice, practice, activity, thread

@@ -74,13 +74,13 @@ def test_builder_saves_a_plan_of_steps_with_recent_goals_in_context():
     saved = store.get_next_plan(DAD)
     assert saved["plan_type"] == "regular" and saved["built_after_session"] == old
     assert [s["kind"] for s in saved["steps"]] == ["opening", "practice", "practice", "activity", "thread",
-                                                     "thread", "thread"]
-    assert saved["estimated_minutes"] == 9.8 and saved["homework"] == "Think of a place."
+                                                     "thread", "thread", "thread", "thread"]
+    assert saved["estimated_minutes"] == 9.6 and saved["homework"] == "Think of a place."
     context = plan_context(client)
     assert "- discourse: Names of places he loves." in context  # recent goals, for rotation
     assert "first): טבריה" in context  # the word bank's due words
     session = store.get_session(DAD, old)
-    assert (session["plan_status"], session["plan_tool_calls"], session["plan_tool_errors"]) == ("done", 10, 0)
+    assert (session["plan_status"], session["plan_tool_calls"], session["plan_tool_errors"]) == ("done", 12, 0)
 
 
 def test_builder_without_memory_leaves_the_intro_for_next_time():

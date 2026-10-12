@@ -36,7 +36,7 @@ def a_plan(*, steps=None, goal="name_retrieval", **over) -> ClassPlan:
 
 
 def build_calls(*, goal="name_retrieval", names=("כנרת", "טבריה"), game=False, extra=(), finish=True):
-    """The tool calls of a typical, complete plan (~9.75 minutes at a typical pace)."""
+    """The tool calls of a typical, complete plan (~9.6 minutes with the default step lengths)."""
     calls = [("set_goal", {"type": goal, "description": "Names of places he loves."}),
              ("set_opening", {"recall": "בפעם הקודמת סיפרת לי על הגליל.", "opener": "איך אתה מרגיש היום?"})]
     if game:
@@ -45,6 +45,8 @@ def build_calls(*, goal="name_retrieval", names=("כנרת", "טבריה"), game
     calls += [("add_activity", {"instructions": "Ask him to tell a trip in order.", "why": "Discourse."}),
               ("add_thread", thread()), ("add_thread", thread("his work", "ספר לי על העבודה שלך?")),
               ("add_thread", thread("music", "איזו מוזיקה אתה אוהב?")),
+              ("add_thread", thread("his town", "מה אתה הכי אוהב בשכונה שלך?")),
+              ("add_thread", thread("cooking", "מה אתה אוהב לבשל?")),
               *extra,
               ("set_closing", {"homework": "Think of a place.", "fatigue_fallback": "His garden.", "avoid": []})]
     if finish:

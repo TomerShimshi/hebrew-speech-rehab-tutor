@@ -125,6 +125,7 @@ function ensureUserLine() {
   if (!s.userLine) {
     s.tutorLine = null;
     s.userLine = newLine("patient");
+    countAnswer();
   }
   return s.userLine;
 }
@@ -186,6 +187,11 @@ function endTutorTurn(reason) {
 function heSpoke() {
   s.turnsSinceUser = 0;
   s.tutorTextSinceUser = "";
+}
+
+// His answers in the current step (13.5): a talking step is a short conversation, not one question.
+function countAnswer() {
+  s.answersInStep = (s.answersInStep || 0) + 1;
 }
 
 function setUserLive(text) {
@@ -550,6 +556,15 @@ function handleToolCall(toolCall) {
         "call next_step again." } });
       continue;
     }
+    const needed = s.agenda?.min_answers?.[s.stepIndex] ?? 2;
+    if (fc.name === "next_step" && (s.answersInStep || 0) < needed && !GOODBYE_RE.test(s.lastUserText || "")) {
+      // A talking step is a real short conversation (12.10): not before he has answered enough times.
+      log("tool", `next_step held: ${s.answersInStep || 0} of ${needed} answers in this step`);
+      responses.push({ id: fc.id, name: fc.name, response: { result:
+        "Not yet: this step is a short conversation. Talk with him about it a little more -- react to what he " +
+        "just said and follow up on his own words -- then call next_step again." } });
+      continue;
+    }
     if (fc.name === "next_step") {
       // Steps mode (13): record what she finished, reply with the next step. The tool is BLOCKING:
       // she waits a moment for this reply and goes on in the same turn (live-tested). After the last
@@ -558,6 +573,7 @@ function handleToolCall(toolCall) {
                          how_it_went: String(fc.args?.how_it_went || "").slice(0, 400),
                          at_s: Math.round((performance.now() - s.startedAt) / 100) / 10 });
       s.stepIndex += 1;
+      s.answersInStep = 0;
       const steps = s.agenda?.steps || [];
       const left = steps.length - s.stepIndex;
       const longEnough = performance.now() - s.startedAt >= MIN_SESSION_MS;

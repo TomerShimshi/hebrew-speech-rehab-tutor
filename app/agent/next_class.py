@@ -22,7 +22,7 @@ from google.genai import types
 from app import check_in_set, word_bank
 from app.agent.memory_update import format_memory
 from app.agent.research import personal_terms, research_technique, search_available
-from app.agent.plan_tools import BUDGET_MINUTES, MIN_ACCEPT, PACE_FACTOR, PlanDraft, build_plan_tools
+from app.agent.plan_tools import BUDGET_MINUTES, MIN_ACCEPT, PlanDraft, build_plan_tools
 from app.agent.runner import Tool, run_tool_loop
 from app.config import REPO_ROOT, Settings
 from app.games import render_games_for_plan
@@ -153,6 +153,39 @@ def speaking_pace(store: SessionStore, pid: str) -> list[dict]:
         if len(rows) == PACE_SESSIONS:
             break
     return rows
+
+
+STEP_SESSIONS = 10  # his step lengths from this many recent sessions with step reports
+MIN_SAMPLES = 2  # a kind's measured length is used once it has this many samples
+
+
+def step_minutes(store: SessionStore, pid: str) -> dict[str, float]:
+    """How long each step kind really takes HIM (13.5): from his recent sessions' steps and her
+    next_step reports (seconds since the start). The median per kind; kinds without enough data
+    are left out (the class default applies)."""
+    from app.steps import STEP_CLASSES
+    samples: dict[str, list[float]] = {}
+    for s in store.list_sessions(pid, STEP_SESSIONS):
+        # Only sessions on the current way of talking (prompt 3.x): before it she moved on after one
+        # answer, and those lengths would plan a rushed session (12.10).
+        if not str(s.get("prompt_version") or "").startswith("3."):
+            continue
+        agenda, done = s.get("agenda") or [], s.get("steps_done") or []
+        prev = 0.0
+        for step, report in zip(agenda, done):
+            at = float(report.get("at_s") or 0)
+            if at > prev:
+                samples.setdefault(step.get("kind"), []).append((at - prev) / 60)
+            prev = max(prev, at)
+    out = {}
+    for kind, values in samples.items():
+        cls = STEP_CLASSES.get(kind)
+        if cls is None or len(values) < MIN_SAMPLES:  # an old kind, or too little data
+            continue
+        values = sorted(values)
+        # a talking step shorter than its floor means she rushed: plan for a real conversation
+        out[kind] = round(max(values[len(values) // 2], cls.MIN_MINUTES), 2)
+    return out
 
 
 def pace_label(rows: list[dict]) -> str:
@@ -370,7 +403,7 @@ def build_next_plan(
         # The plan, built step by step with tools (13.5): each step checked when it's added, in the
         # builder's order, to a time budget at his pace.
         his_games = {g.id: g for g in (games.games if games and not games.error else [])}
-        draft = PlanDraft(pace_factor=PACE_FACTOR[pace_label(context_args["pace"])])
+        draft = PlanDraft(measured=step_minutes(store, pid))
         tools = build_plan_tools(
             draft, check_practice=practice_checker(known, check_in_set.untreated_targets(current_set)),
             his_games={gid for gid, g in his_games.items() if g.route},

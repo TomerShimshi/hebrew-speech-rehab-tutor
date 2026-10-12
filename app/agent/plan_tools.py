@@ -17,7 +17,6 @@ from app.steps import (ActivityStep, GamesActivityStep, NamesGameStep, OpeningSt
 
 BUDGET_MINUTES = 9.0  # the wrap-up note comes at ~9 minutes
 MIN_ACCEPT = 0.7  # an unfinished draft (round limit) is still used if it reaches this share of the budget
-PACE_FACTOR = {"FAST": 0.8, "typical": 1.0, "SLOW": 1.3}  # a fast talker uses a step up sooner (12b)
 
 
 def _norm(text: str) -> str:
@@ -26,7 +25,10 @@ def _norm(text: str) -> str:
 
 @dataclass
 class PlanDraft:
-    pace_factor: float = 1.0
+    # Minutes per step kind, measured from his real sessions (step_minutes in next_class.py); a kind
+    # without data uses the class's default. A guessed pace factor got it backwards (12.10): a "slow"
+    # talker with long answers finished each step SOONER.
+    measured: dict[str, float] = field(default_factory=dict)
     goal: PrimaryGoal | None = None
     steps: list = field(default_factory=list)
     homework: str = ""
@@ -38,8 +40,11 @@ class PlanDraft:
     notes_applied: str = ""
     finished: bool = False
 
+    def step_minutes(self, step) -> float:
+        return self.measured.get(step.kind, step.MINUTES)
+
     def minutes(self) -> float:
-        return round(sum(s.MINUTES for s in self.steps) * self.pace_factor, 1)
+        return round(sum(self.step_minutes(s) for s in self.steps), 1)
 
     def progress(self) -> dict:
         return {"ok": True, "plan_minutes": self.minutes(), "budget_minutes": BUDGET_MINUTES,

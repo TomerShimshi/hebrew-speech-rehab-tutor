@@ -36,7 +36,12 @@ class Step(BaseModel):
     TOOL: ClassVar[str] = ""  # the plan builder's tool that adds it ("" = added by code)
     GUIDE: ClassVar[str] = ""
     RULES: ClassVar[str] = ""
-    MINUTES: ClassVar[float] = 1.0
+    MINUTES: ClassVar[float] = 1.0  # default length; measured per account once there is data (13.5)
+    # A talking step is a real short conversation, not one question and on (12.10): the shortest it
+    # may be counted as (a short measurement means she rushed, not that he's fast), and the fewest
+    # of HIS answers before the page lets it end (static/app.js gets them with the steps).
+    MIN_MINUTES: ClassVar[float] = 0.0
+    MIN_ANSWERS: ClassVar[int] = 1
 
     def content(self) -> str:
         raise NotImplementedError
@@ -62,7 +67,7 @@ class OpeningStep(Step):
     RULES: ClassVar[str] = ("Greet him warmly, ask how he feels and react to what he says (recall ONE thing from last "
                             "time, ask about his games or homework, as the rules say). The step is finished after his "
                             "answer and your reaction.")
-    MINUTES: ClassVar[float] = 1.0
+    MINUTES: ClassVar[float] = 0.6
     recall: str = Field(default="", description="HEBREW: one sentence recalling last time, for her greeting.")
     opener: str = Field(default="", description="HEBREW: an easy, pleasant opening question.")
 
@@ -85,7 +90,8 @@ class NamesGameStep(Step):
                             "short warm \"נכון!\"; if not, say the name warmly in one sentence and go on -- no second "
                             "try. Don't come back to these names later in the session. The step is finished only "
                             "after his answer to the LAST question. Skip it if he seems tired or low.")
-    MINUTES: ClassVar[float] = 1.5
+    MINUTES: ClassVar[float] = 1.0
+    MIN_ANSWERS: ClassVar[int] = 0  # its own questions are the step
     items: list[ProbeItem] = []  # filled at session start (app/class_plan.py)
 
     def content(self) -> str:
@@ -109,11 +115,14 @@ class PracticeStep(Step):
         "Hints must really match the name and be correct Hebrew; the first syllable AS SPOKEN, with vowel marks "
         "(e.g. 'טְבֶ...'), never the letter's name.")
     RULES: ClassVar[str] = (
-        "A short conversation about the topic: an open question, follow his answer, and at a natural point ask the "
-        "question. If he's stuck, hints one at a time in this order: meaning -> first syllable -> sentence to "
-        "complete -> say it and have him use it in a sentence. After the name, one follow-up about it, and his "
-        "answer to it.")
-    MINUTES: ClassVar[float] = 1.25
+        "A real short conversation about the topic -- a few exchanges, not a quiz: start with an open question "
+        "about the topic and follow his answer; at a natural point ask the question. If he's stuck, hints one at a "
+        "time in this order: meaning -> first syllable -> sentence to complete -> say it and have him use it in a "
+        "sentence. After the name, talk about it with him: follow up on what he says (a memory, a detail, his "
+        "opinion).")
+    MINUTES: ClassVar[float] = 1.0
+    MIN_MINUTES: ClassVar[float] = 0.75
+    MIN_ANSWERS: ClassVar[int] = 2
     topic: str = Field(description="ENGLISH: the conversation topic the name fits into, e.g. 'his years at work'.")
     name: str = Field(description="HEBREW: the name he should come up with.")
     question: str = Field(description="HEBREW: how she asks for it, without giving it away.")
@@ -146,7 +155,9 @@ class ActivityStep(Step):
         "voice only. Instructions to her in ENGLISH (a quoted Hebrew word is fine).")
     RULES: ClassVar[str] = ("Give it time and let him complete it; help gently if he's stuck. The step is finished "
                             "when he has completed it.")
-    MINUTES: ClassVar[float] = 2.5
+    MINUTES: ClassVar[float] = 2.0
+    MIN_MINUTES: ClassVar[float] = 1.5
+    MIN_ANSWERS: ClassVar[int] = 2
     instructions: str = Field(description="ENGLISH: the activity, as instructions to her.")
     why: str = Field(default="", description="ENGLISH: one short sentence -- what it practices.")
 
@@ -162,7 +173,9 @@ class GamesActivityStep(Step):
                             "at home'. ENGLISH instructions.")
     RULES: ClassVar[str] = ("Turn the game into talking practice -- never a quiz on its words. Follow what he says. "
                             "The step is finished after a short exchange about it.")
-    MINUTES: ClassVar[float] = 1.5
+    MINUTES: ClassVar[float] = 1.2
+    MIN_MINUTES: ClassVar[float] = 1.0
+    MIN_ANSWERS: ClassVar[int] = 2
     instructions: str = Field(description="ENGLISH: the talking activity, built on what he played.")
 
     def content(self) -> str:
@@ -175,10 +188,13 @@ class ThreadStep(Step):
     GUIDE: ClassVar[str] = ("A conversation thread from his life or interests (the memory), with one concrete opening "
                             "question in HEBREW and 1-2 follow-up ideas. Good for filling the time budget with real "
                             "talk, and for a fast talker.")
-    RULES: ClassVar[str] = ("Ask the question, follow his answer with at least one follow-up on his own words (a "
-                            "detail, his opinion, what happened next), and let him tell it fully. Then the step is "
-                            "finished.")
-    MINUTES: ClassVar[float] = 1.25
+    RULES: ClassVar[str] = ("A real short conversation about the topic -- a few exchanges, not one question: ask, "
+                            "listen, and follow up at least twice on his OWN words (a detail he mentioned, how he "
+                            "felt, his opinion, what happened next). Share a short reaction of your own like a "
+                            "person would. Let him tell it fully.")
+    MINUTES: ClassVar[float] = 1.0
+    MIN_MINUTES: ClassVar[float] = 1.0
+    MIN_ANSWERS: ClassVar[int] = 3
     topic: str = Field(description="ENGLISH: the topic, e.g. 'his ping-pong plans'.")
     question: str = Field(description="HEBREW: a concrete opening question, in her voice.")
     follow_ups: str = Field(default="", description="ENGLISH: 1-2 follow-up ideas.")
@@ -195,6 +211,16 @@ PlanStep = Annotated[Union[OpeningStep, NamesGameStep, PracticeStep, ActivitySte
                      Field(discriminator="kind")]
 BUILDABLE = (OpeningStep, NamesGameStep, PracticeStep, ActivityStep, GamesActivityStep, ThreadStep)
 
+STEP_CLASSES = {cls.model_fields["kind"].default: cls for cls in BUILDABLE}
+
+
+def min_answers(kind: str) -> int:
+    """The fewest of his answers before a step of this kind may end (the follow-up and free
+    conversation steps count as talking steps: 2)."""
+    cls = STEP_CLASSES.get(kind)
+    return cls.MIN_ANSWERS if cls else 2
+
+
 # Handed out again and again once the planned steps run out, until the wrap-up note (~9 min) or
 # "you may close" (after 8 min, 13). Never "the steps are done": that made her close at once.
 FOLLOW_UP = ("Follow-up: go back to something he told you earlier today (a detail of his story, his opinion, what "
@@ -209,12 +235,11 @@ NAMES = {"opening": "opening", "names_game": "names game", "practice": "practice
 
 
 def overview(steps: list[dict]) -> str:
-    """For the system prompt: the whole agenda by name, so she knows where she is going (stable
-    across reconnects -- the current step itself only ever comes from the page)."""
-    # Kinds only, no names or topics: with "practice (<the name>)" here she guessed the next question
-    # and asked it before the step came (12.10).
-    return "Today's steps, in order: " + ", ".join(
-        f"{i}. {NAMES.get(s['kind'], s['kind'])}" for i, s in enumerate(steps, 1)) + "."
+    """For the system prompt: NOT the agenda. With a numbered list she saw where the plan ended and
+    closed there herself (12.10, 5 minutes in); with the names in it she guessed the next question
+    (12.10). She only needs to know that there is always a next step."""
+    return ("There is always a next step: the app hands them out one at a time, for as long as the session "
+            "lasts. You never know how many are left, and only the app ends the session.")
 
 
 def tool_parameters(cls: type[Step]) -> dict:
