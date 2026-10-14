@@ -10,7 +10,7 @@ Each step type is one class that owns, in one place:
 {kind, ...content}; the rules always come from here.
 """
 
-from typing import Annotated, ClassVar, Literal, Union
+from typing import Annotated, ClassVar, Literal, Union, get_args, get_origin
 
 from pydantic import BaseModel, Field
 
@@ -65,9 +65,11 @@ class OpeningStep(Step):
                             "recalling something from last time (from the memory). opener: an easy, pleasant question "
                             "at his level. Both in HEBREW, in her voice (a woman; masculine for him).")
     RULES: ClassVar[str] = ("Greet him warmly, ask how he feels and react to what he says (recall ONE thing from last "
-                            "time, ask about his games or homework, as the rules say). The step is finished after his "
-                            "answer and your reaction.")
+                            "time, ask about his games or homework, as the rules say). If he shares something -- news, "
+                            "a feeling, something that happened today -- stay with it for a few exchanges before "
+                            "anything else: that is the conversation.")
     MINUTES: ClassVar[float] = 0.6
+    MIN_ANSWERS: ClassVar[int] = 2
     recall: str = Field(default="", description="HEBREW: one sentence recalling last time, for her greeting.")
     opener: str = Field(default="", description="HEBREW: an easy, pleasant opening question.")
 
@@ -187,7 +189,7 @@ class ThreadStep(Step):
     TOOL: ClassVar[str] = "add_thread"
     GUIDE: ClassVar[str] = ("A conversation thread from his life or interests (the memory), with one concrete opening "
                             "question in HEBREW and 1-2 follow-up ideas. Good for filling the time budget with real "
-                            "talk, and for a fast talker.")
+                            "talk, and for a fast talker. Never about the homework: the opening already asks about it.")
     RULES: ClassVar[str] = ("A real short conversation about the topic -- a few exchanges, not one question: ask, "
                             "listen, and follow up at least twice on his OWN words (a detail he mentioned, how he "
                             "felt, his opinion, what happened next). Share a short reaction of your own like a "
@@ -207,9 +209,59 @@ class ThreadStep(Step):
         return self.topic
 
 
-PlanStep = Annotated[Union[OpeningStep, NamesGameStep, PracticeStep, ActivityStep, GamesActivityStep, ThreadStep],
-                     Field(discriminator="kind")]
-BUILDABLE = (OpeningStep, NamesGameStep, PracticeStep, ActivityStep, GamesActivityStep, ThreadStep)
+class SequencingStep(Step):
+    """Telling things in order (14): his therapist's kind of task, by voice. One right order."""
+    kind: Literal["sequencing"] = "sequencing"
+    TOOL: ClassVar[str] = "add_sequencing"
+    GUIDE: ClassVar[str] = (
+        "A sequencing task -- telling things in order, as his speech therapist practices with him. task: "
+        "'scrambled' (she says the events out of order, he tells the story in the right order) or 'retell' (she "
+        "tells a short story, he retells it in order); rotate them. events: the story's events in HEBREW, in the "
+        "CORRECT order, one short, simple sentence each, about 'him' (a man) or 'her' -- a NEW everyday, adult "
+        "situation (a visit to the doctor, buying a gift, fixing a leaking tap, a bus ride), never from his own "
+        "life, with events that can only come in one order. Exactly the number of events HIS SEQUENCING "
+        "recommends (+-1). Code scrambles them.")
+    RULES: ClassVar[str] = (
+        "This is the one long turn of the session: introduce it lightly as a game (scrambled: \"אספר לך כמה דברים "
+        "שקרו, אבל בבלגן, ואתה תספר לי את הסיפור לפי הסדר\"; retell: tell the story, then \"ספר לי את הסיפור "
+        "במילים שלך, מההתחלה\"), then say all the events in ONE turn, slowly, one short sentence each with a small "
+        "pause between them, and only then ask your one question. In the scrambled game, number them as you say "
+        "them (\"ראשון: ... שני: ...\") -- each one appears on his screen as a card as you say it, so you may say "
+        "\"הם גם מופיעים לך על המסך\". Let him tell it ALL the way through without "
+        "correcting him; repeat all the events once if he asks. If the order is off, help with ONE question at a "
+        "time (\"מה קרה קודם, ... או ...?\") -- never the answer first -- and say warmly what he got right. Then "
+        "link the story to his life (\"קרה לך פעם משהו כזה?\") for an exchange or two. Skip it, without "
+        "mentioning it, if he seems tired.")
+    MINUTES: ClassVar[float] = 2.5
+    MIN_MINUTES: ClassVar[float] = 2.0
+    MIN_ANSWERS: ClassVar[int] = 2
+    task: Literal["scrambled", "retell"] = Field(description="'scrambled' or 'retell'.")
+    title: str = Field(description="ENGLISH: a short title for the family, e.g. 'buying a gift'.")
+    events: list[str] = Field(description="HEBREW: the events in the CORRECT order, one short sentence each.")
+    told_order: list[int] = []  # filled by code when it's added: the order she says them in (scrambled)
+
+    def content(self) -> str:
+        numbered = " ".join(f'{i}) "{e}"' for i, e in enumerate(self.events, 1))
+        if self.task == "retell":
+            return f"Story retell ({self.title}): tell him this story, in this order: {numbered}."
+        order = ", ".join(str(i) for i in self.told_order)
+        return (f"Sequencing game ({self.title}): the events, numbered in the CORRECT order: {numbered}. Say them "
+                f"to him in THIS scrambled order: {order}.")
+
+    def label(self) -> str:
+        return self.title
+
+    def cards(self) -> list[str]:
+        """The scrambled game's events in the order she says them, shown on his screen as she says
+        each one (13.10: by ear it was hard to remember them). Never for a retell -- that's from memory."""
+        if self.task != "scrambled":
+            return []
+        return [self.events[i - 1] for i in self.told_order if 1 <= i <= len(self.events)]
+
+
+PlanStep = Annotated[Union[OpeningStep, NamesGameStep, PracticeStep, ActivityStep, GamesActivityStep, ThreadStep,
+                           SequencingStep], Field(discriminator="kind")]
+BUILDABLE = (OpeningStep, NamesGameStep, PracticeStep, ActivityStep, GamesActivityStep, ThreadStep, SequencingStep)
 
 STEP_CLASSES = {cls.model_fields["kind"].default: cls for cls in BUILDABLE}
 
@@ -230,7 +282,7 @@ FOLLOW_UP = ("Follow-up: go back to something he told you earlier today (a detai
 FREE_CONVERSATION = ("Conversation: ask whether there is something special he'd like to talk about today; follow his "
                      "choice, one thread at a time, with follow-ups on his own words.")
 
-NAMES = {"opening": "opening", "names_game": "names game", "practice": "practice", "activity": "activity",
+NAMES = {"sequencing": "telling things in order", "opening": "opening", "names_game": "names game", "practice": "practice", "activity": "activity",
          "games_activity": "game-linked activity", "thread": "conversation thread", "conversation": "conversation"}
 
 
@@ -246,10 +298,16 @@ def tool_parameters(cls: type[Step]) -> dict:
     """The builder tool's JSON schema, from the class's content fields (kind and items excluded)."""
     props, required = {}, []
     for name, field in cls.model_fields.items():
-        if name in ("kind", "items"):
+        if name in ("kind", "items", "told_order"):  # set by code, never by the builder
             continue
-        typ = {str: "string", bool: "boolean"}.get(field.annotation, "string")
-        props[name] = {"type": typ, "description": field.description or ""}
+        if field.annotation == list[str]:
+            props[name] = {"type": "array", "items": {"type": "string"}, "description": field.description or ""}
+        elif get_origin(field.annotation) is Literal:
+            props[name] = {"type": "string", "enum": list(get_args(field.annotation)),
+                           "description": field.description or ""}
+        else:
+            typ = {str: "string", bool: "boolean"}.get(field.annotation, "string")
+            props[name] = {"type": typ, "description": field.description or ""}
         if field.is_required():
             required.append(name)
     return {"type": "object", "properties": props, "required": required}

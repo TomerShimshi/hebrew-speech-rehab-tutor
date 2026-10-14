@@ -7,13 +7,15 @@ step type's tool is generated from its class (app/steps.py): the parameters from
 fields, the description from its GUIDE.
 """
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from app.agent.runner import Tool
 from app.schemas import ClassPlan, GameHomework, GamesAppFeedback, GoalType, PrimaryGoal
-from app.steps import (ActivityStep, GamesActivityStep, NamesGameStep, OpeningStep, PracticeStep, ThreadStep,
-                       tool_parameters)
+from app import sequencing
+from app.steps import (ActivityStep, GamesActivityStep, NamesGameStep, OpeningStep, PracticeStep, SequencingStep,
+                       ThreadStep, tool_parameters)
 
 BUDGET_MINUTES = 9.0  # the wrap-up note comes at ~9 minutes
 MIN_ACCEPT = 0.7  # an unfinished draft (round limit) is still used if it reaches this share of the budget
@@ -71,10 +73,16 @@ class PlanDraft:
                          estimated_minutes=self.minutes())
 
 
+HOMEWORK = re.compile(r"homework|שיעורי[ -]?(ה)?בית|המשימה (ש|מה)", re.IGNORECASE)
+
+
 def build_plan_tools(draft: PlanDraft, *, check_practice: Callable[[PracticeStep], str | None],
-                     his_games: set[str], set_names: set[str]) -> list[Tool]:
+                     his_games: set[str], set_names: set[str], seq_events: int = sequencing.DEFAULT_EVENTS,
+                     seq_task: str | None = None) -> list[Tool]:
     """`check_practice` returns why a practice step is rejected (None = fine): his data (8.5),
-    untreated names-game names (12). `his_games`: the game ids he has (06)."""
+    untreated names-game names (12). `his_games`: the game ids he has (06). `seq_events`: the
+    recommended size of a sequencing task; `seq_task`: the task this plan must have (14: every
+    session, the kinds taking turns); None = optional."""
 
     def all_names() -> set[str]:
         return {_norm(n) for s in draft.steps for n in s.names()}
@@ -120,7 +128,27 @@ def build_plan_tools(draft: PlanDraft, *, check_practice: Callable[[PracticeStep
         return draft.progress()
 
     def add_thread(args: dict) -> dict:
-        draft.steps.append(ThreadStep(**args))
+        step = ThreadStep(**args)
+        # 13.10: a "reviewing homework" thread asked what the opening had just asked -- twice in a session
+        if HOMEWORK.search(f"{step.topic} {step.question}"):
+            raise ValueError("the opening already asks about the homework: choose another topic")
+        draft.steps.append(step)
+        return draft.progress()
+
+    def add_sequencing(args: dict) -> dict:
+        step = SequencingStep(**{k: v for k, v in args.items() if k in ("task", "title", "events")})
+        events = [" ".join(str(e).split()) for e in step.events if str(e).strip()]
+        if not sequencing.MIN_EVENTS <= len(events) <= sequencing.MAX_EVENTS:
+            raise ValueError(f"a sequencing task has {sequencing.MIN_EVENTS}-{sequencing.MAX_EVENTS} events")
+        if abs(len(events) - seq_events) > 1:
+            raise ValueError(f"HIS SEQUENCING recommends {seq_events} events (+-1): this one has {len(events)}")
+        if any(isinstance(s, SequencingStep) for s in draft.steps):
+            raise ValueError("one sequencing task per session")
+        if seq_task and step.task != seq_task:
+            raise ValueError(f"this time the task is {seq_task} (the two kinds take turns)")
+        # code scrambles, never the model (14): never the original, never the reverse
+        told = sequencing.scramble(len(events), seed=step.title + "|".join(events)) if step.task == "scrambled" else []
+        draft.steps.append(step.model_copy(update={"events": events, "told_order": told}))
         return draft.progress()
 
     def set_closing(args: dict) -> dict:
@@ -151,6 +179,9 @@ def build_plan_tools(draft: PlanDraft, *, check_practice: Callable[[PracticeStep
         problem = draft.usable()
         if problem:
             raise ValueError(problem)
+        if seq_task and not any(isinstance(s, SequencingStep) for s in draft.steps):
+            raise ValueError(f"every plan has a sequencing task: add one (add_sequencing, task={seq_task}) "
+                             "before finishing")
         if draft.minutes() < BUDGET_MINUTES:
             raise ValueError(f"the plan is ~{draft.minutes()} of {BUDGET_MINUTES} minutes at his pace: add more "
                              f"steps (practice in a topic, a thread, an activity) before finishing")
@@ -173,6 +204,7 @@ def build_plan_tools(draft: PlanDraft, *, check_practice: Callable[[PracticeStep
         step_tool(PracticeStep, add_practice),
         step_tool(ActivityStep, add_activity),
         step_tool(ThreadStep, add_thread),
+        step_tool(SequencingStep, add_sequencing),
         Tool("set_closing", "The session-level parts: homework for next time (she gives it in the closing), an easy "
              "fatigue fallback, what to avoid, and one fact about his recent games she may mention. ENGLISH.",
              {"type": "object", "properties": {

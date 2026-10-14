@@ -162,6 +162,10 @@ function addTutorText(text) {
   }
   s.tutorLine.textEl.textContent += text;
   if (!s.suppressTurn) s.tutorTextSinceUser = (s.tutorTextSinceUser || "") + text;
+  if (s.cards && !s.suppressTurn) {
+    s.cardsHeard += text;
+    revealCards(false);
+  }
   markDirty(s.tutorLine);
   $("captions").scrollTop = $("captions").scrollHeight;
 }
@@ -174,6 +178,7 @@ function endTutorTurn(reason) {
   }
   s.modelActive = false;
   s.turnAudioS = 0;
+  if (s.cards && s.cardsHeard && !s.suppressTurn) revealCards(true); // the transcript can miss words
   if (!s.suppressTurn) {
     s.turnsSinceUser = (s.turnsSinceUser || 0) + 1;
     s.lastTutorEndAt = performance.now();
@@ -192,6 +197,52 @@ function heSpoke() {
 // His answers in the current step (13.5): a talking step is a short conversation, not one question.
 function countAnswer() {
   s.answersInStep = (s.answersInStep || 0) + 1;
+  // She lingers now -- but a step must not go on forever (13.10): a silent reminder, once a step,
+  // after a few answers beyond what the step needs.
+  const needed = s.agenda?.min_answers?.[s.stepIndex] ?? 2;
+  if (s.agenda && !s.closing && s.remindedStep !== s.stepIndex && s.answersInStep >= needed + MOVE_ON_AFTER) {
+    s.remindedStep = s.stepIndex;
+    log("note", `reminder: ${s.answersInStep} answers in step ${s.stepIndex + 1}`);
+    sendSilentNote("(A note from the app, not from him: when this topic feels done, call next_step -- after " +
+                   "his answer, before you say anything.)");
+  }
+}
+const MOVE_ON_AFTER = 4; // a step may be long (Tomer, 13.10): only a gentle reminder, late
+
+// ---- the scrambled game's cards (14) ----------------------------------------------
+// By ear, he couldn't keep the events in mind (13.10): each event shows up as a card as she says
+// it, and stays until the step ends. Matched by words in her transcript; all shown when her turn ends.
+const cardWords = (t) => (t || "").replace(/[^\u0590-\u05FFa-zA-Z0-9 ]/g, " ").split(/\s+/)
+  .map((w) => w.replace(/^[והבלמשכ]/, "")).filter((w) => w.length >= 2);
+
+function showCards() {
+  const box = $("seq-cards");
+  const cards = s.agenda?.cards?.[s.stepIndex] || null;
+  box.replaceChildren();
+  s.cards = cards ? cards.map((text) => ({ text, words: cardWords(text), shown: false })) : null;
+  s.cardsHeard = "";
+  box.hidden = !s.cards;
+  for (const c of s.cards || []) {
+    c.el = document.createElement("li");
+    c.el.className = "seq-card waiting";
+    c.el.dir = "rtl";
+    c.el.textContent = c.text;
+    box.append(c.el);
+  }
+}
+
+function revealCards(all) {
+  if (!s.cards) return;
+  const heard = new Set(cardWords(s.cardsHeard));
+  for (const c of s.cards) {
+    if (c.shown) continue;
+    const hits = c.words.filter((w) => heard.has(w)).length;
+    if (all || (c.words.length && hits / c.words.length >= 0.6)) {
+      c.shown = true;
+      c.el.classList.remove("waiting");
+      c.el.classList.add("new");
+    }
+  }
 }
 
 function setUserLive(text) {
@@ -386,6 +437,8 @@ async function fetchToken(resumeHandle) {
     s.agenda = t.agenda || null;
     s.stepIndex = 0;
     s.stepsDone = [];
+    s.stepsHeld = [];
+    showCards();
   }
   if (t.start_note) s.startNote = t.start_note; // the greeting cue, with when they last talked
   if (t.game_homework) s.gameHomework = t.game_homework; // buttons for the end screen (06)
@@ -436,7 +489,7 @@ async function finishRemote(sess, reason) {
   await flushTurns(sess, { keepalive: true });
   try {
     log("save", `session ended (${reason}); updating memory…`);
-    const res = await api(`api/session/${sess.sessionId}/end`, { reason, steps_done: sess.stepsDone || [] },
+    const res = await api(`api/session/${sess.sessionId}/end`, { reason, steps_done: sess.stepsDone || [], steps_held: sess.stepsHeld || [] },
                           { keepalive: true });
     const body = await res.json().catch(() => ({}));
     log("save", `memory update: ${body.memory_status ?? res.status}`);
@@ -522,16 +575,22 @@ function handleServerMessage(msg, isResume) {
 }
 
 // The guard (13.5): next_step right after she asked him something in the same turn -- not yet.
-// Her transcript lags behind her audio (12.10: the "?" arrived after the call), so it also holds
-// when she has already spoken more than a short reaction (~2.5 s) in this turn: a reaction is
-// "נכון, כל הכבוד!" (~1.5 s); a question is longer. At most twice per step: a step never gets stuck.
-const REACTION_MAX_S = 2.5;
-function nextStepTooSoon() {
-  const herTurn = s.tutorLine?.textEl?.textContent || "";
+// Only a real question holds it: a long reaction is fine (13.10: holding those by their length made
+// her mumble). Her transcript lags behind her audio (12.10), so when she has already spoken in this
+// turn the page waits a moment for it to catch up before answering (the tool is blocking: she waits).
+// At most twice per step: a step never gets stuck.
+const TRANSCRIPT_CATCHUP_MS = 1200;
+function nextStepTooSoon(herLine) {
+  const herTurn = herLine?.textEl?.textContent || "";
   const heldHere = s.guardedStep === s.stepIndex ? (s.guardCount || 0) : 0;
   if (s.guardedStep !== s.stepIndex) s.guardCount = 0;
-  const spokeAlready = /[?؟]/.test(herTurn) || (s.turnAudioS || 0) > REACTION_MAX_S;
-  return spokeAlready && heldHere < 2;
+  return /[?؟]/.test(herTurn) && heldHere < 2;
+}
+
+// A held next_step call, kept for the caregiver page (13.10: where she tried to move on early).
+function holdStep(reason) {
+  s.stepsHeld = s.stepsHeld || [];
+  s.stepsHeld.push({ step: s.stepIndex, reason, at_s: Math.round((performance.now() - s.startedAt) / 100) / 10 });
 }
 
 // Words that mean he is saying goodbye / wants to stop (Hebrew, plus common loanwords).
@@ -542,15 +601,26 @@ const GOODBYE_RE = /להתראות|ביי|bye|ciao|צ'?או|נתראה|יום ט
 // enforces it: a premature call is refused, and she's told to wait and call again. After a
 // silence nudge (he went quiet after her goodbye) the call is accepted.
 function handleToolCall(toolCall) {
+  const herLine = s.tutorLine; // her turn so far (he may start a new line while we wait)
+  const asksStep = (toolCall.functionCalls || []).some((fc) => fc.name === "next_step");
+  if (asksStep && (s.turnAudioS || 0) > 0) {
+    setTimeout(() => answerToolCall(toolCall, herLine), TRANSCRIPT_CATCHUP_MS);
+    return;
+  }
+  answerToolCall(toolCall, herLine);
+}
+
+function answerToolCall(toolCall, herLine) {
   const responses = [];
   for (const fc of toolCall.functionCalls || []) {
     let response = { ok: true };
-    if (fc.name === "next_step" && nextStepTooSoon()) {
+    if (fc.name === "next_step" && nextStepTooSoon(herLine)) {
       // The guard (13.5): she already asked him something in this turn -- the next step now would
       // be a second question in a row (12.10). Don't advance; she calls again after his answer.
       s.guardedStep = s.stepIndex;
       s.guardCount = (s.guardCount || 0) + 1;
       log("tool", `next_step held: she asked a question in this turn (step ${s.stepIndex + 1})`);
+      holdStep("question");
       responses.push({ id: fc.id, name: fc.name, response: { result:
         "Noted. You just asked him a question: stop talking now and wait for his answer. After his answer, " +
         "call next_step again." } });
@@ -560,9 +630,11 @@ function handleToolCall(toolCall) {
     if (fc.name === "next_step" && (s.answersInStep || 0) < needed && !GOODBYE_RE.test(s.lastUserText || "")) {
       // A talking step is a real short conversation (12.10): not before he has answered enough times.
       log("tool", `next_step held: ${s.answersInStep || 0} of ${needed} answers in this step`);
+      holdStep("answers");
+      // A concrete next action (13.10: after a vague "not yet" she stopped calling and drifted).
       responses.push({ id: fc.id, name: fc.name, response: { result:
-        "Not yet: this step is a short conversation. Talk with him about it a little more -- react to what he " +
-        "just said and follow up on his own words -- then call next_step again." } });
+        "Not yet -- stay on this topic. Now: react to what he just said and ask ONE follow-up question about " +
+        "his own words. After his answer, call next_step again." } });
       continue;
     }
     if (fc.name === "next_step") {
@@ -574,6 +646,7 @@ function handleToolCall(toolCall) {
                          at_s: Math.round((performance.now() - s.startedAt) / 100) / 10 });
       s.stepIndex += 1;
       s.answersInStep = 0;
+      showCards();
       const steps = s.agenda?.steps || [];
       const left = steps.length - s.stepIndex;
       const longEnough = performance.now() - s.startedAt >= MIN_SESSION_MS;

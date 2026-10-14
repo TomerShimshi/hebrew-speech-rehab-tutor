@@ -19,7 +19,7 @@ from functools import lru_cache
 import yaml
 from google.genai import types
 
-from app import check_in_set, word_bank
+from app import check_in_set, sequencing, word_bank
 from app.agent.memory_update import format_memory
 from app.agent.research import personal_terms, research_technique, search_available
 from app.agent.plan_tools import BUDGET_MINUTES, MIN_ACCEPT, PlanDraft, build_plan_tools
@@ -188,6 +188,31 @@ def step_minutes(store: SessionStore, pid: str) -> dict[str, float]:
     return out
 
 
+def sequencing_history(store: SessionStore, pid: str) -> tuple[list[dict], str]:
+    """His recent sequencing results (14), newest first, and the next plan's task. Every regular
+    session has one (Tomer, 13.10: more practice, and a fuller progress chart); the two kinds take
+    turns -- the other one than his last task, so each is measured the same way every other time."""
+    results, last_task = [], None
+    for s in store.list_sessions(pid, 12):
+        if s.get("status") != ENDED or (s.get("class_plan") or {}).get("plan_type") != "regular":
+            continue
+        seq = s.get("sequencing") or {}
+        if last_task is None and seq.get("task"):
+            last_task = seq["task"]
+        if seq.get("status") == "done":
+            results.append(seq)
+    return results[:5], "retell" if last_task == "scrambled" else "scrambled"
+
+
+def render_sequencing(results: list[dict], recommended: int, task: str) -> str:
+    lines = [f"- {r.get('task')}: {r.get('title')}, {r.get('events')} events -> {r.get('order_pct')}% in order, "
+             f"{r.get('events_included')}/{r.get('events')} included{', with help' if r.get('needed_help') else ''}"
+             for r in results] or ["(no sequencing tasks yet)"]
+    lines.append(f"Recommended size of the next task: {recommended} events.")
+    lines.append(f"REQUIRED in every plan. This time: task={task} (the two kinds take turns).")
+    return "\n".join(lines)
+
+
 def pace_label(rows: list[dict]) -> str:
     if not rows:
         return "typical"
@@ -288,7 +313,7 @@ def render_check_in_set(current: dict | None) -> str:
 def build_context(memory_raw: dict, recent_plans: list[dict], profile_text: str, today: dt.date,
                   games_text: str = "(no games account linked)", notes_text: str = "(none yet)",
                   caregiver_notes: str = "", check_in: dict | None = None,
-                  pace: list[dict] | None = None) -> str:
+                  pace: list[dict] | None = None, sequencing_text: str = "(no sequencing tasks yet)") -> str:
     memory = MemoryDoc(**memory_raw)
     due = word_bank.due_words(memory.word_bank, today)
     bank = ", ".join(
@@ -311,6 +336,7 @@ def build_context(memory_raw: dict, recent_plans: list[dict], profile_text: str,
         f"{render_check_in_set(check_in)}\n\n"
         f"# RECENT SESSIONS (oldest first)\n{recent}\n\n"
         f"# HIS PACE (newest first; size the plan to fill ~9 minutes at this pace)\n{render_pace(pace or [])}\n\n"
+        f"# HIS SEQUENCING (telling things in order; newest first)\n{sequencing_text}\n\n"
         f"# RECENT PLANS' GOALS (newest first)\n{_recent_plans_text(recent_plans)}\n\n"
         f"# GAMES (the Simon games app; trends computed from his real data)\n{games_text}\n\n"
         f"# RESEARCH NOTES (earlier findings from professional sources, newest first)\n{notes_text}\n\n"
@@ -379,7 +405,10 @@ def build_next_plan(
         known = grounding_text(store, pid, memory_raw, profile_text, caregiver_notes)
         current_set = store.get_check_in_set(pid)
         recent_plans = store.recent_session_plans(pid, 5)
-        context_args = dict(games_text=render_games_for_plan(games),
+        seq_results, seq_task = sequencing_history(store, pid)
+        seq_events = sequencing.recommended_events(seq_results)
+        context_args = dict(sequencing_text=render_sequencing(seq_results, seq_events, seq_task),
+                            games_text=render_games_for_plan(games),
                             notes_text=render_notes(store.recent_technique_notes(pid, 3)),
                             caregiver_notes=caregiver_notes, pace=speaking_pace(store, pid))
         if check_in_set.needs_new_set(current_set, today):
@@ -407,7 +436,8 @@ def build_next_plan(
         tools = build_plan_tools(
             draft, check_practice=practice_checker(known, check_in_set.untreated_targets(current_set)),
             his_games={gid for gid, g in his_games.items() if g.route},
-            set_names={i["target"] for i in (current_set or {}).get("items") or []})
+            set_names={i["target"] for i in (current_set or {}).get("items") or []},
+            seq_events=seq_events, seq_task=seq_task)
         run = run_tool_loop(client, _models(settings), load_prompt()["system"], context, tools,
                             max_rounds=PLAN_MAX_ROUNDS, generate_fn=generate_fn)
         if not draft.finished:

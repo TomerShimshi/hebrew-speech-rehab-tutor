@@ -180,7 +180,7 @@ function namesGameLine(s) {
 }
 
 // Steps mode (13): how far through the agenda the session got, and what she reported.
-const STEP_KIND = { opening: "פתיחה", conversation: "שיחה", names_game: "משחק השמות", practice: "תרגול",
+const STEP_KIND = { sequencing: "סיפור לפי סדר", opening: "פתיחה", conversation: "שיחה", names_game: "משחק השמות", practice: "תרגול",
                     activity: "פעילות", games_activity: "פעילות מהמשחקים", reserve: "רזרבה",
                     thread: "נושא לשיחה" };
 const stepName = (a) => `${STEP_KIND[a.kind] || a.kind}${a.label ? ` ${a.label}` : ""}`;
@@ -207,7 +207,17 @@ function stepsLine(s) {
     s.agenda_after ? el("details", { class: "step" }, el("summary", { text: "אחרי השלבים: שאלת המשך, שוב ושוב עד הודעת הסיום" }),
                         el("p", { class: "muted kv", dir: "ltr", text: s.agenda_after })) : null,
     ...extra.map((d) => el("p", { class: "muted kv", dir: "ltr",
-      text: `${Math.round(d.at_s / 6) / 10} min · ${d.done}${d.how_it_went ? ` — ${d.how_it_went}` : ""}` })));
+      text: `${Math.round(d.at_s / 6) / 10} min · ${d.done}${d.how_it_went ? ` — ${d.how_it_went}` : ""}` })),
+    heldLine(s));
+}
+
+// Where she tried to move on and the app held her (13.10): after a question, or too few answers.
+const HELD_WHY = { question: "אחרי ששאלה שאלה", answers: "לפני שענה מספיק" };
+function heldLine(s) {
+  const held = s.steps_held || [];
+  if (!held.length) return null;
+  return p("ניסתה לעבור שלב מוקדם (נעצרה): " + held.map((h) =>
+    `שלב ${h.step + 1}, ${HELD_WHY[h.reason] || h.reason}, דקה ${Math.round(h.at_s / 6) / 10}`).join(" · "), "muted kv");
 }
 
 // The steps the next session would run (13), shown under the next lesson.
@@ -219,6 +229,18 @@ function nextSteps(plan) {
     ...plan.steps.map((a, i) => stepItem(a, i)),
     el("details", { class: "step" }, el("summary", { text: "אחרי השלבים: שאלת המשך, שוב ושוב עד הודעת הסיום" }),
        el("p", { class: "muted kv", dir: "ltr", text: plan.steps_after || "" })));
+}
+
+// Telling things in order (14): the task and its score.
+const SEQ_TASK = { scrambled: "מעורבב", retell: "שחזור סיפור" };
+function sequencingLine(s) {
+  const q = s.sequencing;
+  if (!q) return null;
+  const head = `סיפור לפי סדר (${SEQ_TASK[q.task] || q.task}, ${q.events} אירועים${q.title ? `, ${q.title}` : ""}): `;
+  if (q.status === "skipped") return p(`${head}דולג${q.note ? ` (${q.note})` : ""}`, "kv muted");
+  if (q.status !== "done") return p(`${head}לא דווח`, "kv muted");
+  return p(`${head}${q.order_pct}% בסדר הנכון · ${q.events_included} מתוך ${q.events} אירועים · ` +
+           `${q.needed_help ? "עם עזרה" : "בלי עזרה"}${q.low_confidence ? " · תמלול לא בטוח" : ""}`, "kv");
 }
 
 // Names he went for on his own in free talk (12): found / couldn't find.
@@ -324,6 +346,7 @@ function renderSessions(sessions) {
       s.difficulties?.length ? p(`קשיים: ${s.difficulties.join(" · ")}`) : null,
       namesGameLine(s),
       ownNamesLine(s),
+      sequencingLine(s),
       stepsLine(s),
       voiceLine(s),
       el("div", { class: "cg-actions" }, button, promptButton, recordingButton(s), processButton),
@@ -800,6 +823,13 @@ function renderProgress(data) {
       p("בכל שיחה יש רק 3–5 פריטי בדיקה, ולכן כל נקודה קופצת. מה שחשוב הוא המגמה לאורך זמן. " +
         "אם \"תורגלו\" עולה יותר מ\"חדשות\", התרגול עצמו עוזר; אם שתיהן עולות, השליפה משתפרת בכלל.", "muted kv"));
   }
+  const withSeq = data.points.filter((pt) => pt.sequencing !== null && pt.sequencing !== undefined);
+  if (withSeq.length) {
+    out.push(el("h3", { text: "סיפור לפי סדר: כמה מהסיפור הוא סיפר בסדר הנכון" }),
+      lineChart(withSeq, [{ key: "sequencing", color: COLORS.treated }]),
+      p("משימות כמו אצל הקלינאית: אירועים מעורבבים שהוא מסדר, או סיפור קצר שהוא מספר מחדש. " +
+        "המשימה גדלה (עד 6 אירועים) כשהוא מצליח, וקטנה כשקשה לו.", "muted kv"));
+  }
   const withOwn = data.points.filter((pt) => pt.self_found || pt.not_found);
   if (withOwn.length) {
     const top = Math.max(2, ...withOwn.map((pt) => Math.max(pt.self_found, pt.not_found)));
@@ -878,6 +908,7 @@ function buildExport(n, t = (s) => s, translated = false) {
         ? el("p", { dir: "auto", text: `משחק השמות: ${s.probe_results.map((r) => `${RESULT[r.result] || "?"} ${r.word}`).join("  ")}  (✓${st.uncued} ~${st.cued} ✗${st.failed})` })
         : null,
       ownNamesLine(s),
+      sequencingLine(s),
     ));
   }
 
@@ -886,6 +917,16 @@ function buildExport(n, t = (s) => s, translated = false) {
     .filter(([k]) => sections[k]?.length);
   if (obs.length) {
     out.push(el("h2", { text: "תצפיות" }), ...obs.map(([k, title]) => el("div", {}, el("h3", { text: title }), list(sections[k]))));
+  }
+
+  const seqs = sessions.filter((s) => s.sequencing?.status === "done");
+  if (seqs.length) {
+    out.push(el("h2", { text: "סיפור לפי סדר" }), el("table", {},
+      el("thead", {}, el("tr", {}, ["תאריך", "משימה", "אירועים", "בסדר הנכון", "עזרה"].map((h) => el("th", { text: h })))),
+      el("tbody", {}, seqs.slice().reverse().map((s) => el("tr", {},
+        [when(s.started_at, false), `${SEQ_TASK[s.sequencing.task] || s.sequencing.task} · ${s.sequencing.title || ""}`,
+         `${s.sequencing.events_included}/${s.sequencing.events}`, `${s.sequencing.order_pct}%`,
+         s.sequencing.needed_help ? "כן" : "לא"].map((v) => el("td", { dir: "auto", text: String(v) })))))));
   }
 
   const own = sessions.flatMap((s) => s.own_names || []);

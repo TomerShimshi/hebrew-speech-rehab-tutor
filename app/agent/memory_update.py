@@ -14,7 +14,8 @@ from functools import lru_cache
 import yaml
 from google.genai import types
 
-from app import check_in_set
+from app import check_in_set, sequencing
+from app.steps import SequencingStep
 from app.agent.memory_tools import MemoryDraft, build_memory_tools
 from app.agent.runner import run_tool_loop
 from app.class_plan import render_plan_full
@@ -74,6 +75,22 @@ def _recent_summaries_text(recent: list[dict]) -> str:
     if not recent:
         return "(no previous sessions)"
     return "\n".join(f"- {r.get('date')}: mood {r.get('mood')}; {r.get('summary')}" for r in recent)
+
+
+def sequencing_result(plan, reported: dict | None) -> dict | None:
+    """The session's sequencing result (14): the task, and the score computed by code from the
+    order the agent heard -- or skipped / not reported."""
+    step = next((s for s in (plan.steps if plan else []) if isinstance(s, SequencingStep)), None)
+    if step is None:
+        return None
+    base = {"task": step.task, "title": step.title, "events": len(step.events)}
+    if not reported:
+        return {**base, "status": "not_reported"}
+    if reported.get("skipped"):
+        return {**base, "status": "skipped", "note": reported.get("note", "")}
+    return {**base, "status": "done", **sequencing.score(reported["told_order"], len(step.events)),
+            "told_order": reported["told_order"], "needed_help": reported["needed_help"],
+            "low_confidence": reported["low_confidence"], "note": reported.get("note", "")}
 
 
 def run_memory_update(
@@ -139,6 +156,14 @@ def run_memory_update(
             max_rounds=settings.memory_max_tool_rounds, generate_fn=generate_fn,
         )
 
+        # The sequencing task must be reported (13.10: the agent skipped it, so no score): one
+        # short extra round with only that tool when the plan had one and it's missing.
+        if plan and any(isinstance(s, SequencingStep) for s in plan.steps) and draft.sequencing is None:
+            seq_tool = [t for t in build_memory_tools(draft) if t.name == "record_sequencing"]
+            run_tool_loop(client, models, prompts["tool_phase"] + "\n\nYOU MISSED ONE: TODAY'S PLAN had a "
+                          "sequencing task and you didn't record it. Call record_sequencing now (skipped=true if "
+                          "she didn't run it).", context, seq_tool, max_rounds=2, generate_fn=generate_fn)
+
         # ---- phase 2: consolidation -------------------------------------------------
         summary_text = draft.summary.summary if draft.summary else "(no summary saved)"
         updated = MemoryDoc(sections=draft.sections, word_bank=draft.word_bank)
@@ -184,6 +209,7 @@ def run_memory_update(
             "probe_results": draft.probe_results,
             "own_names": draft.own_names,  # names he found / couldn't find in free talk (12)
             "names_game": draft.names_game,
+            "sequencing": sequencing_result(plan, draft.sequencing),  # telling things in order (14)
             "memory_error": None,
             "memory_model": result.model,
             "memory_attempts": run.attempts + result.attempts,

@@ -35,8 +35,14 @@ def a_plan(*, steps=None, goal="name_retrieval", **over) -> ClassPlan:
     return ClassPlan(**fields)
 
 
-def build_calls(*, goal="name_retrieval", names=("כנרת", "טבריה"), game=False, extra=(), finish=True):
-    """The tool calls of a typical, complete plan (~9.6 minutes with the default step lengths)."""
+SEQUENCE = {"task": "scrambled", "title": "buying a gift",
+            "events": ["הוא יצא מהבית", "הוא נכנס לחנות", "הוא בחר מתנה", "הוא שילם בקופה"]}
+
+
+def build_calls(*, goal="name_retrieval", names=("כנרת", "טבריה"), game=False, extra=(), finish=True,
+                sequencing=True):
+    """The tool calls of a typical, complete plan (~12 minutes with the default step lengths),
+    with a sequencing task (14) -- required while he has no sequencing history."""
     calls = [("set_goal", {"type": goal, "description": "Names of places he loves."}),
              ("set_opening", {"recall": "בפעם הקודמת סיפרת לי על הגליל.", "opener": "איך אתה מרגיש היום?"})]
     if game:
@@ -47,6 +53,7 @@ def build_calls(*, goal="name_retrieval", names=("כנרת", "טבריה"), game
               ("add_thread", thread("music", "איזו מוזיקה אתה אוהב?")),
               ("add_thread", thread("his town", "מה אתה הכי אוהב בשכונה שלך?")),
               ("add_thread", thread("cooking", "מה אתה אוהב לבשל?")),
+              *([("add_sequencing", SEQUENCE)] if sequencing else []),
               *extra,
               ("set_closing", {"homework": "Think of a place.", "fatigue_fallback": "His garden.", "avoid": []})]
     if finish:

@@ -238,7 +238,9 @@ def start_session(
         "names_game": built.names_game,  # today's plan has a names game (12)
         # steps mode (13): the page hands her the next step after each next_step call
         "agenda": {"steps": [s["text"] for s in built.steps], "kinds": [s["kind"] for s in built.steps],
-                   "min_answers": [min_answers(s["kind"]) for s in built.steps], "after": built.after_steps},
+                   "min_answers": [min_answers(s["kind"]) for s in built.steps],
+                   "cards": [s.get("cards") for s in built.steps],  # the scrambled game's cards (14)
+                   "after": built.after_steps},
         # buttons for the end screen: the game homework the tutor will suggest
         "game_homework": homework_buttons(plan, patient_id_for(user), settings),
         "voice": {"tap_to_talk": voice.tap_to_talk, "noise_level": voice.noise_level,
@@ -305,8 +307,9 @@ def end_session(
     pid = patient_id_for(user)
     _own_active_session(store, settings, user, session_id)
     store.end_session(pid, session_id, body.reason)
-    if body.steps_done:  # steps mode (13): what she reported finished, in order
-        store.update_session(pid, session_id, {"steps_done": [s.model_dump() for s in body.steps_done]})
+    if body.steps_done or body.steps_held:  # what she reported finished, in order; and the held calls
+        store.update_session(pid, session_id, {"steps_done": [s.model_dump() for s in body.steps_done],
+                                               "steps_held": [h.model_dump() for h in body.steps_held]})
     # Update the tutor's memory now, inside this request (Cloud Run throttles CPU after the
     # response). The browser doesn't wait: it sent this with keepalive and moved on.
     # Failures are recorded and retried by the hourly sweep.

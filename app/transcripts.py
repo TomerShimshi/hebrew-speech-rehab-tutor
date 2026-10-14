@@ -45,9 +45,17 @@ class StepDone(BaseModel):
     at_s: float = Field(default=0, ge=0)
 
 
+class StepHeld(BaseModel):
+    """A next_step call the page held back (13.5): which step, why, when."""
+    step: int = Field(default=0, ge=0, le=100)
+    reason: str = Field(default="", max_length=40)  # "question" | "answers"
+    at_s: float = Field(default=0, ge=0)
+
+
 class EndRequest(BaseModel):
     reason: EndReason = EndReason.end_button
     steps_done: list[StepDone] = Field(default=[], max_length=40)  # steps mode (13)
+    steps_held: list[StepHeld] = Field(default=[], max_length=60)
 
 
 def turn_doc_id(seq: int) -> str:

@@ -59,7 +59,8 @@ class Translations(BaseModel):
 SESSION_FIELDS = ("id", "status", "started_at", "ended_at", "end_reason", "turn_count", "prompt_version",
                   "summary", "topics", "mood", "highlights", "difficulties", "probe_results",
                   "own_names", "names_game",  # names found / missed in free talk; the names game (12)
-                  "agenda", "agenda_after", "steps_done",  # steps mode (13): the steps it ran (exact texts), and her reports
+                  "sequencing",  # telling things in order (14): the task and its score
+                  "agenda", "agenda_after", "steps_done", "steps_held",  # steps mode (13): the steps it ran (exact texts), and her reports
                   "memory_status", "memory_error", "plan_status", "plan_error",
                   "memory_model", "plan_model",  # which model did the work (09)
                   "voice_used", "voice_decision",  # the settings it ran with, and the automatic decision after it
@@ -157,13 +158,16 @@ def progress_series(sessions: list[dict], word_bank: dict) -> dict:
     for s in reversed(sessions):  # oldest first, for the x-axis
         results = s.get("probe_results") or []
         own = s.get("own_names") or []  # names in free talk (12), their own series
+        seq = s.get("sequencing") or {}  # telling things in order (14), its own series
+        seq_pct = seq.get("order_pct") if seq.get("status") == "done" else None
         mood = MOOD_SCORE.get(s.get("mood") or "")
-        if not results and not own and mood is None:
+        if not results and not own and mood is None and seq_pct is None:
             continue
         points.append({"date": s.get("started_at"), "treated": _own_share(results, "treated"),
                        "untreated": _own_share(results, "untreated"), "items": len(results), "mood": mood,
                        "self_found": sum(o.get("result") == "self_found" for o in own),
-                       "not_found": sum(o.get("result") == "not_found" for o in own)})
+                       "not_found": sum(o.get("result") == "not_found" for o in own),
+                       "sequencing": seq_pct, "sequencing_task": seq.get("task") if seq_pct is not None else None})
     with_checkins = [p for p in points if p["items"]]
     recent, before = with_checkins[-5:], with_checkins[-10:-5]
     words = list((word_bank or {}).values())

@@ -35,6 +35,7 @@ class MemoryDraft:
     # names he found / couldn't find in free talk (12), for the session's caregiver view
     own_names: list[dict] = field(default_factory=list)
     names_game: dict | None = None  # {status, note} (12)
+    sequencing: dict | None = None  # {told_order, needed_help, low_confidence, skipped, note} (14)
 
 
 # What report_tutor_issue may report (8.5). Saved as a low-severity "tutor_issue" flag.
@@ -111,6 +112,15 @@ def build_memory_tools(draft: MemoryDraft) -> list[Tool]:
             })
         return {"ok": True, "next_due": stats.next_due}
 
+    def record_sequencing(args: dict) -> dict:
+        told = args.get("told_order") or []
+        if not isinstance(told, list) or not all(isinstance(t, (int, float)) for t in told):
+            raise ValueError("told_order is a list of the events' numbers, e.g. [1, 3, 2, 4]")
+        draft.sequencing = {"told_order": [int(t) for t in told], "needed_help": bool(args.get("needed_help")),
+                            "low_confidence": bool(args.get("low_confidence")), "skipped": bool(args.get("skipped")),
+                            "note": str(args.get("note", ""))[:300]}
+        return {"ok": True}
+
     def record_names_game(args: dict) -> dict:
         status = args.get("status")
         if status not in NAMES_GAME_STATUSES:
@@ -176,6 +186,27 @@ def build_memory_tools(draft: MemoryDraft) -> list[Tool]:
                 "required": ["word", "result", "asr_confidence"],
             },
             record_word_result,
+        ),
+        Tool(
+            "record_sequencing",
+            "Record the SEQUENCING task of TODAY'S PLAN (only if the plan has one): the order he told the events in. "
+            "Call once.",
+            {
+                "type": "object",
+                "properties": {
+                    "told_order": {"type": "array", "items": {"type": "integer"}, "description": (
+                        "The events' numbers (as numbered in TODAY'S PLAN, the correct order) in the order HE told "
+                        "them, matched by meaning (the transcript mishears); events he left out are absent. His "
+                        "first full telling, before her help.")},
+                    "needed_help": {"type": "boolean", "description": "true if she had to help with the order."},
+                    "low_confidence": {"type": "boolean", "description": (
+                        "true if the two transcript versions disagree in a way that changes the order.")},
+                    "skipped": {"type": "boolean", "description": "true if she didn't run it (e.g. he was tired)."},
+                    "note": {"type": "string", "description": "ENGLISH, one short sentence: how it went."},
+                },
+                "required": ["told_order"],
+            },
+            record_sequencing,
         ),
         Tool(
             "record_names_game",

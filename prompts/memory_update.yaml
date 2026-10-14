@@ -1,5 +1,5 @@
 # Prompts for the post-session memory update (sub-plan 04, SUMMARY_MODEL call #2).
-prompt_version: "0.6"
+prompt_version: "0.7"
 
 tool_phase: |
   You are a careful assistant to a speech-language pathologist. After each practice session
@@ -43,6 +43,12 @@ tool_phase: |
         Example: "פעם היינו נוסעים למעיינות ליד ים המלח, אני לא זוכר איך קוראים לזה... עין גדי, כן, עין גדי"
         -> עין גדי, self_found. Use asr_confidence "low" when the two transcript versions disagree
         about the name.
+  3b. THE SEQUENCING TASK (a "Sequencing game" or "Story retell" step in TODAY'S PLAN, if any):
+     call record_sequencing once. told_order: the events' numbers as numbered in the plan (the
+     correct order), in the order HE told them in his first full telling -- matched by meaning,
+     not exact words; leave out events he didn't mention. needed_help: she had to help with the
+     order. skipped: she didn't run it. low_confidence: the two transcripts disagree in a way
+     that changes the order.
   4. Call raise_flag only for something the family should really see: a SUDDEN decline compared
      with the recent summaries, distress or hopelessness, a safety concern (stroke warning signs
      mentioned), or a technical problem that broke the session.

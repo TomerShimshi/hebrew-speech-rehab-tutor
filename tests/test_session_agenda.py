@@ -123,9 +123,11 @@ def test_every_session_runs_as_steps(env):
     assert [a["text"] for a in saved["agenda"]] == body["agenda"]["steps"] and saved["agenda_after"] == FOLLOW_UP
     # the steps she reported are saved with the session at the end
     env.client.post(f"/api/session/{sid}/end", headers=auth(), json={"reason": "tutor_goodbye", "steps_done": [
-        {"done": "Opening", "how_it_went": "He feels fine.", "at_s": 40.5}]})
+        {"done": "Opening", "how_it_went": "He feels fine.", "at_s": 40.5}],
+        "steps_held": [{"step": 1, "reason": "answers", "at_s": 70}]})
     assert env.store.get_session(DAD, sid)["steps_done"] == [
         {"done": "Opening", "how_it_went": "He feels fine.", "at_s": 40.5}]
+    assert env.store.get_session(DAD, sid)["steps_held"] == [{"step": 1, "reason": "answers", "at_s": 70}]
     # the caregiver page shows the next session's steps (exact texts), and the same prompt
     nxt = env.client.get(f"/api/caregiver/{DAD}/overview", headers=auth("tok-tomer")).json()["next_plan"]
     assert nxt["steps"][0]["text"].startswith("Opening") and nxt["steps_after"] == FOLLOW_UP
@@ -158,4 +160,4 @@ def test_the_page_gets_how_many_answers_each_step_needs(env):
     env.store.save_memory(DAD, "s0", {"memory_prompt": "He loves the Galilee."}, None)
     env.store.save_next_plan(DAD, "s0", PLAN.model_dump(mode="json"))
     body = env.client.post("/api/session/start", headers=auth()).json()
-    assert body["agenda"]["min_answers"] == [1, 2, 2, 2, 3]  # opening, practice, practice, activity, thread
+    assert body["agenda"]["min_answers"] == [2, 2, 2, 2, 3]  # opening, practice, practice, activity, thread

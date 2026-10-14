@@ -66,7 +66,8 @@ def prepare_for_session(plan: ClassPlan | None, current_set: dict | None) -> Cla
 def session_steps(plan: ClassPlan | None) -> list[dict]:
     """The steps the page hands out: kind, a short label, and the exact instruction."""
     steps = plan.steps if plan else [OpeningStep()]
-    out = [{"kind": s.kind, "label": s.label(), "text": s.instruction()} for s in steps]
+    out = [{"kind": s.kind, "label": s.label(), "text": s.instruction(),
+            **({"cards": s.cards()} if hasattr(s, "cards") and s.cards() else {})} for s in steps]
     if plan is None:
         out.append({"kind": "conversation", "label": "", "text": FREE_CONVERSATION})
     return out

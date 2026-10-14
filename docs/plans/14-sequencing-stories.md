@@ -1,6 +1,6 @@
 # Sub-plan 14: Telling things in order (sequencing and story retell)
 
-Part of the [master design](00-master-design.md). After [13.5](13.5-tool-based-planner.md), before [15](15-names-goodbyes-and-excluded-sessions.md). (Was 13.5 until 2026-10-12.) Requested by Tomer (2026-10-12). Reviewed and updated after 13.5 (2026-10-12).
+Part of the [master design](00-master-design.md). After [13.5](13.5-tool-based-planner.md), before [15](15-new-accounts.md). (Was 13.5 until 2026-10-12.) Requested by Tomer (2026-10-12). Reviewed and updated after 13.5 (2026-10-12).
 
 ## Why
 - **The patient's speech therapist works on sequencing a lot.** She shows him a set of pictures, and he tells their story in chronological order. Practicing the same skill at home supports her work.
@@ -17,7 +17,7 @@ Part of the [master design](00-master-design.md). After [13.5](13.5-tool-based-p
 - **Score by story parts:** setting, what started it, what was tried, the outcome, the reaction ("story grammar", [Richardson & Hudspeth](https://aphasiology.pitt.edu/2593)).
 
 ## Goal
-A sequencing task regularly (at least every other session, more when his results call for it), at his level, scored by code, with its own progress series. Voice only in this round.
+A sequencing task in every regular session (changed 13.10, see below), at his level, scored by code, with its own progress series. Voice only in this round.
 
 ## Decisions (with Tomer, 2026-10-12)
 - **Two task types, both with one right order** (so they can be scored deterministically, and they're the closest to his therapist's work):
@@ -28,10 +28,11 @@ A sequencing task regularly (at least every other session, more when his results
   | `retell` | She tells a **new** short story (4–6 events: a setting, a problem, what was done, the outcome). He retells it in order. |
 
   "Procedure" and "a story from his life in order" stay **activities** (`ActivityStep`), as today: they have no fixed order to score. A story-parts score for them can come later.
-- **How often: the plan builder decides, with a minimum enforced by code.** Not the tutor (she doesn't see his progress over time), and not in every session (it would repeat, and take ~2–3 of the 9 minutes every time).
-  - If none of his last 2 plans had a sequencing step, `finish` refuses a regular plan without one.
-  - Beyond that, the builder chooses from his results (HIS SEQUENCING, below): low scores → more often; high scores → less often, or harder.
-  - In the session, she may skip it if he seems tired (like the names game). The memory agent records it; the next plan counts it as a session without sequencing.
+- **How often: every regular session, enforced by code** (changed 13.10; first built as "at least every other session, the builder decides").
+  - Why: the dose reviews lean toward more practice helping, with diminishing returns ([Dose effects, 2022](https://pubmed.ncbi.nlm.nih.gov/33164590/)); it is ~2.5 of the 9 minutes; every session gives a point on the progress chart; the size already adapts to his results. In a test session where it wasn't required, the builder left it out.
+  - **The two kinds take turns:** the next plan gets the other kind than his last task (scrambled first). Each kind is then elicited the same way every other session, which the discourse literature asks for when tracking change.
+  - `add_sequencing` refuses the other kind; `finish` refuses a regular plan without one.
+  - In the session, she may skip it if he seems tired (like the names game). The memory agent records it; the turn still passes to the other kind.
 
 ## Design
 
@@ -78,7 +79,7 @@ class SequencingStep(Step):
   - the order he told the events in, as the events' numbers (e.g. `[1, 3, 2, 4, 5]`; events he left out are simply absent);
   - whether he needed her help;
   - `skipped` (with why) if she didn't run it.
-- **Matching is by meaning, not word for word:** his telling goes through Gemini's transcription, which mishears (12). The result is marked low-confidence when the two transcripts disagree in a way that changes the order. The recording-based recheck of plan 15 can be applied here later.
+- **Matching is by meaning, not word for word:** his telling goes through Gemini's transcription, which mishears (12). The result is marked low-confidence when the two transcripts disagree in a way that changes the order. The recording-based recheck of plan 16 can be applied here later.
 - **Code computes the score, not the model:**
   - the share of neighbouring pairs he told in the right order: `[1,3,2,4,5]` → 1→3 ✓, 3→2 ✗, 2→4 ✓, 4→5 ✓ = 3 of 4 = 75%;
   - how many events he included;
@@ -90,7 +91,7 @@ class SequencingStep(Step):
 - **Progress:** a new series, the share in the right order over time (by type), and the recommended number of events.
 - **The therapist export:** the tasks and their scores. Useful to his speech therapist, since it's her kind of task.
 
-## Later: pictures like the therapist's → [plan 16](16-picture-sequences.md)
+## Later: pictures like the therapist's → [plan 17](17-picture-sequences.md)
 Not in this round. Decide after seeing how the voice-only version goes.
 
 ## Files
@@ -98,7 +99,7 @@ Not in this round. Decide after seeing how the voice-only version goes.
 |---|---|
 | `app/steps.py` | `SequencingStep`: content fields, `RULES`, `GUIDE`, times, `MIN_ANSWERS`. |
 | `app/sequencing.py` (new) | Scrambling (never the original, the reverse or near them); the order score; the recommended number of events from recent results. |
-| `app/agent/plan_tools.py` | `add_sequencing` (generated from the class) with its checks; `finish`'s minimum-frequency check. |
+| `app/agent/plan_tools.py` | `add_sequencing` (generated from the class) with its checks; `finish`'s every-session check; the kinds taking turns. |
 | `app/agent/next_class.py`, `prompts/next_class.yaml` | HIS SEQUENCING in the context; a line on when to choose it. |
 | `app/agent/memory_tools.py`, `app/agent/memory_update.py`, `prompts/memory_update.yaml` | `record_sequencing`; the score computed and saved on the session. |
 | `app/caregiver_api.py`, `static/caregiver.*` | The session line, the progress series, the export. |
@@ -109,7 +110,7 @@ Not in this round. Decide after seeing how the voice-only version goes.
 - **A live test on Tomer's account:** she says the events clearly and slowly in one turn, doesn't correct mid-way, helps with one question at a time, and then talks about it with him.
 
 ## Done when
-- [ ] Sequencing comes up at least every other session, and it holds a few minutes of real talk.
+- [ ] Sequencing comes up every session, the kinds taking turns, and it holds a few minutes of real talk.
 - [ ] Its score shows on the session, in progress, and in the therapist export.
 - [ ] `pytest` passes.
 
