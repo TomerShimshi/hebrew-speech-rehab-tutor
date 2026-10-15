@@ -1,6 +1,6 @@
-# Sub-plan 16: Hearing the names right, a clean goodbye, and leaving a conversation out
+# Sub-plan 17: Hearing the names right, a clean goodbye, and leaving a conversation out
 
-Part of the [master design](00-master-design.md). After [15.5](15.5-first-sessions-needs-check.md). (Was 13.5, then 14, then 15, until 2026-10-13.) Requested by Tomer (2026-10-11).
+Part of the [master design](00-master-design.md). After [16](16-practicing-every-area.md). (Was 13.5, then 14, then 15, then 16, until 2026-10-15.) Requested by Tomer (2026-10-11).
 
 > **Revisit after 13, 13.5 and 14 are done.** 13 changes how a session runs (steps, a record of what was done, and maybe an optional gate on `end_session`). Parts of this plan depend on it: the noise filter off during the names game needs 13's "current step"; the goodbye rules must fit 13's `end_session` (gated or not). Re-read and adjust this plan before building it.
 
@@ -86,4 +86,4 @@ Part of the [master design](00-master-design.md). After [15.5](15.5-first-sessio
 - [ ] `pytest` passes.
 
 ## Commit
-`Sub-plan 16: hearing the names right, a clean goodbye, and leaving a conversation out`
+`Sub-plan 17: hearing the names right, a clean goodbye, and leaving a conversation out`

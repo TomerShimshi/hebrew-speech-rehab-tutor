@@ -79,7 +79,7 @@ class SequencingStep(Step):
   - the order he told the events in, as the events' numbers (e.g. `[1, 3, 2, 4, 5]`; events he left out are simply absent);
   - whether he needed her help;
   - `skipped` (with why) if she didn't run it.
-- **Matching is by meaning, not word for word:** his telling goes through Gemini's transcription, which mishears (12). The result is marked low-confidence when the two transcripts disagree in a way that changes the order. The recording-based recheck of plan 16 can be applied here later.
+- **Matching is by meaning, not word for word:** his telling goes through Gemini's transcription, which mishears (12). The result is marked low-confidence when the two transcripts disagree in a way that changes the order. The recording-based recheck of plan 17 can be applied here later.
 - **Code computes the score, not the model:**
   - the share of neighbouring pairs he told in the right order: `[1,3,2,4,5]` → 1→3 ✓, 3→2 ✗, 2→4 ✓, 4→5 ✓ = 3 of 4 = 75%;
   - how many events he included;
@@ -91,7 +91,7 @@ class SequencingStep(Step):
 - **Progress:** a new series, the share in the right order over time (by type), and the recommended number of events.
 - **The therapist export:** the tasks and their scores. Useful to his speech therapist, since it's her kind of task.
 
-## Later: pictures like the therapist's → [plan 17](17-picture-sequences.md)
+## Later: pictures like the therapist's → [plan 18](18-picture-sequences.md)
 Not in this round. Decide after seeing how the voice-only version goes.
 
 ## Files
