@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 
 from app import word_bank
 from app.agent.runner import Tool
+from app.patient_profile import AREA_NAMES, LEVELS, MAX_ABOUT, MAX_ABOUT_CHARS, MAX_VOCABULARY, MAX_VOCABULARY_CHARS
 from app.schemas import (
     MAX_ITEM_CHARS,
     MAX_ITEMS_PER_SECTION,
@@ -20,6 +21,27 @@ from app.schemas import (
     WordSource,
     WordStats,
 )
+
+
+@dataclass
+class Inferring:
+    """What the app infers about him (15.5), starting from what it inferred before: his needs per
+    area and points for his therapist -- for every account; and, only without an uploaded profile
+    (`profile`), a few lines about him and his own names."""
+    about: list[str] = field(default_factory=list)
+    vocabulary: list[str] = field(default_factory=list)  # newest first
+    areas: dict[str, dict] = field(default_factory=dict)  # area -> {level, evidence, note, set_by, history, ...}
+    changed: set[str] = field(default_factory=set)  # areas recorded in this session
+    points: list[dict] = field(default_factory=list)  # for his therapist: {id, text, why, evidence, status, ...}
+    new_points: list[dict] = field(default_factory=list)  # added in this session
+    profile: bool = True  # False: he has an uploaded profile -- never inferred, never touched
+
+
+def add_vocabulary(inferring: Inferring, word: str) -> None:
+    """Newest first, no duplicates, capped: the oldest names drop off."""
+    word = " ".join(str(word).split())
+    if word and len(word) <= MAX_VOCABULARY_CHARS:
+        inferring.vocabulary = [word, *[w for w in inferring.vocabulary if w != word]][:MAX_VOCABULARY]
 
 
 @dataclass
@@ -36,6 +58,7 @@ class MemoryDraft:
     own_names: list[dict] = field(default_factory=list)
     names_game: dict | None = None  # {status, note} (12)
     sequencing: dict | None = None  # {told_order, needed_help, low_confidence, skipped, note} (14)
+    inferring: Inferring | None = None  # no uploaded profile (15.5); None = the tools aren't offered
 
 
 # What report_tutor_issue may report (8.5). Saved as a low-severity "tutor_issue" flag.
@@ -128,6 +151,73 @@ def build_memory_tools(draft: MemoryDraft) -> list[Tool]:
         draft.names_game = {"status": status, "note": str(args.get("note", ""))[:300]}
         return {"ok": True}
 
+    def record_needs(args: dict) -> dict:
+        area = args.get("area")
+        if area not in AREA_NAMES:
+            raise ValueError(f"area must be one of {list(AREA_NAMES)}")
+        evidence = [_norm(str(e))[:200] for e in (args.get("evidence") or []) if _norm(str(e))][:3]
+        note = _norm(str(args.get("note", "")))[:300]
+        if area == "goals":
+            if not note:
+                raise ValueError("for goals, the note says what he wants (in English)")
+            level = "noted"
+        else:
+            level = args.get("level")
+            if level not in LEVELS:
+                raise ValueError(f"level must be one of {list(LEVELS)}")
+            if not evidence:
+                level = "unclear"  # no quote, no level: never a guess
+        current = draft.inferring.areas.get(area) or {}
+        if current.get("set_by") == "family":
+            # The family's word wins: keep their level, add what the app heard as a note.
+            draft.inferring.areas[area] = {**current, "app_note": note, "app_evidence": evidence,
+                                           "app_level": level}
+        else:
+            draft.inferring.areas[area] = {**current, "level": level, "evidence": evidence, "note": note,
+                                           "set_by": "app", "app_level": level}
+        draft.inferring.changed.add(area)
+        return {"ok": True, "level": draft.inferring.areas[area].get("level")}
+
+    def suggest_for_therapist(args: dict) -> dict:
+        text_ = _norm(str(args.get("point", "")))[:300]
+        if not text_:
+            raise ValueError("point is required (HEBREW, one short sentence the family can raise)")
+        inf = draft.inferring
+        if any(p.get("text") == text_ for p in inf.points + inf.new_points):
+            raise ValueError("already on the list")
+        if len(inf.new_points) >= 2:
+            raise ValueError("at most two points per session: only what really matters")
+        inf.new_points.append({"text": text_, "why": _norm(str(args.get("why", "")))[:300],
+                               "evidence": [_norm(str(e))[:200] for e in (args.get("evidence") or []) if _norm(str(e))][:3],
+                               "status": "new"})
+        return {"ok": True}
+
+    def update_profile(args: dict) -> dict:
+        inf, field_, op = draft.inferring, args.get("field"), args.get("op")
+        item = _norm(str(args.get("item", "")))
+        if field_ not in ("about", "vocabulary") or op not in ("add", "remove"):
+            raise ValueError("field is about|vocabulary, op is add|remove")
+        if not item:
+            raise ValueError("item is required")
+        items = inf.about if field_ == "about" else inf.vocabulary
+        if op == "remove":
+            if item not in items:
+                raise ValueError("not in the profile: copy the item exactly")
+            items.remove(item)
+            return {"ok": True}
+        if field_ == "vocabulary":
+            if len(item) > MAX_VOCABULARY_CHARS or len(item.split()) > 4:
+                raise ValueError("a vocabulary item is ONE name or place, in Hebrew")
+            add_vocabulary(inf, item)
+            return {"ok": True, "vocabulary": len(inf.vocabulary)}
+        if len(item) > MAX_ABOUT_CHARS:
+            raise ValueError(f"too long (max {MAX_ABOUT_CHARS} characters): one short line")
+        if item not in inf.about:
+            if len(inf.about) >= MAX_ABOUT:
+                raise ValueError(f"the profile has {MAX_ABOUT} lines: remove or merge one first")
+            inf.about.append(item)
+        return {"ok": True, "about": len(inf.about)}
+
     def save_session_summary(args: dict) -> dict:
         draft.summary = SessionSummary(**args)
         return {"ok": True}
@@ -147,7 +237,66 @@ def build_memory_tools(draft: MemoryDraft) -> list[Tool]:
         return {"ok": True}
 
     str_list = {"type": "array", "items": {"type": "string"}}
-    return [
+    inferring_tools = [
+        Tool(
+            "record_needs",
+            "Record how one AREA of his speech went in THIS session, from the transcript: after a check step in "
+            "TODAY'S PLAN ('A short naming moment', ...); naming from the names game and practice; connected "
+            "speech from a sequencing task or an activity; 'conversation' from how he talked throughout. Not a "
+            "diagnosis: what you heard today. Call once per area this session showed; skip the others.",
+            {
+                "type": "object",
+                "properties": {
+                    "area": {"type": "string", "enum": list(AREA_NAMES)},
+                    "level": {"type": "string", "enum": list(LEVELS), "description": (
+                        "ok = no real difficulty; some_difficulty = some effort or errors; clear_difficulty = "
+                        "often hard; unclear = not enough heard. Not used for goals.")},
+                    "evidence": {**str_list, "description": "1-3 short quotes (HEBREW, exact) from the transcript. "
+                                                             "None -> the level is 'unclear'."},
+                    "note": {"type": "string", "description": (
+                        "ENGLISH, one short sentence: what you noticed (for goals: what he wants to do better).")},
+                },
+                "required": ["area", "note"],
+            },
+            record_needs,
+        ),
+        Tool(
+            "suggest_for_therapist",
+            "RARELY (most sessions: none): a point the family could raise with his speech therapist -- a "
+            "difficulty that keeps coming back over sessions (HIS NEEDS' history), a clear change, or something "
+            "the app can't practice. Not something already on the list (POINTS FOR HIS THERAPIST). At most two.",
+            {
+                "type": "object",
+                "properties": {
+                    "point": {"type": "string", "description": (
+                        "HEBREW, one short practical sentence for the family, e.g. 'כדאי לשאול אם לתרגל ...'.")},
+                    "why": {"type": "string", "description": "ENGLISH, one sentence: what you saw, over which sessions."},
+                    "evidence": {**str_list, "description": "1-3 short quotes (HEBREW, exact)."},
+                },
+                "required": ["point", "why"],
+            },
+            suggest_for_therapist,
+        ),
+        *([Tool(
+            "update_profile",
+            "HE HAS NO UPLOADED PROFILE: keep his inferred profile up to date from what HE said. about: a few "
+            "short lines (ENGLISH) -- age range if he said, what he does or did, family, where he lives, interests, "
+            "how he speaks. Only what he said; never guess. vocabulary: ONE name or place (HEBREW) he used or that "
+            "matters to him (people, towns, places, brands) -- it helps the transcription hear him right. Don't add "
+            "what's already there.",
+            {
+                "type": "object",
+                "properties": {
+                    "field": {"type": "string", "enum": ["about", "vocabulary"]},
+                    "op": {"type": "string", "enum": ["add", "remove"]},
+                    "item": {"type": "string", "description": "The line or the name (for remove: copied exactly)."},
+                },
+                "required": ["field", "op", "item"],
+            },
+            update_profile,
+        )] if draft.inferring.profile else []),
+    ] if draft.inferring is not None else []
+    return [*inferring_tools,
         Tool(
             "update_memory",
             "Add, replace or remove ONE short item in a section of the long-term memory about him. "

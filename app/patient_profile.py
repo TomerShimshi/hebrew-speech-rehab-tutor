@@ -54,3 +54,47 @@ def account_profile(store, pid: str) -> AccountProfile:
     doc = store.get_profile(pid) or {}
     text = (doc.get("text") or "").strip()
     return AccountProfile(text, doc.get("source", "") if text else "")
+
+
+# ---- the needs profile and the inferred profile (15.5) ---------------------------------------------
+LEVELS = ("ok", "some_difficulty", "clear_difficulty", "unclear")
+AREA_NAMES = {"conversation": "Conversation (fluency, word-finding in talk)", "naming": "Naming",
+              "repetition": "Repetition", "understanding": "Understanding",
+              "connected_speech": "Connected speech (explaining, telling in order)",
+              "clarity": "Speech clarity", "goals": "His goals"}
+PRACTICED = ("conversation", "naming", "connected_speech")  # what the app can practice today
+MAX_HISTORY = 30  # levels kept per area, one per session that showed it
+MAX_POINTS = 30  # points for his therapist kept (newest)
+MAX_ABOUT, MAX_ABOUT_CHARS = 8, 160
+MAX_VOCABULARY, MAX_VOCABULARY_CHARS = 40, 40
+
+
+def needs_lines(needs: dict | None) -> list[str]:
+    """One line per area: level (who set it) -- note. For the plan builder and the inferred profile."""
+    out = []
+    for area, name in AREA_NAMES.items():
+        a = ((needs or {}).get("areas") or {}).get(area)
+        if not a:
+            continue
+        if area == "goals":
+            out.append(f"{name}: {a.get('note', '')}".strip())
+            continue
+        by = " (set by the family)" if a.get("set_by") == "family" else ""
+        note = f" -- {a['note']}" if a.get("note") else ""
+        practiced = "" if area in PRACTICED else " [not practiced in the app yet]"
+        out.append(f"{name}: {a.get('level', 'unclear').replace('_', ' ')}{by}{note}{practiced}")
+    return out
+
+
+def render_inferred(about: list[str], vocabulary: list[str], needs: dict | None) -> str:
+    """The inferred profile's text, by code (never free-written): the same shape as an uploaded one,
+    so its Vocabulary line feeds the transcription the same way."""
+    lines = ["Inferred by the app from his conversations (not a diagnosis; only what he said and how it went):"]
+    lines += [f"- {a}" for a in about]
+    need = needs_lines(needs)
+    if need:
+        lines.append("What he needs (from the first sessions):")
+        lines += [f"- {n}" for n in need]
+    if vocabulary:
+        lines.append(f"- Vocabulary: {', '.join(vocabulary)}")
+    return "\n".join(lines) if len(lines) > 1 else ""

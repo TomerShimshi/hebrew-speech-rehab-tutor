@@ -1,0 +1,53 @@
+# The fixed plan for the FIRST session of an account WITHOUT an uploaded profile (sub-plan 15.5).
+# No LLM involved. The getting-to-know-you session of intro_plan.yaml, with a few small checks
+# spread inside it (never two in a row), like a speech therapist's first meeting -- never a test.
+# The memory agent records what it heard per area (record_needs) and infers his profile.
+# The rest of the checks come in the second session (intro_needs_2.yaml).
+plan_type: intro
+intro_part: 1
+primary_goal:
+  type: intro
+  description: >-
+    Get to know him as a person, warmly and without any feeling of a test: his people and
+    places, his work and interests -- and, lightly inside the talk, how naming, repeating and
+    talking go for him, and what he finds hardest when he talks with people.
+steps:
+  - kind: opening
+    opener: "נעים מאוד, אני כאן כדי לדבר ולתרגל איתך דיבור. איך אתה מרגיש היום?"
+  - kind: activity
+    instructions: >-
+      Ask him, one question at a time, to tell you about the people closest to him (ask for
+      their names, naturally: "איך קוראים לה?") and where he lives and where he grew up. Follow
+      up on what he says and let him talk. If a name doesn't come, help gently with a hint and
+      move on.
+    why: Seeds the memory with the names of his people and places.
+  - kind: check
+    area: naming
+    items:
+      - "משהו שפותחים איתו דלת = מפתח"
+      - "פרי צהוב וארוך שקולפים אותו = בננה"
+      - "מקום שקונים בו תרופות = בית מרקחת"
+      - "כלי שמודדים איתו את הזמן ושמים על היד = שעון"
+  - kind: thread
+    topic: his work and hobbies
+    question: "ספר לי, במה אתה עובד או עבדת, ומה אתה אוהב לעשות בזמן הפנוי?"
+    follow_ups: What he enjoyed most; a story from those years.
+  - kind: check
+    area: repetition
+    items:
+      - "שולחן"
+      - "כוס קפה חם"
+      - "אתמול בערב הלכנו לטייל ליד הים בנמל יפו"
+  - kind: thread
+    topic: a place he loves
+    question: "יש מקום בארץ שאתה במיוחד אוהב לבקר בו?"
+    follow_ups: What he does there; who he goes with.
+  - kind: check
+    area: goals
+homework: >-
+  Ask him to think, until next time, of one place he would like to tell you about.
+fatigue_fallback: >-
+  Switch to an easy, pleasant topic he clearly enjoys, and keep your questions simple. The
+  checks can wait for the next session.
+avoid:
+  - Calling anything a test, a check or an exercise

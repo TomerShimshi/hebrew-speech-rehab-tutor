@@ -55,7 +55,14 @@ class Step(BaseModel):
         return []
 
     def instruction(self) -> str:
-        return f"{self.content()} HOW: {self.RULES} {FINISHED}"
+        return f"{self.content()} HOW: {self.rules()} {FINISHED}"
+
+    def rules(self) -> str:
+        return self.RULES
+
+    def answers_needed(self) -> int:
+        """The fewest of his answers before the page lets this step end."""
+        return self.MIN_ANSWERS
 
 
 class OpeningStep(Step):
@@ -259,11 +266,57 @@ class SequencingStep(Step):
         return [self.events[i - 1] for i in self.told_order if 1 <= i <= len(self.events)]
 
 
+# ---- the needs check of a new account's first two sessions (15.5) ------------------------------
+# Like a speech therapist's first meeting, but inside "getting to know you": a few small checks
+# between ordinary talk. Not a test and never called one; not a diagnosis. Only in the fixed
+# first-sessions plans (prompts/intro_needs_*.yaml), never built by the plan builder.
+CHECK_AREAS = ("conversation", "naming", "repetition", "understanding", "connected_speech", "clarity", "goals")
+CHECK_COMMON = ("Bring it in lightly, as part of the conversation -- never say test, check or exercise. Whatever "
+                "happens, react warmly; never say it was wrong. If something doesn't come after a few seconds, help "
+                "gently (the first sound, then the word) and move on. Don't comment on how he did.")
+CHECK_RULES = {
+    "naming": ("A short riddle game (\"בוא נשחק רגע בחידות\"): describe each thing in ITEMS, one at a time, and let "
+               "him say what it is (the answer is after the '='; never say it first)."),
+    "repetition": ("Playfully ask him to say after you (\"תגיד אחריי\"): each item in ITEMS in turn -- a word, a "
+                   "phrase, a longer sentence. Say each once, clearly; say it again only if he asks."),
+    "understanding": ("Ask the first item as a light riddle he answers yes or no; later, ask the second item "
+                      "naturally, as one two-part request. Don't repeat or simplify unless he asks."),
+    "connected_speech": ("Ask him to explain the first item step by step, as if to someone who has never done it. "
+                         "Let him tell it all the way; if he stops early, one \"ומה אחר כך?\". No corrections."),
+    "clarity": ("A playful moment (\"בוא ננסה משהו מצחיק\"): ask him to say the first item as fast as he can, a few "
+                "times -- do it with him and laugh lightly. Once is enough."),
+    "goals": ("Ask what is hardest for him when he talks with people, and what he would like to be able to do "
+              "better. Listen, react to what he says, one follow-up. Never say goals or assessment."),
+}
+CHECK_ANSWERS = {"naming": 3, "repetition": 3, "understanding": 2, "connected_speech": 1, "clarity": 1, "goals": 2}
+
+
+class CheckStep(Step):
+    kind: Literal["check"] = "check"
+    MINUTES: ClassVar[float] = 1.0
+    area: Literal["naming", "repetition", "understanding", "connected_speech", "clarity", "goals"]
+    items: list[str] = []  # HEBREW: what she says (a riddle = its answer, a phrase to repeat, a request)
+
+    def content(self) -> str:
+        items = " ".join(f'{i}) "{x}"' for i, x in enumerate(self.items, 1))
+        return f"A short {self.area.replace('_', ' ')} moment, inside the conversation." + (
+            f" ITEMS: {items}." if items else "")
+
+    def rules(self) -> str:
+        return f"{CHECK_RULES[self.area]} {CHECK_COMMON}"
+
+    def answers_needed(self) -> int:
+        return CHECK_ANSWERS[self.area]
+
+    def label(self) -> str:
+        return self.area
+
+
 PlanStep = Annotated[Union[OpeningStep, NamesGameStep, PracticeStep, ActivityStep, GamesActivityStep, ThreadStep,
-                           SequencingStep], Field(discriminator="kind")]
+                           SequencingStep, CheckStep], Field(discriminator="kind")]
 BUILDABLE = (OpeningStep, NamesGameStep, PracticeStep, ActivityStep, GamesActivityStep, ThreadStep, SequencingStep)
 
-STEP_CLASSES = {cls.model_fields["kind"].default: cls for cls in BUILDABLE}
+STEP_CLASSES = {cls.model_fields["kind"].default: cls for cls in (*BUILDABLE, CheckStep)}
 
 
 def min_answers(kind: str) -> int:
@@ -282,7 +335,7 @@ FOLLOW_UP = ("Follow-up: go back to something he told you earlier today (a detai
 FREE_CONVERSATION = ("Conversation: ask whether there is something special he'd like to talk about today; follow his "
                      "choice, one thread at a time, with follow-ups on his own words.")
 
-NAMES = {"sequencing": "telling things in order", "opening": "opening", "names_game": "names game", "practice": "practice", "activity": "activity",
+NAMES = {"check": "getting-to-know check", "sequencing": "telling things in order", "opening": "opening", "names_game": "names game", "practice": "practice", "activity": "activity",
          "games_activity": "game-linked activity", "thread": "conversation thread", "conversation": "conversation"}
 
 

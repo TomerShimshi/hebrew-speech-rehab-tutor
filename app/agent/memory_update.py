@@ -16,7 +16,9 @@ from google.genai import types
 
 from app import check_in_set, sequencing
 from app.steps import SequencingStep
-from app.agent.memory_tools import MemoryDraft, build_memory_tools
+from app.agent.memory_tools import Inferring, MemoryDraft, add_vocabulary, build_memory_tools
+from app.patient_profile import (AREA_NAMES, MAX_HISTORY, MAX_POINTS, account_profile, needs_lines,
+                                 render_inferred)
 from app.agent.runner import run_tool_loop
 from app.class_plan import render_plan_full
 from app.config import REPO_ROOT, Settings
@@ -77,6 +79,40 @@ def _recent_summaries_text(recent: list[dict]) -> str:
     return "\n".join(f"- {r.get('date')}: mood {r.get('mood')}; {r.get('summary')}" for r in recent)
 
 
+def needs_history_text(areas: dict) -> str:
+    """Per area: the current level and the levels over his sessions -- for the agent's context."""
+    out = []
+    for line, (area, a) in zip(needs_lines({"areas": areas}), ((k, areas[k]) for k in AREA_NAMES if k in areas)):
+        levels = [h.get("level", "") for h in a.get("history") or []]
+        out.append(line + (f" | history: {', '.join(levels[-8:])}" if levels else ""))
+    return "\n".join(out)
+
+
+def save_inferred(store, pid: str, sid: str, draft: MemoryDraft, today: dt.date) -> None:
+    """The needs profile and the inferred profile (15.5), after the session. His own names (12) go
+    into the vocabulary by code. Never over an uploaded profile (re-read: the family may have just
+    uploaded one)."""
+    inf = draft.inferring
+    for area in inf.changed:  # a level per session that showed the area: his progress
+        a = inf.areas[area]
+        entry = {"date": today.isoformat(), "session": sid, "level": a.get("app_level") or a.get("level")}
+        history = [h for h in (a.get("history") or []) if h.get("session") != sid] + [entry]
+        inf.areas[area] = {**a, "session": sid, "date": today.isoformat(), "history": history[-MAX_HISTORY:]}
+    for point in inf.new_points:
+        point.update(id=f"{sid}-{len(inf.points)}", date=today.isoformat(), session=sid)
+        inf.points.append(point)
+    needs = {"areas": inf.areas, "therapist_points": inf.points[-MAX_POINTS:]}
+    if inf.changed or inf.new_points:
+        store.save_needs(pid, needs)
+    if not inf.profile or account_profile(store, pid).source == "uploaded":
+        return  # an uploaded profile is never touched
+    for own in draft.own_names:
+        add_vocabulary(inf, own.get("word", ""))
+    text = render_inferred(inf.about, inf.vocabulary, needs)
+    if text:
+        store.save_profile(pid, text, "inferred", "app", extra={"about": inf.about, "vocabulary": inf.vocabulary})
+
+
 def sequencing_result(plan, reported: dict | None) -> dict | None:
     """The session's sequencing result (14): the task, and the score computed by code from the
     order the agent heard -- or skipped / not reported."""
@@ -124,6 +160,15 @@ def run_memory_update(
             word_bank={w: s.model_copy() for w, s in previous.word_bank.items()},
             today=today,
         )
+        # His needs, after every session (15.5): for every account -- with an uploaded profile for the
+        # family's eyes only (status, progress, points for his therapist); without one, the agent also
+        # keeps the inferred profile.
+        prof = store.get_profile(pid) or {}
+        needs_doc = store.get_needs(pid) or {}
+        draft.inferring = Inferring(about=list(prof.get("about") or []), vocabulary=list(prof.get("vocabulary") or []),
+                                    areas=dict(needs_doc.get("areas") or {}),
+                                    points=list(needs_doc.get("therapist_points") or []),
+                                    profile=account_profile(store, pid).source != "uploaded")
         prompts = load_prompts()
         models = _models(settings)
         # The plan this session used (05): lets the agent score its check-in items.
@@ -149,6 +194,10 @@ def run_memory_update(
             f"# CURRENT MEMORY\n{format_memory(previous)}\n\n"
             f"# RECENT SESSION SUMMARIES (oldest first)\n{_recent_summaries_text(recent)}\n\n"
             f"# TODAY'S PLAN (what the tutor was asked to do)\n{plan_text}\n\n"
+            + f"# HIS NEEDS SO FAR (record_needs updates them; history oldest -> newest)\n"
+            f"{needs_history_text(draft.inferring.areas) or '(none yet)'}\n\n"
+            f"# POINTS FOR HIS THERAPIST ALREADY ON THE LIST\n"
+            f"{chr(10).join('- ' + p['text'] for p in draft.inferring.points) or '(none)'}\n\n" +
             f"# TRANSCRIPT OF THE SESSION THAT JUST ENDED ({today.isoformat()})\n{format_transcript(turns)}"
         )
         run = run_tool_loop(
@@ -201,6 +250,8 @@ def run_memory_update(
         ).model_dump(mode="json")
         new_memory["recent_summaries"] = recent[-RECENT_SUMMARIES:]
         store.save_memory(pid, sid, new_memory, previous_raw)
+        if draft.inferring is not None:
+            save_inferred(store, pid, sid, draft, today)
         for flag in draft.flags:
             store.add_flag(pid, sid, flag.model_dump(mode="json"))
         session_fields = {

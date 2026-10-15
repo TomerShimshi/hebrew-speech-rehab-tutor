@@ -66,6 +66,7 @@ def test_starting_a_session_only_abandons_your_own_open_sessions(env):
 def test_end_runs_the_memory_update_then_builds_the_next_plan(env):
     env.llm = FakeClient(text("nothing to add"), consolidated("He talked about his grandchildren."), *plan_reply())
     env.configure()
+    env.store.save_profile(DAD, "Man, 70.", "uploaded", "tomer@example.com")  # the classic intro, then a built plan
     sid = talk(env)
     r = env.client.post(f"/api/session/{sid}/end", headers=auth(), json={"reason": "tutor_goodbye"})
     assert r.json() == {"status": "ended", "memory_status": "done", "plan_status": "done"}

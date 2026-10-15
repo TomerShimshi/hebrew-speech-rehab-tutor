@@ -9,6 +9,7 @@ import yaml
 
 from app import check_in_set
 from app.config import REPO_ROOT
+from app.patient_profile import account_profile
 from app.schemas import ClassPlan
 from app.steps import FREE_CONVERSATION, NamesGameStep, OpeningStep, PracticeStep
 
@@ -16,9 +17,22 @@ INTRO_PLAN_PATH = REPO_ROOT / "prompts" / "intro_plan.yaml"
 
 
 @lru_cache
+def fixed_plan(name: str) -> ClassPlan:
+    """A fixed plan from prompts/ (no LLM): intro_plan, intro_needs_1, intro_needs_2."""
+    return ClassPlan(**yaml.safe_load((REPO_ROOT / "prompts" / f"{name}.yaml").read_text(encoding="utf-8")))
+
+
 def intro_plan() -> ClassPlan:
     """The fixed 'getting to know you' plan (no LLM)."""
-    return ClassPlan(**yaml.safe_load(INTRO_PLAN_PATH.read_text(encoding="utf-8")))
+    return fixed_plan("intro_plan")
+
+
+def first_plan(store, pid: str) -> ClassPlan:
+    """An account's first session (or the first after "forget memory"): with an uploaded profile,
+    just getting to know him; without one, getting to know him with the needs check (15.5)."""
+    if account_profile(store, pid).source == "uploaded":
+        return intro_plan()
+    return fixed_plan("intro_needs_1")
 
 
 def plan_for_session(store, pid: str) -> ClassPlan | None:
@@ -33,7 +47,7 @@ def plan_for_session(store, pid: str) -> ClassPlan | None:
             pass
     memory = store.get_memory(pid)
     if not memory or not memory.get("memory_prompt"):
-        return intro_plan()
+        return first_plan(store, pid)
     return None
 
 
@@ -66,7 +80,7 @@ def prepare_for_session(plan: ClassPlan | None, current_set: dict | None) -> Cla
 def session_steps(plan: ClassPlan | None) -> list[dict]:
     """The steps the page hands out: kind, a short label, and the exact instruction."""
     steps = plan.steps if plan else [OpeningStep()]
-    out = [{"kind": s.kind, "label": s.label(), "text": s.instruction(),
+    out = [{"kind": s.kind, "label": s.label(), "text": s.instruction(), "min_answers": s.answers_needed(),
             **({"cards": s.cards()} if hasattr(s, "cards") and s.cards() else {})} for s in steps]
     if plan is None:
         out.append({"kind": "conversation", "label": "", "text": FREE_CONVERSATION})

@@ -180,7 +180,7 @@ function namesGameLine(s) {
 }
 
 // Steps mode (13): how far through the agenda the session got, and what she reported.
-const STEP_KIND = { sequencing: "סיפור לפי סדר", opening: "פתיחה", conversation: "שיחה", names_game: "משחק השמות", practice: "תרגול",
+const STEP_KIND = { check: "היכרות: רגע של בדיקה", sequencing: "סיפור לפי סדר", opening: "פתיחה", conversation: "שיחה", names_game: "משחק השמות", practice: "תרגול",
                     activity: "פעילות", games_activity: "פעילות מהמשחקים", reserve: "רזרבה",
                     thread: "נושא לשיחה" };
 const stepName = (a) => `${STEP_KIND[a.kind] || a.kind}${a.label ? ` ${a.label}` : ""}`;
@@ -750,6 +750,9 @@ function renderProfile(profile) {
   $("profile-source").textContent = savedProfile
     ? `מקור: ${PROFILE_SOURCE[profile.source] || profile.source} · עודכן ${when(profile.updated_at)}`
     : "אין פרופיל לחשבון הזה: המטפלת מכירה אותו רק מהשיחות.";
+  if (profile?.source === "inferred") {
+    $("profile-source").textContent += " · האפליקציה מעדכנת אותו אחרי כל שיחה; עריכה כאן הופכת אותו לשלכם, והיא תפסיק לעדכן.";
+  }
   $("profile-view").textContent = savedProfile;
   $("profile-view").hidden = !savedProfile;
   $("profile-status").textContent = "";
@@ -789,6 +792,88 @@ $("profile-save").addEventListener("click", async () => {
     $("profile-save").disabled = false;
   }
 });
+
+// His needs per area (15.5): inferred from his first sessions, or set by the family (which wins).
+const NEED_AREA = { conversation: "שיחה (שטף, מציאת מילים)", naming: "שיום (מציאת שמות ומילים)",
+                    repetition: "חזרה אחריה", understanding: "הבנה",
+                    connected_speech: "דיבור רציף (הסבר, סיפור לפי סדר)", clarity: "בהירות הדיבור",
+                    goals: "המטרות שלו" };
+const NEED_LEVEL = { ok: "בסדר", some_difficulty: "קושי מסוים", clear_difficulty: "קושי ברור",
+                     unclear: "לא ברור עדיין" };
+const NOT_PRACTICED = new Set(["repetition", "understanding", "clarity"]);
+function renderNeeds(needs) {
+  const areas = needs?.areas || {};
+  $("needs").replaceChildren(...Object.entries(NEED_AREA).map(([area, name]) => {
+    const a = areas[area] || {};
+    const level = area === "goals" ? null : el("select", { "aria-label": name },
+      el("option", { value: "", text: "—" }),
+      ...Object.entries(NEED_LEVEL).map(([v, t]) => {
+        const o = el("option", { value: v, text: t });
+        if (a.level === v) o.selected = true;
+        return o;
+      }));
+    const note = el("input", { type: "text", maxlength: "300", dir: "auto", value: a.note || "",
+                               placeholder: area === "goals" ? "מה הוא רוצה להצליח לעשות" : "הערה (למשל מהקלינאית)" });
+    const save = el("button", { class: "small", type: "button", text: "שמירה" });
+    save.addEventListener("click", () => saveNeed(area, level?.value || "", note.value, save));
+    const who = a.set_by === "family" ? "המשפחה" : a.set_by === "app" ? `האפליקציה${a.date ? `, ${a.date}` : ""}` : "";
+    const evidence = (a.evidence || a.app_evidence || []);
+    const history = (a.history || []).slice(-12);
+    const trend = history.length ? el("div", { class: "need-trend", "aria-label": "לאורך השיחות" },
+      el("span", { class: "muted", text: "לאורך השיחות: " }),
+      ...history.map((h) => el("span", { class: `dot lvl-${h.level}`, title: `${h.date}: ${NEED_LEVEL[h.level] || h.level}` })))
+      : null;
+    return el("div", { class: "need" },
+      el("div", { class: "need-head" }, el("b", { text: name }),
+        NOT_PRACTICED.has(area) ? el("span", { class: "muted", text: " · לא מתורגל באפליקציה עדיין" }) : null,
+        who ? el("span", { class: "muted", text: ` · נקבע ע"י ${who}` }) : null),
+      el("div", { class: "cg-actions" }, level, note, save),
+      a.app_note ? p(`האפליקציה שמעה: ${a.app_note}`, "muted kv") : null,
+      a.set_by === "app" && a.note ? p(a.note, "muted kv") : null,
+      trend,
+      evidence.length ? el("details", {}, el("summary", { class: "muted", text: "מה הוא אמר" }),
+        el("ul", {}, evidence.map((q) => el("li", { dir: "auto", text: q })))) : null);
+  }));
+}
+const POINT_STATUS = { new: "חדש", raised: "הועלה מול הקלינאית", dismissed: "לא רלוונטי" };
+function renderTherapistPoints(points) {
+  const list = (points || []).slice().reverse();
+  if (!list.length) {
+    $("therapist-points").replaceChildren(p("עדיין אין. נקודות יופיעו כשהאפליקציה תראה דפוס לאורך כמה שיחות.", "muted kv"));
+    return;
+  }
+  $("therapist-points").replaceChildren(...list.map((pt) => {
+    const mark = (status, label) => {
+      const b = el("button", { class: `small${pt.status === status ? " on" : ""}`, type: "button", text: label });
+      b.addEventListener("click", async () => {
+        b.disabled = true;
+        try { await api(acct(`/therapist-points/${encodeURIComponent(pt.id)}`), { status }, "PUT"); await loadAccount(); }
+        catch { b.disabled = false; }
+      });
+      return b;
+    };
+    return el("div", { class: `need point-${pt.status}` },
+      el("div", {}, el("b", { dir: "auto", text: pt.text })),
+      p(`${pt.date} · ${POINT_STATUS[pt.status] || pt.status}${pt.why ? ` · ${pt.why}` : ""}`, "muted kv"),
+      (pt.evidence || []).length ? el("details", {}, el("summary", { class: "muted", text: "מה הוא אמר" }),
+        el("ul", {}, pt.evidence.map((q) => el("li", { dir: "auto", text: q })))) : null,
+      el("div", { class: "cg-actions" }, mark("raised", "הועלה"), mark("dismissed", "לא רלוונטי"), mark("new", "חדש")));
+  }));
+}
+
+async function saveNeed(area, level, note, button) {
+  if (area !== "goals" && !level) { $("needs-status").textContent = "צריך לבחור רמה."; return; }
+  button.disabled = true;
+  try {
+    await api(acct(`/needs/${area}`), { level, note }, "PUT");
+    await loadAccount();
+    $("needs-status").textContent = `✓ נשמר (${NEED_AREA[area]}). בונה השיעורים יקבל את זה מהשיעור הבא.`;
+  } catch {
+    $("needs-status").textContent = "השמירה נכשלה.";
+  } finally {
+    button.disabled = false;
+  }
+}
 
 function renderNotes(notes) {
   $("notes").value = notes?.text || "";
@@ -1055,6 +1140,8 @@ async function loadAccount() {
     renderResearch(ov.research_notes);
     renderGames(ov.recommendations, ov.games_profile);
     renderProfile(ov.profile);
+    renderNeeds(ov.needs);
+    renderTherapistPoints(ov.needs?.therapist_points);
     renderNotes(ov.notes);
     const au = ov.audio || {};
     audioUsage = au.enabled && au.files !== null && au.files !== undefined

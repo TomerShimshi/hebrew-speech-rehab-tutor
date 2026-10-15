@@ -456,6 +456,7 @@ def test_process_refuses_a_session_that_may_still_be_running_but_ends_a_stuck_on
 def test_process_picks_up_where_it_stopped_memory_done_plan_failed(env):
     from fake_llm import FakeClient, text
     from test_memory_wiring import consolidated, plan_reply, talk
+    env.store.save_profile(DAD, "Man, 70.", "uploaded", TOMER)  # the classic intro, then a built plan
     sid = talk(env)
     env.llm = FakeClient(text("done"), consolidated("Memory from the session."), text("{}"))  # plan reply invalid
     env.client.post(f"/api/session/{sid}/end", headers=auth("tok-dad"), json={"reason": "end_button"})

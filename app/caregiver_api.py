@@ -38,7 +38,7 @@ from app.deps import (
 )
 from app.reminders import TITLE, ReminderSettings, send_to_devices, text_for
 from fastapi.responses import Response
-from app.patient_profile import PROFILE_MAX_CHARS, account_profile
+from app.patient_profile import AREA_NAMES, LEVELS, PROFILE_MAX_CHARS, account_profile, render_inferred
 from app.session_prompt import build_session_prompt
 from app.prompt_archive import PromptArchive
 from app.schemas import VoiceSettings
@@ -241,6 +241,7 @@ def overview(pid: str = Depends(account), settings: Settings = Depends(get_setti
         "memory": {k: memory.get(k) for k in ("memory_prompt", "sections", "focus_next_session",
                                                "sessions_processed", "updated_at", "last_session_id")},
         "profile": store.get_profile(pid),  # his own profile (15): uploaded here, or inferred (15.5)
+        "needs": store.get_needs(pid),  # his needs per area (15.5): inferred, or set by the family
         "word_bank": _word_rows(memory.get("word_bank")),
         "check_in_set": check_in,
         "check_in_history": [{k: h.get(k) for k in ("id", "created_on", "retired_at", "sessions_played", "items")}
@@ -333,6 +334,46 @@ def save_profile(text: str = Body(..., embed=True, max_length=PROFILE_MAX_CHARS)
     print(f"[caregiver] {caregiver.email} saved the profile of {pid} ({len(text.strip())} chars); backup={backup}",
           flush=True)
     return {"ok": True, "backup": backup}
+
+
+@router.put("/{email}/needs/{area}")
+def save_need(area: str, level: str = Body("", embed=True), note: str = Body("", embed=True, max_length=300),
+              pid: str = Depends(account), caregiver: User = Depends(require_caregiver),
+              store: SessionStore = Depends(get_store)) -> dict:
+    """The family's word on one area (15.5): it wins over the app's, which never overwrites it."""
+    if area not in AREA_NAMES:
+        raise HTTPException(status_code=404, detail="Unknown area")
+    if area != "goals" and level not in LEVELS:
+        raise HTTPException(status_code=422, detail=f"level must be one of {list(LEVELS)}")
+    needs = store.get_needs(pid) or {}
+    areas = dict(needs.get("areas") or {})
+    areas[area] = {**(areas.get(area) or {}), "level": level if area != "goals" else "noted", "note": note.strip(),
+                   "set_by": "family", "by": caregiver.email,
+                   "date": dt.datetime.now(dt.timezone.utc).date().isoformat()}
+    store.save_needs(pid, {**needs, "areas": areas})
+    profile = store.get_profile(pid) or {}
+    if profile.get("source") == "inferred":  # keep the inferred profile in step with the family's word
+        store.save_profile(pid, render_inferred(profile.get("about") or [], profile.get("vocabulary") or [],
+                                                {"areas": areas}),
+                           "inferred", "app", extra={"about": profile.get("about") or [],
+                                                     "vocabulary": profile.get("vocabulary") or []})
+    print(f"[caregiver] {caregiver.email} set the {area} need of {pid}", flush=True)
+    return {"ok": True}
+
+
+@router.put("/{email}/therapist-points/{point_id}")
+def therapist_point_status(point_id: str, status: Literal["new", "raised", "dismissed"] = Body(..., embed=True),
+                           pid: str = Depends(account), caregiver: User = Depends(require_caregiver),
+                           store: SessionStore = Depends(get_store)) -> dict:
+    """A point for his therapist (15.5): raised with her, or not relevant."""
+    needs = store.get_needs(pid) or {}
+    points = list(needs.get("therapist_points") or [])
+    for p in points:
+        if p.get("id") == point_id:
+            p.update(status=status, status_by=caregiver.email)
+            store.save_needs(pid, {**needs, "therapist_points": points})
+            return {"ok": True}
+    raise HTTPException(status_code=404, detail="Point not found")
 
 
 @router.put("/{email}/notes")

@@ -123,6 +123,7 @@ def test_memory_update_scores_the_sessions_names_game():
 # ---- wiring through the API --------------------------------------------------------------------------
 
 def test_first_session_gets_the_intro_and_the_session_keeps_its_plan(env):
+    env.store.save_profile(DAD, "Man, 70.", "uploaded", "tomer@example.com")  # uploaded: no needs check (15.5)
     body = env.client.post("/api/session/start", headers=auth()).json()
     assert "## TODAY'S PLAN" in system_instruction() and "Plan type: intro" in system_instruction()
     assert env.store.get_session(DAD, body["session_id"])["class_plan"]["plan_type"] == "intro"

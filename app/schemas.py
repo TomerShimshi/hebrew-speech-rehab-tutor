@@ -208,6 +208,7 @@ class ClassPlan(BaseModel):
     """The lesson plan (05): session-level parts + an ORDERED list of steps (13.5). Built by the
     plan builder with tools (app/agent/plan_tools.py); the intro plan is fixed (prompts/intro_plan.yaml)."""
     plan_type: str = "regular"  # 'intro' or 'regular'
+    intro_part: int = 0  # the first-sessions needs check (15.5): 1 or 2; 0 = not one of them
     primary_goal: PrimaryGoal
     steps: list[PlanStep] = []
     homework: str = ""  # ENGLISH: the small task for next time (she says it, in the closing only)

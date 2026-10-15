@@ -24,6 +24,8 @@ from app.agent.memory_update import format_memory
 from app.agent.research import personal_terms, research_technique, search_available
 from app.agent.plan_tools import BUDGET_MINUTES, MIN_ACCEPT, PlanDraft, build_plan_tools
 from app.agent.runner import Tool, run_tool_loop
+from app.class_plan import fixed_plan
+from app.patient_profile import account_profile, needs_lines
 from app.config import REPO_ROOT, Settings
 from app.games import render_games_for_plan
 from app.llm import generate
@@ -313,7 +315,8 @@ def render_check_in_set(current: dict | None) -> str:
 def build_context(memory_raw: dict, recent_plans: list[dict], profile_text: str, today: dt.date,
                   games_text: str = "(no games account linked)", notes_text: str = "(none yet)",
                   caregiver_notes: str = "", check_in: dict | None = None,
-                  pace: list[dict] | None = None, sequencing_text: str = "(no sequencing tasks yet)") -> str:
+                  pace: list[dict] | None = None, sequencing_text: str = "(no sequencing tasks yet)",
+                  needs_text: str = "") -> str:
     memory = MemoryDoc(**memory_raw)
     due = word_bank.due_words(memory.word_bank, today)
     bank = ", ".join(
@@ -337,6 +340,8 @@ def build_context(memory_raw: dict, recent_plans: list[dict], profile_text: str,
         f"# RECENT SESSIONS (oldest first)\n{recent}\n\n"
         f"# HIS PACE (newest first; size the plan to fill ~9 minutes at this pace)\n{render_pace(pace or [])}\n\n"
         f"# HIS SEQUENCING (telling things in order; newest first)\n{sequencing_text}\n\n"
+        f"# HIS NEEDS (per area, from his first sessions and the family; not a diagnosis)\n"
+        f"{needs_text or '(none recorded: plan from the profile)'}\n\n"
         f"# RECENT PLANS' GOALS (newest first)\n{_recent_plans_text(recent_plans)}\n\n"
         f"# GAMES (the Simon games app; trends computed from his real data)\n{games_text}\n\n"
         f"# RESEARCH NOTES (earlier findings from professional sources, newest first)\n{notes_text}\n\n"
@@ -400,6 +405,14 @@ def build_next_plan(
             # Nothing to build on: the next session will be the intro plan.
             store.update_session(pid, sid, {"plan_status": PLAN_DONE, "plan_model": None})
             return PLAN_DONE
+        # The needs check's second session (15.5) is fixed: saved as the next plan, no LLM.
+        finished = (store.get_session(pid, sid) or {}).get("class_plan") or {}
+        if finished.get("plan_type") == "intro" and finished.get("intro_part") == 1:
+            store.save_next_plan(pid, sid, fixed_plan("intro_needs_2").model_dump(mode="json"))
+            store.update_session(pid, sid, {"plan_status": PLAN_DONE, "plan_model": "fixed: intro_needs_2",
+                                            "plan_error": None})
+            _log(f"{sid}: next plan = the needs check's second session (fixed)")
+            return PLAN_DONE
         notes_doc = store.get_notes(pid) or {}
         caregiver_notes = notes_doc.get("text", "")
         known = grounding_text(store, pid, memory_raw, profile_text, caregiver_notes)
@@ -410,7 +423,10 @@ def build_next_plan(
         context_args = dict(sequencing_text=render_sequencing(seq_results, seq_events, seq_task),
                             games_text=render_games_for_plan(games),
                             notes_text=render_notes(store.recent_technique_notes(pid, 3)),
-                            caregiver_notes=caregiver_notes, pace=speaking_pace(store, pid))
+                            caregiver_notes=caregiver_notes, pace=speaking_pace(store, pid),
+                            # with an uploaded profile his needs are for the family's eyes only (Tomer, 15.10)
+                            needs_text="" if account_profile(store, pid).source == "uploaded"
+                            else "\n".join(needs_lines(store.get_needs(pid))))
         if check_in_set.needs_new_set(current_set, today):
             # The names game's stable set is due (none yet, or ~3 weeks / 10 sessions old): first a
             # new one, so the plan below sees which names it must not practice (12).

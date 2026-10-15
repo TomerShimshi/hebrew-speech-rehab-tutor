@@ -107,7 +107,9 @@ class SessionStore(Protocol):
     def get_notes(self, pid: str) -> dict | None: ...
     def save_notes(self, pid: str, text: str, by: str) -> None: ...
     def get_profile(self, pid: str) -> dict | None: ...  # his profile (15): {text, source, updated_by, updated_at}
-    def save_profile(self, pid: str, text: str, source: str, by: str) -> None: ...
+    def save_profile(self, pid: str, text: str, source: str, by: str, extra: dict | None = None) -> None: ...
+    def get_needs(self, pid: str) -> dict | None: ...  # the needs profile (15.5): {areas: {area: {...}}}
+    def save_needs(self, pid: str, needs: dict) -> None: ...
     def save_session_prompt(self, pid: str, sid: str, text: str, version: str) -> None: ...
     def get_settings(self, pid: str) -> dict | None: ...
     def get_billing_state(self) -> dict | None: ...
@@ -135,6 +137,7 @@ def _turn_fields(turn: TurnIn) -> dict:
 class InMemorySessionStore:
     def __init__(self) -> None:
         self.profiles: dict[str, dict] = {}  # his profile (15)
+        self.needs: dict[str, dict] = {}  # his needs profile (15.5)
         self.sessions: dict[tuple[str, str], dict] = {}
         self.turns: dict[tuple[str, str], dict[str, dict]] = {}
         self.memory: dict[str, dict] = {}
@@ -336,8 +339,14 @@ class InMemorySessionStore:
     def get_profile(self, pid):
         return self.profiles.get(pid)
 
-    def save_profile(self, pid, text, source, by):
-        self.profiles[pid] = {"text": text, "source": source, "updated_by": by, "updated_at": _now()}
+    def save_profile(self, pid, text, source, by, extra=None):
+        self.profiles[pid] = {**(extra or {}), "text": text, "source": source, "updated_by": by, "updated_at": _now()}
+
+    def get_needs(self, pid):
+        return self.needs.get(pid)
+
+    def save_needs(self, pid, needs):
+        self.needs[pid] = {**needs, "updated_at": _now()}
 
     def save_session_prompt(self, pid, sid, text, version):
         self.session_prompts[(pid, sid)] = {"text": text, "prompt_version": version, "saved_at": _now()}
@@ -637,9 +646,18 @@ class FirestoreSessionStore:
         snap = self._patient(pid).collection("caregiver").document("profile").get()
         return snap.to_dict() if snap.exists else None
 
-    def save_profile(self, pid, text, source, by):
+    def save_profile(self, pid, text, source, by, extra=None):
         self._patient(pid).collection("caregiver").document("profile").set(
-            {"text": text, "source": source, "updated_by": by, "updated_at": self._fs.SERVER_TIMESTAMP})
+            {**(extra or {}), "text": text, "source": source, "updated_by": by,
+             "updated_at": self._fs.SERVER_TIMESTAMP})
+
+    def get_needs(self, pid):
+        snap = self._patient(pid).collection("caregiver").document("needs").get()
+        return snap.to_dict() if snap.exists else None
+
+    def save_needs(self, pid, needs):
+        self._patient(pid).collection("caregiver").document("needs").set(
+            {**needs, "updated_at": self._fs.SERVER_TIMESTAMP})
 
     def save_session_prompt(self, pid, sid, text, version):
         self._session(pid, sid).collection("prompt").document("live").set(

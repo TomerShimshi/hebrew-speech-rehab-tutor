@@ -237,7 +237,7 @@ def start_session(
         "names_game": built.names_game,  # today's plan has a names game (12)
         # steps mode (13): the page hands her the next step after each next_step call
         "agenda": {"steps": [s["text"] for s in built.steps], "kinds": [s["kind"] for s in built.steps],
-                   "min_answers": [min_answers(s["kind"]) for s in built.steps],
+                   "min_answers": [s.get("min_answers", min_answers(s["kind"])) for s in built.steps],
                    "cards": [s.get("cards") for s in built.steps],  # the scrambled game's cards (14)
                    "after": built.after_steps},
         # buttons for the end screen: the game homework the tutor will suggest

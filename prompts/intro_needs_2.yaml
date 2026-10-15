@@ -1,0 +1,46 @@
+# The fixed plan for the SECOND session of an account without an uploaded profile (sub-plan 15.5),
+# saved as the next plan after the first (intro_needs_1.yaml) -- no LLM. The rest of the checks,
+# spread inside an ordinary conversation. From the third session on, the plan builder plans as
+# usual, from his needs (HIS NEEDS) and his inferred profile.
+plan_type: intro
+intro_part: 2
+primary_goal:
+  type: intro
+  description: >-
+    Keep getting to know him through his stories -- and, lightly inside the talk, how
+    understanding, explaining something step by step and speaking clearly go for him.
+steps:
+  - kind: opening
+    opener: "שמחה לדבר איתך שוב! מה שלומך היום?"
+  - kind: thread
+    topic: a trip or an outing he remembers
+    question: "יש טיול או יציאה שאתה זוכר במיוחד?"
+    follow_ups: Who was with him; what happened there.
+  - kind: check
+    area: understanding
+    items:
+      - "האם אבן כבדה יותר מנוצה?"
+      - "ספר לי מה המאכל שאתה הכי אוהב, ואחר כך באיזו עיר גדלת"
+  - kind: thread
+    topic: something he did this week
+    question: "מה עשית השבוע שנהנית ממנו?"
+    follow_ups: Who was there; what happened next.
+  - kind: check
+    area: connected_speech
+    items:
+      - "איך מכינים כוס קפה"
+  - kind: thread
+    topic: music he likes
+    question: "איזו מוזיקה אתה אוהב לשמוע?"
+    follow_ups: A song or a singer he loves; when he listens.
+  - kind: check
+    area: clarity
+    items:
+      - "פה-טה-קה"
+homework: >-
+  Ask him to think, until next time, of a story from his life he would like to tell you.
+fatigue_fallback: >-
+  Switch to an easy, pleasant topic he clearly enjoys, and keep your questions simple. Skip the
+  remaining checks.
+avoid:
+  - Calling anything a test, a check or an exercise
