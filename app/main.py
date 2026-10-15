@@ -20,7 +20,7 @@ from app.config import Settings, get_settings
 from app.live_token import create_live_token
 from app.class_plan import plan_names
 from app.steps import min_answers
-from app.patient_profile import PatientProfileLoader, extract_vocabulary
+from app.patient_profile import account_profile, extract_vocabulary
 from app.prompt_archive import PromptArchive
 from app.schemas import VoiceSettings
 from app import billing_guard
@@ -29,7 +29,7 @@ from app.session_prompt import build_session_prompt
 from app.rate_limit import SlidingWindowLimiter
 from app.store import ACTIVE, MEM_DONE, SessionStore
 from app.deps import (  # noqa: F401 -- shared with the caregiver router (tests override these)
-    _bounded_generate, games_for, get_audio_store, get_games_reader, get_profile_loader, get_prompt_archive,
+    _bounded_generate, games_for, get_audio_store, get_games_reader, get_prompt_archive,
     get_push_sender, get_store, get_text_client,
 )
 from app.reminders import ReminderSettings, run_reminders, subscription_id
@@ -161,7 +161,6 @@ def start_session(
     settings: Settings = Depends(get_settings),
     client: genai.Client = Depends(get_genai_client),
     limiter: SlidingWindowLimiter = Depends(get_token_limiter),
-    profile: PatientProfileLoader = Depends(get_profile_loader),
     store: SessionStore = Depends(get_store),
     archive: PromptArchive = Depends(get_prompt_archive),
     games_reader=Depends(get_games_reader),
@@ -182,7 +181,7 @@ def start_session(
         # A session still "active" means its tab was closed without ending: close it out
         # (before the prompt, so "when you last spoke" counts it).
         store.mark_abandoned(patient_id_for(user))
-    profile_text = profile.get()
+    profile_text = account_profile(store, patient_id_for(user)).text  # his own, written or learned (15)
     # Per-account voice settings from the caregiver page (09): silence length, tap-to-talk, steps mode (13).
     voice = voice_settings(store, settings, patient_id_for(user))
     # The same function builds the caregiver page's "prompt for the next session" (8.5).
@@ -300,7 +299,6 @@ def end_session(
     user: User = Depends(verify_user),
     settings: Settings = Depends(get_settings),
     store: SessionStore = Depends(get_store),
-    profile: PatientProfileLoader = Depends(get_profile_loader),
     llm_client=Depends(get_text_client),
     games_reader=Depends(get_games_reader),
 ) -> dict:
@@ -318,9 +316,9 @@ def end_session(
         # sweep after a caregiver resumes.
         return {"status": "ended", "memory_status": "pending", "plan_status": None, "paused": True}
     bounded = _bounded_generate(settings.memory_end_deadline_s)  # one budget for both calls
-    profile_text = profile.get()
     memory_status = run_memory_update(
-        store, llm_client, settings, pid, session_id, profile_text=profile_text, generate_fn=bounded,
+        store, llm_client, settings, pid, session_id, profile_text=account_profile(store, pid).text,
+        generate_fn=bounded,
     )
     # Voice settings for next time, from this session's interruptions (09; code, no model).
     adjust_after_session(store, settings, pid, session_id)
@@ -328,8 +326,8 @@ def end_session(
     if memory_status == MEM_DONE:
         # The next session's lesson plan, built from the memory we just updated (05).
         plan_status = build_next_plan(
-            store, llm_client, settings, pid, session_id, profile_text=profile_text, generate_fn=bounded,
-            games=games_for(pid, settings, games_reader),
+            store, llm_client, settings, pid, session_id, profile_text=account_profile(store, pid).text,
+            generate_fn=bounded, games=games_for(pid, settings, games_reader),
         )
     return {"status": "ended", "memory_status": memory_status, "plan_status": plan_status}
 
@@ -395,7 +393,6 @@ def memory_sweep(
     push_sender=Depends(get_push_sender),
     settings: Settings = Depends(get_settings),
     store: SessionStore = Depends(get_store),
-    profile: PatientProfileLoader = Depends(get_profile_loader),
     llm_client=Depends(get_text_client),
     games_reader=Depends(get_games_reader),
 ) -> dict:
@@ -408,17 +405,17 @@ def memory_sweep(
         return {"processed": {}, "paused": True, "reminders": reminders}  # soft stop (10): nothing calls a model
     results: dict[str, str] = {}
     budget = settings.memory_sweep_batch
-    profile_text = profile.get()
     for pid in store.list_patient_ids():
         for sid in store.pending_memory_sessions(pid, limit=budget - len(results)):
             results[sid] = run_memory_update(
-                store, llm_client, settings, pid, sid,
-                profile_text=profile_text, generate_fn=_bounded_generate(240),
+                store, llm_client, settings, pid, sid, profile_text=account_profile(store, pid).text,  # his own (15)
+                generate_fn=_bounded_generate(240),
             )
             adjust_after_session(store, settings, pid, sid)  # once per session (09)
         # Plans that are missing (memory done, plan failed or never built): newest only --
         # a plan always reflects the latest memory, so one per account is enough.
         games = games_for(pid, settings, games_reader)
+        profile_text = account_profile(store, pid).text
         for sid in store.pending_plan_sessions(pid, limit=1):
             if len(results) >= budget:
                 break

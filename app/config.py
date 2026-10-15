@@ -1,7 +1,7 @@
 """Runtime settings, read from environment variables (or a local .env file).
 
-On Cloud Run, GEMINI_API_KEY is mounted from Secret Manager and PATIENT_PROFILE_URI
-points at the private bucket (deploy/deploy.sh).
+On Cloud Run, GEMINI_API_KEY is mounted from Secret Manager (deploy/deploy.sh). The patient
+profiles are per account, kept with the account's data (15) -- not here.
 """
 
 from functools import lru_cache
@@ -91,12 +91,6 @@ class Settings(BaseSettings):
     @property
     def caregiver_email_set(self) -> frozenset[str]:
         return _email_set(self.caregiver_emails)
-
-    # Private, de-identified patient profile, never committed (the repo is public).
-    # Its home is a private Cloud Storage object; the gitignored local file is only a
-    # fallback for development without bucket access.
-    patient_profile_uri: str | None = None  # e.g. gs://heb-practice-private/patient_profile.md
-    patient_profile_path: Path | None = REPO_ROOT / "prompts" / "patient_profile.local.md"
 
 
 def _email_set(raw: str) -> frozenset[str]:

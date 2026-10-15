@@ -12,7 +12,6 @@ from fastapi import Depends, HTTPException
 from app.config import Settings, get_settings
 from app.games import UpstashReader, games_snapshot, profile_for
 from app.llm import generate, text_client
-from app.patient_profile import PatientProfileLoader
 from app.audio_store import GcsAudioStore
 from app.prompt_archive import PromptArchive
 from app.store import FirestoreSessionStore, SessionStore
@@ -39,11 +38,6 @@ def get_push_sender(settings: Settings = Depends(get_settings)):
         return None
     from app.reminders import webpush_sender
     return webpush_sender(settings.vapid_private_key, settings.sweep_audience or "https://localhost")
-
-
-@lru_cache
-def get_profile_loader() -> PatientProfileLoader:
-    return PatientProfileLoader(get_settings())
 
 
 @lru_cache

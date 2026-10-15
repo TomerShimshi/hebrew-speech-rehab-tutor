@@ -17,11 +17,10 @@ from app.auth import get_oidc_verifier, get_token_verifier
 from app.config import Settings, get_settings
 from app.audio_store import InMemoryAudioStore
 from app.main import (
-    app, get_push_sender, get_audio_store, get_games_reader, get_genai_client, get_profile_loader, get_prompt_archive, get_store,
+    app, get_push_sender, get_audio_store, get_games_reader, get_genai_client, get_prompt_archive, get_store,
     get_text_client, get_token_limiter,
 )
 from app.prompt_archive import PromptArchive
-from app.patient_profile import PatientProfileLoader
 from app.rate_limit import SlidingWindowLimiter
 from app.store import InMemorySessionStore
 from fake_llm import FakeClient
@@ -106,8 +105,6 @@ def env(tmp_path, monkeypatch):
             "gemini_api_key": state.key,
             "allowed_emails": f"{DAD},{TOMER}",
             "caregiver_emails": TOMER,
-            "patient_profile_uri": None,
-            "patient_profile_path": tmp_path / "none.md",
             "sweeper_sa_email": SWEEPER,
             "sweep_audience": SWEEP_AUDIENCE,
             "summary_model": "primary",
@@ -117,7 +114,6 @@ def env(tmp_path, monkeypatch):
         limiter = SlidingWindowLimiter(state.limit, window_s=3600)
         app.dependency_overrides[get_settings] = lambda: settings
         app.dependency_overrides[get_token_limiter] = lambda: limiter
-        app.dependency_overrides[get_profile_loader] = lambda: PatientProfileLoader(settings)
         app.dependency_overrides[get_store] = lambda: state.store
         app.dependency_overrides[get_token_verifier] = lambda: fake_verifier
         app.dependency_overrides[get_oidc_verifier] = lambda: fake_oidc_verifier

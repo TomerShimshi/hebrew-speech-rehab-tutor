@@ -33,12 +33,12 @@ from app.steps import FOLLOW_UP
 from app.config import REPO_ROOT, Settings, get_settings
 from app.games import profile_for
 from app.deps import (
-    _bounded_generate, games_for, get_audio_store, get_games_reader, get_profile_loader, get_prompt_archive,
+    _bounded_generate, games_for, get_audio_store, get_games_reader, get_prompt_archive,
     get_push_sender, get_store, get_text_client,
 )
 from app.reminders import TITLE, ReminderSettings, send_to_devices, text_for
 from fastapi.responses import Response
-from app.patient_profile import PatientProfileLoader
+from app.patient_profile import PROFILE_MAX_CHARS, account_profile
 from app.session_prompt import build_session_prompt
 from app.prompt_archive import PromptArchive
 from app.schemas import VoiceSettings
@@ -214,12 +214,11 @@ def accounts(caregiver: User = Depends(require_caregiver), settings: Settings = 
 @router.get("/{email}/overview")
 def overview(pid: str = Depends(account), settings: Settings = Depends(get_settings),
              store: SessionStore = Depends(get_store),
-             profile: PatientProfileLoader = Depends(get_profile_loader),
              audio=Depends(get_audio_store)) -> dict:
     memory = store.get_memory(pid) or {}
     notes = store.get_notes(pid) or {}
     games_profile = profile_for(pid, settings.simon_profiles)
-    terms = personal_terms(memory, f"{profile.get()}\n{notes.get('text', '')}",
+    terms = personal_terms(memory, f"{account_profile(store, pid).text}\n{notes.get('text', '')}",
                            extra=(pid.split("@")[0], games_profile or ""))
     stored_plan = store.get_next_plan(pid) or {}
     built_after = stored_plan.get("built_after_session")
@@ -241,6 +240,7 @@ def overview(pid: str = Depends(account), settings: Settings = Depends(get_setti
         "flags": store.list_flags(pid),
         "memory": {k: memory.get(k) for k in ("memory_prompt", "sections", "focus_next_session",
                                                "sessions_processed", "updated_at", "last_session_id")},
+        "profile": store.get_profile(pid),  # his own profile (15): uploaded here, or inferred (15.5)
         "word_bank": _word_rows(memory.get("word_bank")),
         "check_in_set": check_in,
         "check_in_history": [{k: h.get(k) for k in ("id", "created_on", "retired_at", "sessions_played", "items")}
@@ -293,11 +293,10 @@ def session_prompt(sid: str, pid: str = Depends(account), store: SessionStore = 
 @router.get("/{email}/next-prompt")
 def next_prompt(pid: str = Depends(account), settings: Settings = Depends(get_settings),
                 store: SessionStore = Depends(get_store),
-                profile: PatientProfileLoader = Depends(get_profile_loader),
                 games_reader=Depends(get_games_reader)) -> dict:
     """What the tutor would get if this account started a session right now -- built by the
     same function as /api/session/start."""
-    built = build_session_prompt(store, settings, pid, profile.get(), games_reader)
+    built = build_session_prompt(store, settings, pid, account_profile(store, pid).text, games_reader)
     return {"text": built.prompt.text, "prompt_version": built.prompt.version}
 
 
@@ -321,6 +320,19 @@ def memory_history(pid: str = Depends(account), store: SessionStore = Depends(ge
     return {"versions": [{k: v.get(k) for k in ("version", "memory_prompt", "sections", "updated_at",
                                                  "sessions_processed", "last_session_id")}
                          for v in store.list_memory_history(pid)]}
+
+
+@router.put("/{email}/profile")
+def save_profile(text: str = Body(..., embed=True, max_length=PROFILE_MAX_CHARS), pid: str = Depends(account),
+                 caregiver: User = Depends(require_caregiver), store: SessionStore = Depends(get_store),
+                 archive: PromptArchive = Depends(get_prompt_archive)) -> dict:
+    """His profile (15), written or pasted by the family: it goes into every prompt from the next
+    session on. Saved as "uploaded" -- the app never overwrites it. The previous one is backed up."""
+    backup = _backup(archive, pid, store.get_profile(pid), "profile")
+    store.save_profile(pid, text.strip(), "uploaded", caregiver.email)
+    print(f"[caregiver] {caregiver.email} saved the profile of {pid} ({len(text.strip())} chars); backup={backup}",
+          flush=True)
+    return {"ok": True, "backup": backup}
 
 
 @router.put("/{email}/notes")
@@ -501,7 +513,6 @@ def process_session(
     settings: Settings = Depends(get_settings),
     store: SessionStore = Depends(get_store),
     llm_client=Depends(get_text_client),
-    profile: PatientProfileLoader = Depends(get_profile_loader),
     games_reader=Depends(get_games_reader),
 ) -> dict:
     """Process a session now instead of waiting for the hourly sweep: the same steps as the
@@ -517,15 +528,15 @@ def process_session(
             raise HTTPException(status_code=409, detail="The session may still be running")
         store.end_session(pid, sid, EndReason.abandoned)  # its tab was closed without ending
     bounded = _bounded_generate(settings.memory_end_deadline_s)
-    profile_text = profile.get()
     memory_status = session.get("memory_status")
     if memory_status not in (MEM_DONE, MEM_SKIPPED):
         memory_status = run_memory_update(store, llm_client, settings, pid, sid,
-                                          profile_text=profile_text, generate_fn=bounded)
+                                          profile_text=account_profile(store, pid).text, generate_fn=bounded)
     adjust_after_session(store, settings, pid, sid)
     plan_status = (store.get_session(pid, sid) or {}).get("plan_status")
     if memory_status == MEM_DONE and plan_status != PLAN_DONE:
-        plan_status = build_next_plan(store, llm_client, settings, pid, sid, profile_text=profile_text,
+        plan_status = build_next_plan(store, llm_client, settings, pid, sid,
+                                      profile_text=account_profile(store, pid).text,
                                       generate_fn=bounded, games=games_for(pid, settings, games_reader))
     after = store.get_session(pid, sid) or {}
     print(f"[caregiver] {caregiver.email} processed {pid}/{sid}: memory {memory_status}, plan {plan_status}", flush=True)
@@ -540,7 +551,6 @@ def rebuild_plan(
     settings: Settings = Depends(get_settings),
     store: SessionStore = Depends(get_store),
     llm_client=Depends(get_text_client),
-    profile: PatientProfileLoader = Depends(get_profile_loader),
     games_reader=Depends(get_games_reader),
 ) -> dict:
     """Builds the next lesson again now, with the code and prompts deployed right now (e.g.
@@ -552,7 +562,7 @@ def rebuild_plan(
     if not ended:
         raise HTTPException(status_code=409, detail="No ended session to build after")
     sid = ended[0]["id"]
-    status = build_next_plan(store, llm_client, settings, pid, sid, profile_text=profile.get(),
+    status = build_next_plan(store, llm_client, settings, pid, sid, profile_text=account_profile(store, pid).text,
                              generate_fn=_bounded_generate(240), games=games_for(pid, settings, games_reader))
     error = None if status == PLAN_DONE else (store.get_session(pid, sid) or {}).get("plan_error")
     print(f"[caregiver] {caregiver.email} rebuilt the next plan for {pid}: {status}", flush=True)

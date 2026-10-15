@@ -15,8 +15,6 @@ cd "$(dirname "$0")/.."
 
 # --allow-unauthenticated is temporary: Google sign-in + allowlist arrives in sub-plan 03.
 PROJECT_ID="$(gcv config get-value project 2>/dev/null)"
-# The app reads the private patient profile straight from its bucket (see setup_gcp.sh).
-PROFILE_URI="gs://${PROJECT_ID}-private/patient_profile.md"
 
 # Personal/deployment values come from the local .env -- never from the (public) repo.
 dotenv() {
@@ -32,8 +30,7 @@ if [[ -z "$ALLOWED_EMAILS" ]]; then
   exit 1
 fi
 # '^|^' switches gcloud's list delimiter to '|', because the email lists contain commas.
-ENV_VARS="^|^PATIENT_PROFILE_URI=${PROFILE_URI}"
-ENV_VARS+="|GCP_PROJECT_ID=${PROJECT_ID}"
+ENV_VARS="^|^GCP_PROJECT_ID=${PROJECT_ID}"
 ENV_VARS+="|ALLOWED_EMAILS=${ALLOWED_EMAILS}"
 ENV_VARS+="|CAREGIVER_EMAILS=$(dotenv CAREGIVER_EMAILS)"
 ENV_VARS+="|FIREBASE_API_KEY=$(dotenv FIREBASE_API_KEY)"

@@ -76,7 +76,7 @@ Open http://localhost:8000 (health check: `/api/health`).
 | `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_READONLY_TOKEN`, `SIMON_APP_URL`, `SIMON_PROFILES` | Optional: the games app, **read-only** token; `account=profile` pairs. |
 | `TAVILY_API_KEY` | Optional: research (free 1,000 searches/month); without it research is skipped. |
 
-The private patient profile is a gitignored local file for development (`prompts/patient_profile.local.md`). In production it's in the private bucket.
+Patient profiles are per account (sub-plan 15), kept with the account's data: the family uploads one on the caregiver page (the account's profile card); accounts without one get none until the app infers it (sub-plan 15.5). A new account's sessions are visible to everyone in `CAREGIVER_EMAILS`.
 
 ## Test
 

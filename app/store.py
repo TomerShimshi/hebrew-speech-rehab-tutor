@@ -106,6 +106,8 @@ class SessionStore(Protocol):
     def set_recommendation_status(self, pid: str, rec_id: str, status: str) -> bool: ...
     def get_notes(self, pid: str) -> dict | None: ...
     def save_notes(self, pid: str, text: str, by: str) -> None: ...
+    def get_profile(self, pid: str) -> dict | None: ...  # his profile (15): {text, source, updated_by, updated_at}
+    def save_profile(self, pid: str, text: str, source: str, by: str) -> None: ...
     def save_session_prompt(self, pid: str, sid: str, text: str, version: str) -> None: ...
     def get_settings(self, pid: str) -> dict | None: ...
     def get_billing_state(self) -> dict | None: ...
@@ -132,6 +134,7 @@ def _turn_fields(turn: TurnIn) -> dict:
 
 class InMemorySessionStore:
     def __init__(self) -> None:
+        self.profiles: dict[str, dict] = {}  # his profile (15)
         self.sessions: dict[tuple[str, str], dict] = {}
         self.turns: dict[tuple[str, str], dict[str, dict]] = {}
         self.memory: dict[str, dict] = {}
@@ -329,6 +332,12 @@ class InMemorySessionStore:
 
     def save_notes(self, pid, text, by):
         self.notes[pid] = {"text": text, "updated_by": by, "updated_at": _now()}
+
+    def get_profile(self, pid):
+        return self.profiles.get(pid)
+
+    def save_profile(self, pid, text, source, by):
+        self.profiles[pid] = {"text": text, "source": source, "updated_by": by, "updated_at": _now()}
 
     def save_session_prompt(self, pid, sid, text, version):
         self.session_prompts[(pid, sid)] = {"text": text, "prompt_version": version, "saved_at": _now()}
@@ -623,6 +632,14 @@ class FirestoreSessionStore:
     def save_notes(self, pid, text, by):
         self._patient(pid).collection("caregiver").document("notes").set(
             {"text": text, "updated_by": by, "updated_at": self._fs.SERVER_TIMESTAMP})
+
+    def get_profile(self, pid):
+        snap = self._patient(pid).collection("caregiver").document("profile").get()
+        return snap.to_dict() if snap.exists else None
+
+    def save_profile(self, pid, text, source, by):
+        self._patient(pid).collection("caregiver").document("profile").set(
+            {"text": text, "source": source, "updated_by": by, "updated_at": self._fs.SERVER_TIMESTAMP})
 
     def save_session_prompt(self, pid, sid, text, version):
         self._session(pid, sid).collection("prompt").document("live").set(

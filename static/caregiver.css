@@ -49,7 +49,7 @@ body.cg { font-size: 1.05rem; line-height: 1.5; }
 .probes { display: flex; flex-wrap: wrap; gap: .35rem; margin: .3rem 0; }
 .probe { font-size: .95rem; padding: .1rem .6rem; border-radius: .6rem; background: #f1f3f8; }
 .probe.uncued { background: #e3f6e8; } .probe.cued { background: #fff4d6; } .probe.failed { background: #fde3e3; }
-.cg-card button.small, .cg-card a.small {
+.cg-card button.small, .cg-card a.small, .cg-card label.file-pick {
   font-size: .95rem; padding: .3rem .8rem; border-radius: .6rem; border: 1px solid #cfd6e3;
   background: #fff; color: var(--accent); cursor: pointer; text-decoration: none; display: inline-block;
 }
@@ -93,7 +93,7 @@ table.words th { color: var(--muted); font-weight: normal; }
 .suggest { background: #fff7e6; border: 1px solid #f6c768; border-radius: .6rem; padding: .4rem .7rem; margin: .4rem 0; }
 .player { height: 2.2rem; max-width: 100%; vertical-align: middle; }
 .session .voice-line { font-size: .9rem; color: var(--muted); margin: .2rem 0; }
-#sec-notes textarea { width: 100%; font: inherit; padding: .5rem .7rem; border: 1px solid #cfd6e3; border-radius: .6rem; resize: vertical; }
+#sec-notes textarea, #sec-profile textarea { width: 100%; font: inherit; padding: .5rem .7rem; border: 1px solid #cfd6e3; border-radius: .6rem; resize: vertical; }
 .mem-item { display: flex; gap: .4rem; align-items: baseline; }
 .mem-item .x { border: none; background: none; color: var(--muted); cursor: pointer; font-size: .95rem; padding: 0 .3rem; }
 .mem-item .x:hover { color: var(--danger); }
@@ -143,3 +143,4 @@ table.words th { color: var(--muted); font-weight: normal; }
 .wordbar span { display: block; height: 100%; }
 .cg-actions { display: flex; flex-wrap: wrap; gap: .4rem .8rem; align-items: center; margin-top: .6rem; }
 .cg-card button.small:disabled { opacity: .5; cursor: default; }
+.cg-card label.file-pick { cursor: pointer; }

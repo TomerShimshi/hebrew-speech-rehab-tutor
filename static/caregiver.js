@@ -742,6 +742,54 @@ function voiceLine(s) {
   return el("p", { class: "voice-line", text: `🎚️ ${parts.join(" · ")}` });
 }
 
+// His profile (15): uploaded here, or inferred by the app from his first sessions (15.5).
+const PROFILE_SOURCE = { uploaded: "נכתב כאן", inferred: "נבנה ע\"י האפליקציה מהשיחות" };
+let savedProfile = "";
+function renderProfile(profile) {
+  savedProfile = profile?.text || "";
+  $("profile-source").textContent = savedProfile
+    ? `מקור: ${PROFILE_SOURCE[profile.source] || profile.source} · עודכן ${when(profile.updated_at)}`
+    : "אין פרופיל לחשבון הזה: המטפלת מכירה אותו רק מהשיחות.";
+  $("profile-view").textContent = savedProfile;
+  $("profile-view").hidden = !savedProfile;
+  $("profile-status").textContent = "";
+  editProfile(false);
+}
+// Read-only like the prompt and memory cards; the editor opens on demand.
+function editProfile(on) {
+  $("profile").value = savedProfile;
+  for (const id of ["profile-edit", "profile-save", "profile-load", "profile-count"]) $(id).hidden = !on;
+  $("profile-view").hidden = on || !savedProfile;
+  $("profile-toggle").textContent = on ? "ביטול" : savedProfile ? "עריכה" : "הוספת פרופיל";
+  if (on) countProfile();
+}
+$("profile-toggle").addEventListener("click", () => {
+  editProfile($("profile-edit").hidden);
+  $("profile-status").textContent = "";
+});
+function countProfile() { $("profile-count").textContent = `${$("profile").value.length}/8000`; }
+$("profile").addEventListener("input", () => { countProfile(); $("profile-status").textContent = "לא נשמר"; });
+$("profile-file").addEventListener("change", async () => {
+  const file = $("profile-file").files[0];
+  if (!file) return;
+  $("profile").value = (await file.text()).slice(0, 8000);
+  countProfile();
+  $("profile-status").textContent = `נטען "${file.name}" -- לא נשמר עדיין`;
+  $("profile-file").value = "";
+});
+$("profile-save").addEventListener("click", async () => {
+  $("profile-save").disabled = true;
+  try {
+    await api(acct("/profile"), { text: $("profile").value }, "PUT");
+    await loadAccount();
+    $("profile-status").textContent = "✓ נשמר. הגרסה הקודמת גובתה. נכנס לתוקף מהשיחה הבאה.";
+  } catch {
+    $("profile-status").textContent = "השמירה נכשלה.";
+  } finally {
+    $("profile-save").disabled = false;
+  }
+});
+
 function renderNotes(notes) {
   $("notes").value = notes?.text || "";
   $("notes-status").textContent = notes?.updated_at ? `נשמר ${when(notes.updated_at)}` : "";
@@ -1006,6 +1054,7 @@ async function loadAccount() {
     renderNamesGame(ov.check_in_set, ov.check_in_history);
     renderResearch(ov.research_notes);
     renderGames(ov.recommendations, ov.games_profile);
+    renderProfile(ov.profile);
     renderNotes(ov.notes);
     const au = ov.audio || {};
     audioUsage = au.enabled && au.files !== null && au.files !== undefined

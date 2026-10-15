@@ -1,21 +1,18 @@
-"""Loads the private, de-identified patient profile that personalizes the tutor prompt.
+"""The profile that personalizes the tutor prompt -- one per account (15).
 
-The profile never lives in git or the container image (the repo is public). Its home is
-a private Cloud Storage object (PATIENT_PROFILE_URI=gs://...), readable only by the app's
-service account. For local development without the bucket, a gitignored local file
-(PATIENT_PROFILE_PATH) is used instead.
+Kept with the account's data (Firestore, private, like its memory), never in git or the image
+(the repo is public). Two sources:
+- "uploaded": written by the family on the caregiver page (e.g. from his speech-language
+  assessment). The app never overwrites it.
+- "inferred": written by the app from his first sessions (15.5).
+An account with neither has no profile. Nothing of one account's profile reaches another.
 """
 
 import sys
-import threading
-import time
-from collections.abc import Callable
-from pathlib import Path
+from dataclasses import dataclass
 
-from app.config import Settings
-from app.prompts import read_optional_text
-
-CACHE_TTL_S = 300  # a profile edit (re-upload) reaches the tutor within 5 minutes
+PROFILE_MAX_CHARS = 8000  # a page or two: it goes into every prompt
+SOURCES = ("uploaded", "inferred")
 VOCABULARY_PREFIX = "vocabulary:"
 
 
@@ -46,32 +43,14 @@ def read_gcs_text(uri: str) -> str:
     return blob.download_as_text(encoding="utf-8").strip()
 
 
-class PatientProfileLoader:
-    def __init__(
-        self,
-        settings: Settings,
-        read_gcs: Callable[[str], str] = read_gcs_text,
-        clock: Callable[[], float] = time.monotonic,
-    ):
-        self._uri = settings.patient_profile_uri
-        self._path: Path | None = settings.patient_profile_path
-        self._read_gcs = read_gcs
-        self._clock = clock
-        self._cached: str | None = None
-        self._cached_at = 0.0
-        self._lock = threading.Lock()
+@dataclass(frozen=True)
+class AccountProfile:
+    text: str
+    source: str  # "uploaded" | "inferred" | "" (none yet)
 
-    def get(self) -> str:
-        if not self._uri:
-            return read_optional_text(self._path)
-        with self._lock:
-            if self._cached is not None and self._clock() - self._cached_at < CACHE_TTL_S:
-                return self._cached
-            try:
-                self._cached = self._read_gcs(self._uri)
-                self._cached_at = self._clock()
-            except Exception as exc:  # never block a session on this
-                _log(f"could not read {self._uri}: {exc!r}")
-                if self._cached is None:
-                    return ""  # the tutor still works, just without personalization
-            return self._cached
+
+def account_profile(store, pid: str) -> AccountProfile:
+    """This account's own profile, for the tutor and the agents. Never someone else's."""
+    doc = store.get_profile(pid) or {}
+    text = (doc.get("text") or "").strip()
+    return AccountProfile(text, doc.get("source", "") if text else "")

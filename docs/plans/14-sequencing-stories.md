@@ -109,10 +109,14 @@ Not in this round. Decide after seeing how the voice-only version goes.
 - **Build a plan for each account (dry run, nothing saved):** a new everyday story, events in the right order, the recommended number of events; the scrambled order isn't close to the original.
 - **A live test on Tomer's account:** she says the events clearly and slowly in one turn, doesn't correct mid-way, helps with one question at a time, and then talks about it with him.
 
+## What was built and changed after testing (2026-10-13 to 15)
+- `app/sequencing.py` (scramble, score, size), `SequencingStep`, `add_sequencing`, `record_sequencing` (+ one extra round when the memory agent misses it), the progress series and the export.
+- After Tomer's sessions: the scrambled events appear on his screen as centered cards as she says them (numbered "ראשון: ... שני: ..."); every regular session has a task, the two kinds taking turns.
+
 ## Done when
-- [ ] Sequencing comes up every session, the kinds taking turns, and it holds a few minutes of real talk.
-- [ ] Its score shows on the session, in progress, and in the therapist export.
-- [ ] `pytest` passes.
+- [x] Sequencing comes up every session, the kinds taking turns (the scrambled game tested; the retell still to try in a real session).
+- [x] Its score shows on the session, in progress, and in the therapist export.
+- [x] `pytest` passes.
 
 ## Commit
 `Sub-plan 14: telling things in order (sequencing and story retell)`

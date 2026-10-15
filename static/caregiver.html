@@ -168,6 +168,25 @@
         <div id="next-prompt"><p class="muted">נטען בפתיחה…</p></div>
       </details>
 
+      <details class="cg-card" id="sec-profile">
+        <summary>הפרופיל שלו</summary>
+        <p class="muted">מי הוא ומה לתרגל: למשל מהאבחון של הקלינאית (בלי שם מלא). המטפלת, בונה השיעורים והזיכרון
+          מקבלים אותו מהשיחה הבאה. אפשר להדביק טקסט או לטעון קובץ טקסט. שורה שמתחילה ב־"Vocabulary:" (שמות מופרדים
+          בפסיקים) עוזרת לתמלול לשמוע את השמות שלו נכון.</p>
+        <p id="profile-source" class="muted kv"></p>
+        <pre id="profile-view" class="plan" dir="auto"></pre>
+        <div id="profile-edit" hidden>
+          <textarea id="profile" rows="14" maxlength="8000" dir="auto"></textarea>
+        </div>
+        <div class="cg-actions">
+          <button id="profile-toggle" class="small" type="button">עריכה</button>
+          <button id="profile-save" class="small" type="button" hidden>שמירה</button>
+          <label id="profile-load" class="small file-pick" hidden>טעינת קובץ <input id="profile-file" type="file" accept=".md,.txt,text/plain" hidden></label>
+          <span id="profile-count" class="muted" hidden></span>
+          <span id="profile-status" aria-live="polite"></span>
+        </div>
+      </details>
+
       <details class="cg-card" id="sec-notes">
         <summary>הערות לבונה השיעורים</summary>
         <p class="muted">מטרות מהקלינאית, דברים להתמקד בהם או להימנע מהם, תיקונים. בונה השיעורים מקבל אותן בכל פעם

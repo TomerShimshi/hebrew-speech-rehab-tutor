@@ -37,6 +37,11 @@ Part of the [master design](00-master-design.md). After [15.5](15.5-first-sessio
 - **Wider goodbye words:** "ביי", "יאללה ביי", "תודה רבה, להתראות", "נדבר", "נתראה", "שיהיה לך…" (a wish at the end, if it follows her goodbye).
 - **Fits 13:** if 13 adds its optional gate ("not before the wrap-up note"), the gate comes first; this rule only decides whether he said goodbye.
 
+### B2. Transcription markers (added 2026-10-15)
+- **Seen in a test session (15.10):** Gemini's transcription of her voice twice wrote `<no speech detected>` at the end of her line (a pause or breath with no speech). The page adds whatever text arrives, so it showed in the captions, the saved transcript and the caregiver page, and the memory agent reads it too. He never heard it.
+- **Fix (page code):** drop any text in angle brackets (`<...>`) from both transcripts (hers and his) before it is shown or saved. Real Hebrew speech never comes in that form.
+- **The memory agent's transcript** (`format_transcript`) drops them too, for sessions saved before the fix.
+
 ### C. Leaving a conversation out (caregiver page + code)
 - **The button:** on each conversation on the caregiver page, "🚫 לא לכלול בזיכרון ובתכנון", with an inline confirm. When a conversation is left out, it shows a "לא נכלל" chip, and the button becomes "↩ להחזיר".
 - **Stored:** `excluded: true`, `excluded_by`, `excluded_at` on the session. Nothing is deleted: the transcript, recording and prompt stay.
@@ -66,6 +71,7 @@ Part of the [master design](00-master-design.md). After [15.5](15.5-first-sessio
 | `static/app.js` | The noise filter off during the names game step; goodbye: both transcripts, the last two lines, one refusal at most, wider words. |
 | `app/agent/memory_update.py`, `app/audio_store.py` | Re-check the names game from the recording; the `misheard` tutor issue. |
 | `app/transcripts.py`, `app/main.py` | `goodbye_refusals` on the session (from the page's `/end`). |
+| `static/app.js`, `app/agent/memory_update.py` | Drop `<...>` transcription markers (B2). |
 | `app/store.py` | `excluded` on sessions; the sweep and pending queries skip them. |
 | `app/agent/memory_update.py`, `app/agent/next_class.py`, `app/session_prompt.py`, `app/voice_tuning.py`, `app/caregiver_api.py` | Skip left-out sessions (the table above). |
 | `app/check_in_set.py`, `app/agent/memory_edit.py` | Remove a session's names-game results and summary; restore before it. |
@@ -75,6 +81,7 @@ Part of the [master design](00-master-design.md). After [15.5](15.5-first-sessio
 ## Done when
 - [ ] A names-game answer the live model misheard is corrected from the recording, and shown as a tutor issue.
 - [ ] A goodbye misheard by one transcript still ends the session after her goodbye; never more than one refusal.
+- [ ] No `<...>` transcription markers in the captions, the saved transcript or the memory agent's input.
 - [ ] A conversation left out is visible and marked, but changes nothing in the memory, plan, names game, pace, timing or graphs; putting it back works.
 - [ ] `pytest` passes.
 
