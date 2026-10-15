@@ -78,6 +78,7 @@ Part of the [master design](00-master-design.md). After [09](09-polish.md). Requ
 ## Done when
 - [x] The key is on the paid tier (AI Studio shows it; no more free-tier 429s).
 - [~] The budget (120 ILS: email at 60, soft stop at 90, kill switch at 120) is set; the alert emails will show with real spend.
+- **2026-10-15: raised to 200 ILS** (Tomer; 60 ILS spent by mid-month): email at 100, soft stop at 150, kill switch at 200. The soft stop and the kill switch read the amount from the budget's notifications, so only the budget itself (and `setup_gcp.sh`'s default) changed.
 - [x] The soft stop pauses model use and "resume" restarts it (tests + a dry-run Pub/Sub message).
 - [x] The daily Live-minutes cap works (tests).
 - [x] With Tavily unavailable, research falls back to Gemini search, with the same guardrails (tests; one live run).

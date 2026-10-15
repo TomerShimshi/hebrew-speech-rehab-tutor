@@ -43,8 +43,8 @@ fi
 CURRENCY="$(gcv billing accounts describe "$BILLING_ACCOUNT" --format='value(currencyCode)')"
 if [[ -z "${BUDGET_AMOUNT:-}" ]]; then
   case "$CURRENCY" in
-    USD) BUDGET_AMOUNT=32 ;;   # paid Gemini tier (sub-plan 10): ~120 ILS
-    ILS) BUDGET_AMOUNT=120 ;;  # email at 50%, soft stop at 75% (90 ILS), kill switch at 100%
+    USD) BUDGET_AMOUNT=55 ;;   # paid Gemini tier (sub-plan 10): ~200 ILS (raised from 120, 2026-10-15)
+    ILS) BUDGET_AMOUNT=200 ;;  # email at 50%, soft stop at 75% (150 ILS), kill switch at 100%
     *) echo "!! Billing currency is $CURRENCY -- set BUDGET_AMOUNT (about 1 USD) and re-run"; exit 1 ;;
   esac
 fi

@@ -3,7 +3,7 @@
 The monthly budget (120 ILS) publishes its notifications to the `budget-alerts` Pub/Sub topic
 several times a day, each with the month's spend so far. The kill switch (a Cloud Run function)
 removes billing at 100%. This module is the gentler step before it: a push subscription sends
-the same notifications to the app (POST /internal/budget), and at 75% (90 ILS) everything that
+the same notifications to the app (POST /internal/budget), and at 75% (150 ILS of 200) everything that
 calls a model pauses -- new sessions, memory updates, plans, research, the sweep, the caregiver
 page's model actions. The site, the data and the caregiver page stay up (they cost nothing).
 

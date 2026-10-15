@@ -108,7 +108,7 @@ The tests use fakes for Gemini, Firestore, Upstash and Tavily, so they never cal
 `deploy.sh` deploys to Cloud Run (0–1 instances) and keeps only what's live: old revisions, images and source archives are cleaned up.
 
 ### Spending limits: email, soft stop, kill switch
-One monthly budget (default **120 ILS**, set by `setup_gcp.sh`) publishes its notifications to the `budget-alerts` Pub/Sub topic, several times a day:
+One monthly budget (default **200 ILS**: raised from 120 on 2026-10-15; set by `setup_gcp.sh`) publishes its notifications to the `budget-alerts` Pub/Sub topic, several times a day:
 
 | Spend | What happens |
 |---|---|
