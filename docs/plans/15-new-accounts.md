@@ -1,6 +1,6 @@
 # Sub-plan 15: New accounts, with a profile and vocabulary the app learns
 
-Part of the [master design](00-master-design.md). After [14](14-sequencing-stories.md), before [16](16-names-goodbyes-and-excluded-sessions.md). Requested by Tomer (2026-10-13). **To build after 14 is finished.**
+Part of the [master design](00-master-design.md). After [14](14-sequencing-stories.md), before [15.5](15.5-first-sessions-needs-check.md). Requested by Tomer (2026-10-13). **To build after 14 is finished.**
 
 ## Why
 - **Someone new wants to try the app.** Adding an email to `ALLOWED_EMAILS` (and deploying) lets them sign in, and their sessions, memory and plans are already their own (`patient_id_for` keys everything by email).
