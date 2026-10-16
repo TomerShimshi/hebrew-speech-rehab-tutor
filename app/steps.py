@@ -285,8 +285,8 @@ CHECK_RULES = {
                          "Let him tell it all the way; if he stops early, one \"ומה אחר כך?\". No corrections."),
     "clarity": ("A playful moment (\"בוא ננסה משהו מצחיק\"): ask him to say the first item as fast as he can, a few "
                 "times -- do it with him and laugh lightly. Once is enough."),
-    "goals": ("Ask what is hardest for him when he talks with people, and what he would like to be able to do "
-              "better. Listen, react to what he says, one follow-up. Never say goals or assessment."),
+    "goals": ("Ask what is hardest for him when he talks with people; listen and react. Only after his answer, "
+              "ask what he would like to be able to do better. Never say goals or assessment."),
 }
 CHECK_ANSWERS = {"naming": 3, "repetition": 3, "understanding": 2, "connected_speech": 1, "clarity": 1, "goals": 2}
 

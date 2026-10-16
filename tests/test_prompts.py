@@ -40,8 +40,9 @@ def test_read_optional_text_handles_missing_file(tmp_path):
 
 def test_conversation_flow_rules_present():
     text = " ".join(render_tutor_prompt().text.split())
-    # 3.0: at most one question per turn, and it's the last thing she says (12.10)
-    assert "AT MOST ONE question -- the LAST thing you say" in text and "Never two questions in one turn" in text
+    # one question at a time (12.10), explained; never two glued with "או ש" (16.10)
+    assert "ONE QUESTION AT A TIME" in text and "Ask the one that matters more now" in text
+    assert 'Never join two questions, or a remark and a question, with "או"' in text
     assert "NO summary, NO homework" in text and "end a TOPIC, not the session" in text  # no early goodbyes (12)
     # how the session works comes right after the role, and the steps stay behind the scenes
     with_steps = render_tutor_prompt(steps="Today's steps, in order: 1. opening.").text

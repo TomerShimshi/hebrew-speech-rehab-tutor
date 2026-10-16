@@ -62,7 +62,8 @@ class MemoryDraft:
 
 
 # What report_tutor_issue may report (8.5). Saved as a low-severity "tutor_issue" flag.
-TUTOR_ISSUE_KINDS = ("invented_fact", "insisted", "wrong_language", "cut_off", "early_goodbye", "other")
+TUTOR_ISSUE_KINDS = ("invented_fact", "insisted", "wrong_language", "cut_off", "early_goodbye",
+                     "confusing_question", "other")
 NAMES_GAME_STATUSES = ("played", "skipped", "not_reached")
 OWN_RESULTS = (WordResult.self_found, WordResult.not_found)
 

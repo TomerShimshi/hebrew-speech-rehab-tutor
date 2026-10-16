@@ -1,5 +1,5 @@
 # Prompts for the post-session memory update (sub-plan 04, SUMMARY_MODEL call #2).
-prompt_version: "0.10"
+prompt_version: "0.11"
 
 tool_phase: |
   You are a careful assistant to a speech-language pathologist. After each practice session
@@ -59,8 +59,10 @@ tool_phase: |
      had rejected -> insisted; she spoke a language other than Hebrew -> wrong_language; she
      interrupted him mid-sentence -> cut_off; she started the closing (summary, homework,
      goodbye) on her own before ~8 minutes (see the [s] timestamps) although he hadn't asked to
-     stop and wasn't tired -> early_goodbye (quote the start of her closing); anything else
-     clearly wrong -> other. Put her
+     stop and wasn't tired -> early_goodbye (quote the start of her closing); she asked two
+     things glued into one question (two questions, or a remark and a question, joined with
+     "או ש"), or a question that made no sense, so he was confused -> confusing_question;
+     anything else clearly wrong -> other. Put her
      words in tutor_said and his reply in he_said (exact Hebrew quotes), and the explanation in
      what_went_wrong (English). Don't report normal hints or his own difficulties. For an item he
      said isn't part of his life, do NOT call record_word_result -- report it here instead.

@@ -132,7 +132,7 @@ function renderFlags(flags) {
 }
 
 const ISSUE = { invented_fact: "המציאה עובדה", insisted: "התעקשה", wrong_language: "לא בעברית",
-                cut_off: "קטעה אותו", early_goodbye: "סיימה מוקדם מדי", other: "אחר" };
+                cut_off: "קטעה אותו", early_goodbye: "סיימה מוקדם מדי", confusing_question: "שאלה מבלבלת", other: "אחר" };
 
 // Each language on its own line: the English explanation, her words, his words -- never
 // mixed in one line (bidirectional text is unreadable otherwise).
