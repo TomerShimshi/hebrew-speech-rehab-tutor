@@ -45,6 +45,22 @@ QUESTION_CHARS = 300
 NOT_PERSONAL = {"hebrew", "english", "arabic", "russian", "israel", "israeli", "simon", "gemini"}
 
 
+
+# The research sub-agent's one tool (07); a constant so the tools catalog (docs/tools.md) lists it.
+WEB_SEARCH_TOOL = dict(
+    name="web_search",
+    description="Search the web. Returns up to 5 results: title, url, content snippet.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "3-6 English keywords, no personal details."},
+            "scope": {"type": "string", "enum": list(SCOPES),
+                      "description": "'trusted' = professional sources only (default); 'open' = whole web, once."},
+        },
+        "required": ["query"],
+    },
+)
+
 def _log(message: str) -> None:
     print(f"[research] {message}", file=sys.stderr, flush=True)
 
@@ -226,20 +242,7 @@ def research_technique(
                 returned.setdefault(r["url"], r)
             return {"results": [{"title": r["title"], "url": r["url"], "content": r["content"]} for r in found]}
 
-        search_tool = Tool(
-            name="web_search",
-            description="Search the web. Returns up to 5 results: title, url, content snippet.",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "3-6 English keywords, no personal details."},
-                    "scope": {"type": "string", "enum": list(SCOPES),
-                              "description": "'trusted' = professional sources only (default); 'open' = whole web, once."},
-                },
-                "required": ["query"],
-            },
-            handler=handle_search,
-        )
+        search_tool = Tool(**WEB_SEARCH_TOOL, handler=handle_search)
         prompt = load_prompt()
         models = _models(settings)
         run_tool_loop(client, models, prompt["search_phase"], f"QUESTION: {q}", [search_tool],

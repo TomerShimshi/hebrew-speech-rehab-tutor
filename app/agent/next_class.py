@@ -36,6 +36,16 @@ PROMPT_PATH = REPO_ROOT / "prompts" / "next_class.yaml"
 TECHNIQUES_PATH = REPO_ROOT / "prompts" / "therapy_techniques.yaml"
 MIN_SET_ITEMS = 4  # a names-game set needs at least this many usable names
 PLAN_MAX_ROUNDS = 16  # the plan builder's tool loop (13.5)
+
+# The research phase's one tool (07); a constant so the tools catalog (docs/tools.md) lists it.
+RESEARCH_TOOL = dict(
+    name="research_technique",
+    description=("Look up evidence-based home-practice techniques (professional sources) for ONE "
+                 "generic clinical question in English. Never include names, places or Hebrew."),
+    parameters={"type": "object", "properties": {"question": {"type": "string", "description":
+                "e.g. 'mild anomia for proper names in a fluent speaker; retrieval practice at home'"}},
+                "required": ["question"]},
+)
 PACE_SESSIONS = 5  # his pace (12b) from this many recent real sessions
 FAST_PACE, SLOW_PACE = 3.2, 2.0  # his answers per minute: a fast talker uses a plan up sooner
 GROUNDING_SESSIONS = 3  # his own lines in this many recent transcripts count as "his data"
@@ -280,15 +290,7 @@ def run_research_phase(store, client, settings, pid, context, personal, now, gen
         outcome.update({"question": question, **result})
         return result
 
-    tool = Tool(
-        name="research_technique",
-        description=("Look up evidence-based home-practice techniques (professional sources) for ONE "
-                     "generic clinical question in English. Never include names, places or Hebrew."),
-        parameters={"type": "object", "properties": {"question": {"type": "string", "description":
-                    "e.g. 'mild anomia for proper names in a fluent speaker; retrieval practice at home'"}},
-                    "required": ["question"]},
-        handler=handle,
-    )
+    tool = Tool(**RESEARCH_TOOL, handler=handle)
     try:
         run = run_tool_loop(client, _models(settings), load_prompt()["research_phase"], context, [tool],
                             max_rounds=3, generate_fn=generate_fn)
