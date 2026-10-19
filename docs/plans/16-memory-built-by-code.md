@@ -1,6 +1,6 @@
 # Sub-plan 16: The tutor's memory, built by code from the checked sections
 
-Part of the [master design](00-master-design.md). After [15.5](15.5-first-sessions-needs-check.md), before [17](17-measuring-and-summarizing.md). Requested by Tomer (2026-10-19), after an audit of the patient's memory text. **To review before building.**
+Part of the [master design](00-master-design.md). After [15.5](15.5-first-sessions-needs-check.md), before [17](17-measuring-and-summarizing.md). Requested by Tomer (2026-10-19), after an audit of the patient's memory text. **Built 2026-10-19.**
 
 ## Why
 - **Today the memory update has two parts** (04): a tool loop that edits the memory sections one checked item at a time (facts, interests, what works, what to avoid, homework, the word bank), and then one **structured-output call that rewrites from scratch** the text the tutor actually reads (`memory_prompt`, ~250 words) and 2-4 focus points -- from the sections, the session summaries and the previous text.
@@ -58,12 +58,21 @@ Part of the [master design](00-master-design.md). After [15.5](15.5-first-sessio
 | `tests/` | Every section item appears in the text; nothing else does; the order and caps; `set_focus`; removing re-renders without a model call; the memory update makes no consolidation call. |
 | `docs/tools.md` | Regenerated (`set_focus`). |
 
+## What was built (2026-10-19)
+- `app/memory_text.py` `render_memory`: "you have talked N times", last time (the latest summary), then the sections in a fixed order, newest first, capped; empty sections left out.
+- The memory update: no consolidation call (one model call fewer per session); `set_focus` (2-4 points; the old ones kept if not called); what works / to avoid only from this session, with what happened; "every item reaches the tutor word for word". Memory update prompt 0.12; `ConsolidatedMemory` and the `remove_fact` prompt removed.
+- Caregiver edits: removing an item and restoring a version re-render the text by code -- no model call; the remove endpoint no longer needs the models (not paused-gated).
+- `docs/tools.md` regenerated (`set_focus`; the overview).
+- **The move:** each account's text rendered and saved as a new memory version (`migrate16-...`), the old text in the history. The patient's comparison (dry run first): only in the old text -- the unsourced "give him time to self-monitor" advice, a recall instruction, and three points from older session summaries (his age and stroke are in his profile anyway); only in the new text -- 19 checked items the old text had dropped. ~250 -> ~480 words.
+- Tests: `test_memory_text.py` (3); the memory, wiring and caregiver tests updated (no consolidation reply). `pytest`: 296 passed.
+- Note: a wrong item in the sections now reaches the tutor as written -- removing it on the caregiver page is instant.
+
 ## Done when
-- [ ] The tutor's memory text is assembled by code from the sections; no item is dropped and nothing is added.
-- [ ] Focus points come from `set_focus`; "what works" and "what to avoid" fill from his sessions.
-- [ ] Removing a fact on the caregiver page is instant and needs no model call.
-- [ ] The patient's old and new texts were compared before the switch.
-- [ ] `pytest` passes.
+- [x] The tutor's memory text is assembled by code from the sections; no item is dropped and nothing is added.
+- [x] Focus points come from `set_focus`; "what works" and "what to avoid" fill from his sessions.
+- [x] Removing a fact on the caregiver page is instant and needs no model call.
+- [x] The patient's old and new texts were compared before the switch.
+- [x] `pytest` passes.
 
 ## Commit
 `Sub-plan 16: the tutor's memory built by code from the checked sections`

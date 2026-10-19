@@ -11,7 +11,7 @@ from app.agent.memory_update import run_memory_update, sequencing_result
 from app.agent.next_class import build_next_plan, sequencing_history
 from app.agent.plan_tools import PlanDraft, build_plan_tools
 from app.config import Settings
-from app.schemas import ClassPlan, ConsolidatedMemory, MemorySections
+from app.schemas import ClassPlan, MemorySections
 from app.steps import SequencingStep
 from app.store import InMemorySessionStore
 from app.transcripts import EndReason, TurnIn
@@ -180,7 +180,7 @@ def test_memory_update_saves_the_sessions_sequencing():
         ("tutor", "קרה לך פעם משהו כזה?"), ("patient", "כן, קניתי מתנה לנכד")])])
     store.end_session(DAD, sid, EndReason.tutor_goodbye)
     client = FakeClient(tool_calls(("record_sequencing", {"told_order": [1, 2, 3, 4], "needed_help": False})),
-                        text("done"), text("{}", parsed=ConsolidatedMemory(memory_prompt="m", focus_next_session=[])))
+                        text("done"))
     assert run_memory_update(store, client, SETTINGS, DAD, sid, generate_fn=gen) == "done"
     seq = store.get_session(DAD, sid)["sequencing"]
     assert (seq["status"], seq["order_pct"], seq["full"], seq["title"]) == ("done", 100, True, "buying a gift")
@@ -196,8 +196,7 @@ def test_a_missing_sequencing_report_gets_one_extra_round():
         ["קודם הוא יצא מהבית, נכנס לחנות, בחר מתנה ושילם", "כן, קניתי מתנה לנכד", "היה נחמד"])])
     store.end_session(DAD, sid, EndReason.tutor_goodbye)
     client = FakeClient(text("done"),  # the first loop forgets it
-                        tool_calls(("record_sequencing", {"told_order": [1, 2, 3, 4]})), text("ok"),
-                        text("{}", parsed=ConsolidatedMemory(memory_prompt="m", focus_next_session=[])))
+                        tool_calls(("record_sequencing", {"told_order": [1, 2, 3, 4]})), text("ok"))
     run_memory_update(store, client, SETTINGS, DAD, sid, generate_fn=gen)
     assert "YOU MISSED ONE" in str(client.requests[1]["config"])
     assert store.get_session(DAD, sid)["sequencing"]["status"] == "done"

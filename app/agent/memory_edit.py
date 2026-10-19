@@ -4,23 +4,16 @@ Speech recognition can put a wrong "fact" into the memory (a misheard name). The
 can remove one item, or restore an earlier version. Either way the replaced memory goes into
 memory_history first (so the change can be undone), and the caller backs it up to the bucket.
 
-Removing an item also rewrites memory_prompt -- the summary the tutor actually reads -- with
-one small SUMMARY_MODEL call, so the fact is gone from both places. If that call fails,
-nothing is changed.
+The text the tutor reads (memory_prompt) is rendered by code from the sections (16), so after a
+removal or a restore it is simply rendered again: the fact is gone at once, no model call.
 """
 
 import datetime as dt
 import sys
 
-from google.genai import types
-
-from app.agent.memory_update import _models, load_prompts
-from app.config import Settings
-from app.llm import generate
+from app.memory_text import render_memory
 from app.schemas import SECTION_NAMES
 from app.store import SessionStore
-
-MIN_KEEP_RATIO = 0.3  # a rewritten summary shorter than this (vs the old one) is a broken reply
 
 
 class MemoryEditError(Exception):
@@ -39,10 +32,9 @@ def _without_meta(doc: dict) -> dict:
     return {k: v for k, v in doc.items() if k not in ("updated_at", "version")}
 
 
-def remove_item(store: SessionStore, client, settings: Settings, pid: str, section: str, item: str,
-                *, generate_fn=generate) -> dict:
-    """Removes one item from a memory section and rewrites the tutor's summary without it.
-    Returns the new memory. Raises MemoryEditError (nothing changed) on bad input or failure."""
+def remove_item(store: SessionStore, pid: str, section: str, item: str) -> dict:
+    """Removes one item from a memory section; the tutor's text is rendered again without it.
+    Returns the new memory. Raises MemoryEditError (nothing changed) on bad input."""
     if section not in SECTION_NAMES:
         raise MemoryEditError(f"unknown section {section!r}")
     current = store.get_memory(pid)
@@ -53,20 +45,9 @@ def remove_item(store: SessionStore, client, settings: Settings, pid: str, secti
         raise MemoryEditError("item not found (the memory may have changed; reload)")
     items.remove(item)
 
-    old_summary = current.get("memory_prompt", "")
-    summary = old_summary
-    if old_summary.strip():
-        prompt = load_prompts()["remove_fact"]
-        result = generate_fn(client, _models(settings),
-                             f"# FACT TO REMOVE\n{item}\n\n# CURRENT SUMMARY\n{old_summary}",
-                             types.GenerateContentConfig(system_instruction=prompt, temperature=0.1))
-        summary = (result.response.text or "").strip()
-        if len(summary) < MIN_KEEP_RATIO * len(old_summary.strip()):
-            raise MemoryEditError("the rewritten summary looks broken; nothing was changed")
-        _log(f"{pid}: summary rewritten without a {section} item ({len(old_summary)} -> {len(summary)} chars)")
-
-    new = {**_without_meta(current), "memory_prompt": summary,
-           "sections": {**(current.get("sections") or {}), section: items}}
+    new = {**_without_meta(current), "sections": {**(current.get("sections") or {}), section: items}}
+    new["memory_prompt"] = render_memory(new)
+    _log(f"{pid}: removed a {section} item; the text re-rendered")
     # The replaced version keeps its updated_at: the history is listed (and sorted) by it.
     store.save_memory(pid, f"edit-{_stamp()}", new, current)
     return new
@@ -92,6 +73,7 @@ def restore_version(store: SessionStore, pid: str, version: str) -> dict:
         raise MemoryEditError("version not found")
     current = store.get_memory(pid)
     restored = _without_meta(old)
+    restored["memory_prompt"] = render_memory(restored)  # from its sections, as every text is now (16)
     store.save_memory(pid, f"restore-{_stamp()}", restored, current)
     _log(f"{pid}: restored memory version {version}")
     return restored

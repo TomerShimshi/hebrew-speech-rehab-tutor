@@ -8,7 +8,6 @@ from app.agent.memory_update import run_memory_update
 from app.agent.next_class import build_next_plan
 from app.class_plan import intro_plan, plan_for_session, render_class_plan, render_plan_full
 from app.config import Settings
-from app.schemas import ConsolidatedMemory
 from app.store import InMemorySessionStore
 from app.transcripts import EndReason, TurnIn
 from conftest import DAD, FakeAuthTokens, auth
@@ -107,7 +106,6 @@ def test_memory_update_scores_the_sessions_names_game():
                    ("record_word_result", {"word": "צפת", "result": "cued", "asr_confidence": "high", "probe": True}),
                    ("record_word_result", {"word": "כנרת", "result": "cued", "asr_confidence": "high"})),
         text("done"),
-        text("{}", parsed=ConsolidatedMemory(memory_prompt="m", focus_next_session=[])),
     )
     assert run_memory_update(store, client, SETTINGS, DAD, sid, today=TODAY, generate_fn=gen) == "done"
     session = store.get_session(DAD, sid)

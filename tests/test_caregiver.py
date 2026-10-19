@@ -1,5 +1,6 @@
 """Caregiver page API (08): reading every allowlisted account and the caregiver actions."""
 
+from app.memory_text import render_memory
 from conftest import DAD, TOMER, auth
 from plan_helpers import a_plan
 
@@ -198,19 +199,18 @@ def test_notes_are_saved_per_account_and_reach_the_builder(env):
     assert "# NOTES FROM THE FAMILY / THERAPIST" in context and "Focus on family names." in context
 
 
-def test_remove_memory_item_rewrites_the_summary(env):
-    from fake_llm import FakeClient, text
+def test_remove_memory_item_re_renders_the_text_without_a_model(env):
+    from fake_llm import FakeClient
     env.configure(prompt_archive_uri="gs://bucket/debug/prompts")
     memory_with_facts(env)
     memory_with_facts(env, TOMER)
-    env.llm = FakeClient(text("He lives in Haifa. He loves the Galilee and trips to Akko."))
+    env.llm = FakeClient()  # no model call (16)
     r = post(env, f"/api/caregiver/{DAD}/memory/remove-item",
              {"section": "personal_facts", "item": "Lives in Haifa with his wife Rina"})
-    assert r.status_code == 200
+    assert r.status_code == 200 and env.llm.requests == []
     memory = env.store.get_memory(DAD)
     assert memory["sections"]["personal_facts"] == ["Has a dog named Bobo"]
-    assert memory["memory_prompt"] == "He lives in Haifa. He loves the Galilee and trips to Akko."
-    assert "Lives in Haifa with his wife Rina" in env.llm.requests[0]["contents"]  # the model was told what to drop
+    assert "wife Rina" not in memory["memory_prompt"] and "- Has a dog named Bobo" in memory["memory_prompt"]
     versions = env.store.list_memory_history(DAD)
     assert versions[0]["version"].startswith("edit-") and "wife Rina" in versions[0]["memory_prompt"]
     assert "wife Rina" in env.archived[r.json()["backup"]]  # bucket backup first
@@ -218,16 +218,11 @@ def test_remove_memory_item_rewrites_the_summary(env):
 
 
 def test_remove_memory_item_failures_change_nothing(env):
-    from fake_llm import FakeClient, server_error, text
     memory_with_facts(env)
     before = env.store.get_memory(DAD)
     path = f"/api/caregiver/{DAD}/memory/remove-item"
     assert post(env, path, {"section": "personal_facts", "item": "not there"}).status_code == 409
     assert post(env, path, {"section": "bogus", "item": "x"}).status_code == 409
-    env.llm = FakeClient(text("He."))  # a broken (far too short) rewrite
-    assert post(env, path, {"section": "personal_facts", "item": "Has a dog named Bobo"}).status_code == 409
-    env.llm = FakeClient(*[server_error() for _ in range(6)])  # models busy
-    assert post(env, path, {"section": "personal_facts", "item": "Has a dog named Bobo"}).status_code == 503
     assert env.store.get_memory(DAD) == before
 
 
@@ -235,11 +230,12 @@ def test_restore_a_version_and_undo_it(env):
     seed(env, DAD)  # current: "memory of DAD"; history: "older memory of DAD"
     old = env.store.list_memory_history(DAD)[0]["version"]
     assert post(env, f"/api/caregiver/{DAD}/memory/restore", {"version": old}).status_code == 200
-    assert env.store.get_memory(DAD)["memory_prompt"] == f"older memory of {DAD}"
+    restored = env.store.get_memory(DAD)
+    assert restored["memory_prompt"] == render_memory(restored)  # its text, rendered from its sections (16)
     undo = next(v for v in env.store.list_memory_history(DAD) if v["version"].startswith("restore-"))
     assert undo["memory_prompt"] == f"memory of {DAD}"
     assert post(env, f"/api/caregiver/{DAD}/memory/restore", {"version": undo["version"]}).status_code == 200
-    assert env.store.get_memory(DAD)["memory_prompt"] == f"memory of {DAD}"
+    assert f"interest of {DAD}" in env.store.get_memory(DAD)["memory_prompt"]
     assert post(env, f"/api/caregiver/{DAD}/memory/restore", {"version": "nope"}).status_code == 404
 
 
@@ -428,10 +424,10 @@ def test_process_an_unprocessed_session_now(env):
     env.llm = FakeClient(*[server_error() for _ in range(12)])  # models down at the end of the session
     env.client.post(f"/api/session/{sid}/end", headers=auth("tok-dad"), json={"reason": "end_button"})
     assert env.store.get_session(DAD, sid)["memory_status"] == "failed"
-    env.llm = FakeClient(text("done"), consolidated("He talked about his grandchildren."), *plan_reply())
+    env.llm = FakeClient(consolidated("He talked about his grandchildren."), text("done"), *plan_reply())
     body = post(env, f"/api/caregiver/{DAD}/sessions/{sid}/process").json()
     assert (body["memory_status"], body["plan_status"]) == ("done", "done")
-    assert env.store.get_memory(DAD)["memory_prompt"] == "He talked about his grandchildren."
+    assert "He talked about his grandchildren." in env.store.get_memory(DAD)["memory_prompt"]
     assert env.store.get_session(DAD, sid)["voice_decision"] is not None
     # done now: pressing it again changes nothing and calls no model
     env.llm = FakeClient()
@@ -445,7 +441,7 @@ def test_process_refuses_a_session_that_may_still_be_running_but_ends_a_stuck_on
     sid = talk(env)
     assert post(env, f"/api/caregiver/{DAD}/sessions/{sid}/process").status_code == 409  # started just now
     env.store.update_session(DAD, sid, {"started_at": dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=45)})
-    env.llm = FakeClient(text("done"), consolidated("m"), *plan_reply())
+    env.llm = FakeClient(consolidated("m"), text("done"), *plan_reply())
     assert post(env, f"/api/caregiver/{DAD}/sessions/{sid}/process").json()["memory_status"] == "done"
     assert env.store.get_session(DAD, sid)["end_reason"] == "abandoned"
     assert post(env, f"/api/caregiver/{DAD}/sessions/{sid}/process", token="tok-dad").status_code == 403
@@ -458,7 +454,7 @@ def test_process_picks_up_where_it_stopped_memory_done_plan_failed(env):
     from test_memory_wiring import consolidated, plan_reply, talk
     env.store.save_profile(DAD, "Man, 70.", "uploaded", TOMER)  # the classic intro, then a built plan
     sid = talk(env)
-    env.llm = FakeClient(text("done"), consolidated("Memory from the session."), text("{}"))  # plan reply invalid
+    env.llm = FakeClient(consolidated("Memory from the session."), text("done"), text("{}"))  # plan reply invalid
     env.client.post(f"/api/session/{sid}/end", headers=auth("tok-dad"), json={"reason": "end_button"})
     session = env.store.get_session(DAD, sid)
     assert (session["memory_status"], session["plan_status"]) == ("done", "failed")

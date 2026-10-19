@@ -101,17 +101,10 @@ class Flag(BaseModel):
     he_said: str = Field(default="", max_length=600)
 
 
-class ConsolidatedMemory(BaseModel):
-    """Structured output of the consolidation phase."""
-
-    memory_prompt: str = Field(description="Compact memory for the tutor, max ~500 words.")
-    focus_next_session: list[str] = Field(description="2-4 concrete focus points for next time.")
-
-
 class MemoryDoc(BaseModel):
     """patients/{pid}/memory/current"""
 
-    memory_prompt: str = ""
+    memory_prompt: str = ""  # the text the tutor reads, rendered by code from the sections (16)
     sections: MemorySections = MemorySections()
     word_bank: dict[str, WordStats] = {}
     focus_next_session: list[str] = []

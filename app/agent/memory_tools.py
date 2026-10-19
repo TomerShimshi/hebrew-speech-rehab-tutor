@@ -59,6 +59,7 @@ class MemoryDraft:
     names_game: dict | None = None  # {status, note} (12)
     sequencing: dict | None = None  # {told_order, needed_help, low_confidence, skipped, note} (14)
     inferring: Inferring | None = None  # no uploaded profile (15.5); None = the tools aren't offered
+    focus: list[str] | None = None  # 2-4 focus points for the next session (16); None = keep the old ones
 
 
 # What report_tutor_issue may report (8.5). Saved as a low-severity "tutor_issue" flag.
@@ -219,6 +220,15 @@ def build_memory_tools(draft: MemoryDraft) -> list[Tool]:
             inf.about.append(item)
         return {"ok": True, "about": len(inf.about)}
 
+    def set_focus(args: dict) -> dict:
+        points = [_norm(str(p)) for p in (args.get("points") or []) if _norm(str(p))]
+        if not 1 <= len(points) <= 4:
+            raise ValueError("give 2-4 points (at least one)")
+        if any(len(p) > MAX_ITEM_CHARS for p in points):
+            raise ValueError(f"a point is at most {MAX_ITEM_CHARS} characters: keep each short and concrete")
+        draft.focus = points
+        return {"ok": True}
+
     def save_session_summary(args: dict) -> dict:
         draft.summary = SessionSummary(**args)
         return {"ok": True}
@@ -372,6 +382,15 @@ def build_memory_tools(draft: MemoryDraft) -> list[Tool]:
                 "required": ["status"],
             },
             record_names_game,
+        ),
+        Tool(
+            "set_focus",
+            "Set 2-4 concrete focus points for the NEXT session (ENGLISH), replacing the old ones: what to "
+            "build on or practice, from THIS session (e.g. 'He enjoyed telling about the trip -- ask for the "
+            "story in order'). Call once, after the memory updates.",
+            {"type": "object", "properties": {"points": {**str_list, "description": "2-4 short points."}},
+             "required": ["points"]},
+            set_focus,
         ),
         Tool(
             "save_session_summary",

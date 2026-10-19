@@ -1,7 +1,7 @@
 """Post-session memory update (SUMMARY_MODEL call #2): transcript -> updated memory.
 
   claim (transaction) -> build context -> tool phase (agent writes to a draft) ->
-  consolidation phase (structured output: memory_prompt) -> save history + memory +
+  the memory text rendered by code from the sections (16) -> save history + memory +
   session fields + flags -> memory_status done | skipped | failed
 
 Never raises: a failure is recorded on the session (memory_status=failed) and retried later.
@@ -12,7 +12,6 @@ import sys
 from functools import lru_cache
 
 import yaml
-from google.genai import types
 
 from app import check_in_set, sequencing
 from app.steps import SequencingStep
@@ -20,10 +19,11 @@ from app.agent.memory_tools import Inferring, MemoryDraft, add_vocabulary, build
 from app.patient_profile import (AREA_NAMES, MAX_HISTORY, MAX_POINTS, account_profile, needs_lines,
                                  render_inferred)
 from app.agent.runner import run_tool_loop
+from app.memory_text import render_memory
 from app.class_plan import render_plan_full
 from app.config import REPO_ROOT, Settings
 from app.llm import generate
-from app.schemas import SECTION_NAMES, ClassPlan, ConsolidatedMemory, MemoryDoc, MemorySections
+from app.schemas import SECTION_NAMES, ClassPlan, MemoryDoc, MemorySections
 from app.store import MEM_DONE, MEM_FAILED, MEM_SKIPPED, PLAN_PENDING, SessionStore
 
 PROMPT_PATH = REPO_ROOT / "prompts" / "memory_update.yaml"
@@ -213,42 +213,22 @@ def run_memory_update(
                           "sequencing task and you didn't record it. Call record_sequencing now (skipped=true if "
                           "she didn't run it).", context, seq_tool, max_rounds=2, generate_fn=generate_fn)
 
-        # ---- phase 2: consolidation -------------------------------------------------
-        summary_text = draft.summary.summary if draft.summary else "(no summary saved)"
-        updated = MemoryDoc(sections=draft.sections, word_bank=draft.word_bank)
-        consolidation_input = (
-            f"# MEMORY SECTIONS\n{format_memory(updated)}\n\n"
-            f"# LAST SESSION ({today.isoformat()})\n{summary_text}\n\n"
-            f"# EARLIER SESSIONS\n{_recent_summaries_text(recent)}\n\n"
-            f"# PREVIOUS MEMORY TEXT (for continuity)\n{previous.memory_prompt or '(none)'}"
-        )
-        result = generate_fn(
-            client, models, consolidation_input,
-            types.GenerateContentConfig(
-                system_instruction=prompts["consolidation"],
-                response_mime_type="application/json",
-                response_schema=ConsolidatedMemory,
-                temperature=0.3,
-            ),
-        )
-        consolidated = result.response.parsed
-        if not isinstance(consolidated, ConsolidatedMemory):
-            consolidated = ConsolidatedMemory.model_validate_json(result.response.text)
-
         # ---- save -------------------------------------------------------------------
         if draft.summary:
             recent.append({"date": today.isoformat(), "session_id": sid,
                            "mood": draft.summary.mood.value, "summary": draft.summary.summary})
         new_memory = MemoryDoc(
-            memory_prompt=consolidated.memory_prompt.strip(),
             sections=draft.sections,
             word_bank=draft.word_bank,
-            focus_next_session=consolidated.focus_next_session[:4],
+            focus_next_session=(draft.focus if draft.focus is not None else previous.focus_next_session)[:4],
             last_session_id=sid,
             sessions_processed=previous.sessions_processed + 1,
             prompt_version=str(prompts.get("prompt_version")),
         ).model_dump(mode="json")
         new_memory["recent_summaries"] = recent[-RECENT_SUMMARIES:]
+        # The text she reads, assembled by code from the checked sections (16): nothing dropped,
+        # nothing added -- no model rewrite.
+        new_memory["memory_prompt"] = render_memory(new_memory)
         store.save_memory(pid, sid, new_memory, previous_raw)
         if draft.inferring is not None:
             save_inferred(store, pid, sid, draft, today)
@@ -262,8 +242,8 @@ def run_memory_update(
             "names_game": draft.names_game,
             "sequencing": sequencing_result(plan, draft.sequencing),  # telling things in order (14)
             "memory_error": None,
-            "memory_model": result.model,
-            "memory_attempts": run.attempts + result.attempts,
+            "memory_model": run.models[-1] if run.models else None,
+            "memory_attempts": run.attempts,
             "memory_tool_calls": len(run.calls),
             "memory_tool_errors": sum(not c.ok for c in run.calls),
         }
@@ -274,7 +254,7 @@ def run_memory_update(
         current_set = store.get_check_in_set(pid)
         if current_set and check_in_set.record_results(current_set, draft.probe_results, sid, today):
             store.save_check_in_set(pid, current_set)
-        _log(f"{sid}: done ({len(run.calls)} tool calls, {len(draft.flags)} flag(s), model {result.model})")
+        _log(f"{sid}: done ({len(run.calls)} tool calls, {len(draft.flags)} flag(s), model {run.models[-1] if run.models else None})")
         return MEM_DONE
     except Exception as exc:  # noqa: BLE001 -- recorded, retried on a later /start
         _log(f"{sid}: FAILED {type(exc).__name__}: {exc!s:.300}")

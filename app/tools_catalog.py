@@ -30,11 +30,12 @@ OVERVIEW = """# Tools: what each agent can call, and how a tool call works
 | Agent | Model | When | Tools | Also |
 |---|---|---|---|---|
 | **The live tutor** | Gemini Live (native audio), in his browser | during the session | `next_step`, `end_session` | -- |
-| **The memory agent** | the summary model chain | after each session | the memory tools below | then one **structured output** call: the memory text (`ConsolidatedMemory`) |
+| **The memory agent** | the summary model chain | after each session | the memory tools below | -- the text the tutor reads is then assembled by code from the sections (`app/memory_text.py`, 16) |
 | **The plan builder** | the summary model chain | after the memory update | the plan tools below | a names-game set when due (**structured output**: `CheckInProposal`) |
 | **Research** (optional) | the summary model chain | inside the plan build | `research_technique` -> the research sub-agent's `web_search` | the findings (**structured output**: `ResearchFindings`) |
 
-Structured output is used where the result is ONE whole object made at once. Tools are used where
+Structured output is used where the result is ONE whole object made at once (the memory text was
+one until plan 16: a rewrite that dropped checked items, so it is now assembled by code). Tools are used where
 the work is many small decisions that each need checking, on a document that persists (the memory)
 or is built step by step (the plan): the model never rewrites the whole thing, so it can't silently
 drop something; code applies each change, computes every number, and saves the document at the end.

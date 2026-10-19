@@ -10,7 +10,7 @@ from app.agent.next_class import build_context, build_next_plan
 from app.class_plan import fixed_plan, session_steps
 from app.config import Settings
 from app.patient_profile import account_profile, extract_vocabulary, needs_lines
-from app.schemas import ConsolidatedMemory, MemorySections
+from app.schemas import MemorySections
 from app.steps import CheckStep
 from app.store import InMemorySessionStore
 from app.transcripts import EndReason, TurnIn
@@ -111,7 +111,7 @@ def test_a_new_accounts_first_session_infers_his_profile_and_needs():
                    ("update_profile", {"field": "about", "op": "add", "item": "Retired teacher; lives in Akko."}),
                    ("update_profile", {"field": "vocabulary", "op": "add", "item": "עכו"}),
                    ("record_word_result", {"word": "נהריה", "result": "self_found", "asr_confidence": "high"})),
-        text("done"), text("{}", parsed=ConsolidatedMemory(memory_prompt="m", focus_next_session=[])))
+        text("done"))
     assert run_memory_update(store, client, SETTINGS, NEW, sid, generate_fn=gen) == "done"
     assert "record_needs" in {d.name for d in client.requests[0]["config"].tools[0].function_declarations}
     assert "# HIS NEEDS SO FAR" in client.requests[0]["contents"][0].parts[0].text
@@ -127,7 +127,7 @@ def test_an_uploaded_profile_is_never_touched():
     store = InMemorySessionStore()
     store.save_profile(DAD, "his assessment", "uploaded", TOMER)
     sid = session_with_talk(store, DAD)
-    client = FakeClient(text("done"), text("{}", parsed=ConsolidatedMemory(memory_prompt="m", focus_next_session=[])))
+    client = FakeClient(text("done"))
     run_memory_update(store, client, SETTINGS, DAD, sid, generate_fn=gen)
     offered = {d.name for d in client.requests[0]["config"].tools[0].function_declarations}
     assert "record_needs" in offered and "update_profile" not in offered  # his needs yes, his profile never
@@ -187,8 +187,7 @@ def test_his_needs_build_a_history_and_points_for_his_therapist_without_touching
         if point:
             calls.append(("suggest_for_therapist", {"point": point, "why": "Place names hard in 2 sessions.",
                                                     "evidence": ["אהה... נהריה"]}))
-        client = FakeClient(tool_calls(*calls), text("done"),
-                            text("{}", parsed=ConsolidatedMemory(memory_prompt="m", focus_next_session=[])))
+        client = FakeClient(tool_calls(*calls), text("done"))
         run_memory_update(store, client, SETTINGS, DAD, sid, generate_fn=gen)
     needs = store.get_needs(DAD)
     assert [h["level"] for h in needs["areas"]["naming"]["history"]] == ["clear_difficulty", "some_difficulty"]

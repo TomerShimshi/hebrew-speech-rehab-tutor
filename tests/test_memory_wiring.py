@@ -1,6 +1,5 @@
 """Per-account records, the memory update on /end, and the hourly sweep."""
 
-from app.schemas import ConsolidatedMemory
 from conftest import DAD, TOMER, auth
 from fake_llm import FakeClient, server_error, text, tool_calls
 
@@ -12,8 +11,9 @@ TALK = [
 ]
 
 
-def consolidated(prompt):
-    return text("{}", parsed=ConsolidatedMemory(memory_prompt=prompt, focus_next_session=["ask about the grandchildren"]))
+def consolidated(summary):
+    """The agent's tool round saving this session's summary -- the "last time" of the memory text (16)."""
+    return tool_calls(("save_session_summary", {"summary": summary, "topics": [], "mood": "good"}))
 
 
 def plan_reply():
@@ -37,20 +37,21 @@ def sweep(env, token="oidc-scheduler"):
 def test_each_account_has_its_own_sessions_and_memory(env):
     env.llm = FakeClient(
         tool_calls(("update_memory", {"section": "personal_facts", "op": "add", "item": "Has three grandchildren"})),
-        text("done"), consolidated("He has three grandchildren."),
+        consolidated("He has three grandchildren."), text("done"),
     )
     env.configure()
     dad_sid = talk(env, "tok-dad")
     assert env.client.post(f"/api/session/{dad_sid}/end", headers=auth("tok-dad"),
                            json={"reason": "tutor_goodbye"}).json()["memory_status"] == "done"
 
-    env.llm = FakeClient(text("done"), consolidated("Tomer's test memory."))
+    env.llm = FakeClient(consolidated("Tomer's test memory."), text("done"))
     env.configure()
     tomer_sid = talk(env, "tok-tomer")
     env.client.post(f"/api/session/{tomer_sid}/end", headers=auth("tok-tomer"), json={"reason": "end_button"})
 
-    assert env.store.get_memory(DAD)["memory_prompt"] == "He has three grandchildren."
-    assert env.store.get_memory(TOMER)["memory_prompt"] == "Tomer's test memory."
+    assert "He has three grandchildren." in env.store.get_memory(DAD)["memory_prompt"]
+    assert "Tomer's test memory." in env.store.get_memory(TOMER)["memory_prompt"]
+    assert "Tomer's" not in env.store.get_memory(DAD)["memory_prompt"]
     assert env.store.get_session(DAD, dad_sid) and env.store.get_session(DAD, tomer_sid) is None
     assert env.store.get_session(TOMER, tomer_sid)["user_email"] == TOMER
 
@@ -64,7 +65,7 @@ def test_starting_a_session_only_abandons_your_own_open_sessions(env):
 # ---- /end runs the memory update -----------------------------------------------------------
 
 def test_end_runs_the_memory_update_then_builds_the_next_plan(env):
-    env.llm = FakeClient(text("nothing to add"), consolidated("He talked about his grandchildren."), *plan_reply())
+    env.llm = FakeClient(consolidated("He talked about his grandchildren."), text("nothing to add"), *plan_reply())
     env.configure()
     env.store.save_profile(DAD, "Man, 70.", "uploaded", "tomer@example.com")  # the classic intro, then a built plan
     sid = talk(env)
@@ -104,10 +105,10 @@ def test_sweep_processes_abandoned_and_failed_sessions(env):
     env.configure()
     assert sweep(env).json()["processed"] == {abandoned: "failed"}
 
-    env.llm = FakeClient(text("ok"), consolidated("Recovered memory."), *plan_reply())  # an hour later
+    env.llm = FakeClient(consolidated("Recovered memory."), text("ok"), *plan_reply())  # an hour later
     env.configure()
     assert sweep(env).json()["processed"] == {abandoned: "done", f"plan:{abandoned}": "done"}
-    assert env.store.get_memory(DAD)["memory_prompt"] == "Recovered memory."
+    assert "Recovered memory." in env.store.get_memory(DAD)["memory_prompt"]
     assert sweep(env).json()["processed"] == {}  # nothing left
 
 
@@ -115,7 +116,7 @@ def test_sweep_respects_the_batch_limit(env):
     for _ in range(4):
         talk(env)  # each start abandons the previous one
     talk(env, turns=[])
-    env.llm = FakeClient(*([text("ok"), consolidated("m")] * 4))
+    env.llm = FakeClient(*([consolidated("m"), text("ok")] * 4))
     env.configure(memory_sweep_batch=2)
     assert len(sweep(env).json()["processed"]) == 2
     assert len(sweep(env).json()["processed"]) == 2

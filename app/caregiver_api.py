@@ -432,25 +432,21 @@ def set_recommendation_status(rec_id: str, status: Literal["new", "accepted", "r
     return {"ok": True}
 
 
-@router.post("/{email}/memory/remove-item", dependencies=[Depends(not_paused)])
+@router.post("/{email}/memory/remove-item")
 def memory_remove_item(
     section: str = Body(..., embed=True, max_length=64),
     item: str = Body(..., embed=True, max_length=2000),
     pid: str = Depends(account),
     caregiver: User = Depends(require_caregiver),
-    settings: Settings = Depends(get_settings),
     store: SessionStore = Depends(get_store),
     archive: PromptArchive = Depends(get_prompt_archive),
-    llm_client=Depends(get_text_client),
 ) -> dict:
-    """Removes one wrong item and rewrites the tutor's summary without it (one model call)."""
+    """Removes one wrong item; the tutor's text is rendered again without it (16: no model call)."""
     backup = _backup(archive, pid, store.get_memory(pid), "remove-item")
     try:
-        memory = remove_item(store, llm_client, settings, pid, section, item, generate_fn=_bounded_generate(90))
+        memory = remove_item(store, pid, section, item)
     except MemoryEditError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except Exception as exc:  # noqa: BLE001 -- e.g. the models are busy: nothing was changed
-        raise HTTPException(status_code=503, detail="The model is busy; nothing was changed. Try again.") from exc
     print(f"[caregiver] {caregiver.email} removed a {section} item from {pid}'s memory; backup={backup}", flush=True)
     return {"ok": True, "memory_prompt": memory["memory_prompt"], "backup": backup}
 

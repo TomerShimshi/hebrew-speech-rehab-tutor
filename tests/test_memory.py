@@ -4,7 +4,7 @@ from app import llm, word_bank
 from app.agent.memory_tools import MemoryDraft, build_memory_tools
 from app.agent.memory_update import format_transcript, run_memory_update
 from app.config import Settings
-from app.schemas import ConsolidatedMemory, MemorySections, WordResult
+from app.schemas import MemorySections, WordResult
 from app.store import InMemorySessionStore
 from app.transcripts import EndReason, TurnIn
 from fake_llm import FakeClient, server_error, text, tool_calls
@@ -108,10 +108,6 @@ CONVERSATION = [
 ]
 
 
-def consolidated(prompt="He enjoys the Galilee. Last session: the trip to Tiberias."):
-    return text("{}", parsed=ConsolidatedMemory(memory_prompt=prompt, focus_next_session=["names of places"]))
-
-
 def test_full_update_saves_memory_history_and_session_fields():
     store = InMemorySessionStore()
     sid = make_session(store, CONVERSATION)
@@ -120,14 +116,17 @@ def test_full_update_saves_memory_history_and_session_fields():
             ("save_session_summary", {"summary": "Talked about a trip to the Galilee.", "topics": ["Galilee"], "mood": "good"}),
             ("update_memory", {"section": "interests", "op": "add", "item": "Trips to the Galilee"}),
             ("record_word_result", {"word": "טבריה", "result": "uncued", "asr_confidence": "high"}),
+            ("set_focus", {"points": ["names of places"]}),
         ),
         text("done"),
-        consolidated(),
     )
     status = run_memory_update(store, client, SETTINGS, PID, sid, today=TODAY, generate_fn=gen)
     assert status == "done"
     memory = store.get_memory(PID)
-    assert memory["memory_prompt"].startswith("He enjoys the Galilee")
+    # the text she reads is assembled by code (16): last time, then the sections
+    assert "Last time (" in memory["memory_prompt"] and "Talked about a trip to the Galilee." in memory["memory_prompt"]
+    assert "- Trips to the Galilee" in memory["memory_prompt"]
+    assert len(client.requests) == 2  # the tool loop only: no rewrite call
     assert memory["sections"]["interests"] == ["Trips to the Galilee"]
     assert memory["word_bank"]["טבריה"]["uncued"] == 1
     assert memory["focus_next_session"] == ["names of places"]
@@ -136,14 +135,15 @@ def test_full_update_saves_memory_history_and_session_fields():
     session = store.get_session(PID, sid)
     assert session["memory_status"] == "done"
     assert session["summary"] == "Talked about a trip to the Galilee."
-    assert session["memory_tool_calls"] == 3
+    assert session["memory_tool_calls"] == 4
     assert (PID, sid) not in store.memory_history  # there was no previous memory
 
     # a second session keeps the old memory in history and builds on it
     sid2 = make_session(store, CONVERSATION)
-    client2 = FakeClient(text("nothing new"), consolidated("Second version."))
+    client2 = FakeClient(text("nothing new"))
     assert run_memory_update(store, client2, SETTINGS, PID, sid2, today=TODAY, generate_fn=gen) == "done"
-    assert store.memory_history[(PID, sid2)]["memory_prompt"].startswith("He enjoys the Galilee")
+    assert "Trips to the Galilee" in store.memory_history[(PID, sid2)]["memory_prompt"]
+    assert store.get_memory(PID)["focus_next_session"] == ["names of places"]  # kept: no set_focus this time
     assert store.get_memory(PID)["sections"]["interests"] == ["Trips to the Galilee"]  # kept
     assert store.get_memory(PID)["sessions_processed"] == 2
     # the agent saw the current memory and the transcript in its context
@@ -169,7 +169,7 @@ def test_model_outage_marks_failed_then_a_retry_succeeds():
     assert session["memory_status"] == "failed" and "LLMUnavailable" in session["memory_error"]
     assert store.get_memory(PID) is None  # nothing half-written
     assert store.pending_memory_sessions(PID) == [sid]  # will be retried
-    up = FakeClient(text("ok"), consolidated())
+    up = FakeClient(text("ok"))
     assert run_memory_update(store, up, SETTINGS, PID, sid, today=TODAY, generate_fn=gen) == "done"
     assert store.pending_memory_sessions(PID) == []
 
@@ -177,7 +177,7 @@ def test_model_outage_marks_failed_then_a_retry_succeeds():
 def test_a_session_is_processed_only_once():
     store = InMemorySessionStore()
     sid = make_session(store, CONVERSATION)
-    client = FakeClient(text("ok"), consolidated())
+    client = FakeClient(text("ok"))
     assert run_memory_update(store, client, SETTINGS, PID, sid, today=TODAY, generate_fn=gen) == "done"
     assert run_memory_update(store, FakeClient(), SETTINGS, PID, sid, today=TODAY, generate_fn=gen) == "not_claimed"
     # an active (not ended) session can't be claimed either

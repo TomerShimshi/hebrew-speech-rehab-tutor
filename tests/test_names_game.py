@@ -9,7 +9,7 @@ from app.agent.memory_tools import MemoryDraft, build_memory_tools
 from app.agent.memory_update import run_memory_update
 from app.agent.next_class import build_next_plan
 from app.config import Settings
-from app.schemas import CheckInItem, CheckInProposal, ConsolidatedMemory, MemorySections, WordResult, WordSource, WordStats
+from app.schemas import CheckInItem, CheckInProposal, MemorySections, WordResult, WordSource, WordStats
 from app.store import InMemorySessionStore
 from app.transcripts import EndReason, TurnIn
 from conftest import DAD
@@ -190,7 +190,6 @@ def test_memory_update_records_the_game_in_the_set_and_own_names_on_the_session(
                    ("record_word_result", {"word": "עין גדי", "result": "self_found", "asr_confidence": "high"}),
                    ("record_names_game", {"status": "played", "note": "Asked both."})),
         text("done"),
-        text("{}", parsed=ConsolidatedMemory(memory_prompt="m", focus_next_session=[])),
     )
     assert run_memory_update(store, client, SETTINGS, DAD, sid, today=TODAY, generate_fn=gen) == "done"
     session = store.get_session(DAD, sid)
