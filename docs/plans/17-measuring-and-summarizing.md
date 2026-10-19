@@ -1,6 +1,6 @@
-# Sub-plan 16: Measuring progress the way therapists do, and a summarizing activity
+# Sub-plan 17: Measuring progress the way therapists do, and a summarizing activity
 
-Part of the [master design](00-master-design.md). After [15.5](15.5-first-sessions-needs-check.md), before [16.5](16.5-practicing-the-missing-areas.md). Requested by Tomer (2026-10-15); split from the first plan 16 (2026-10-16) -- this half is what touches the patient's sessions and the family's view; practice in the missing areas is [16.5](16.5-practicing-the-missing-areas.md). **Reviewed; to build.**
+Part of the [master design](00-master-design.md). After [16](16-memory-built-by-code.md), before [17.5](17.5-practicing-the-missing-areas.md). Requested by Tomer (2026-10-15); split from the first plan 16 (2026-10-16; renumbered 16 -> 17 on 2026-10-19) -- this half is what touches the patient's sessions and the family's view; practice in the missing areas is [17.5](17.5-practicing-the-missing-areas.md). **Reviewed; to build.**
 
 ## Why
 - **The way progress is measured today is weak.** After each session the memory agent rates each area from what it heard (15.5): a judgment, on whatever that session happened to contain, asked differently every time. Therapists measure differently (below), and their way can be borrowed.
@@ -27,7 +27,7 @@ Part of the [master design](00-master-design.md). After [15.5](15.5-first-sessio
 
 ### A. An account with an uploaded profile (the patient) -- decided 2026-10-15
 - **No new checks in his sessions.** The areas his assessment found preserved are not tested; the app keeps rating every area from his ordinary conversation (15.5) -- for the family's eyes.
-- **A new difficulty:** if an area shows a difficulty in 2 of 3 sessions of ordinary talk, the card marks it "confirmed" and the app suggests a point for his therapist. Practice in it starts only if the family sets the level on the card (then as in 16.5). A sudden, steep decline is a different matter, handled today: the "sudden decline" flag and the tutor's safety rule.
+- **A new difficulty:** if an area shows a difficulty in 2 of 3 sessions of ordinary talk, the card marks it "confirmed" and the app suggests a point for his therapist. Practice in it starts only if the family sets the level on the card (then as in 17.5). A sudden, steep decline is a different matter, handled today: the "sudden decline" flag and the tutor's safety rule.
 - **A difficulty that eases:** his focus (names, longer speech) comes from his profile and his therapist, so the app doesn't move it. When the probes (B) show ~3 weeks of success, including untreated items, it suggests a point for his therapist ("names seem to be improving -- is it worth shifting the focus?"). If the family updates his profile or the card, the plans follow.
 - Already adapting by itself, as today: the names game rotation and the word bank's spacing (12), the sequencing task's size (14).
 
@@ -38,7 +38,7 @@ Part of the [master design](00-master-design.md). After [15.5](15.5-first-sessio
 - **Retrieval first:** the transcripts are checked that she gives a hint only AFTER he has really tried, in the names game and practice -- a prompt fix if not.
 
 ### C. Measuring like a therapist
-- **A probe set per area,** like the names game's stable set (12): a few fixed items, asked the same way, without hints; half practiced (treated), half never practiced (untreated). Kept ~3 weeks, then renewed; the old set is probed once more later (maintenance). The framework (`app/probes.py`) is general, so 16.5 adds its areas to it.
+- **A probe set per area,** like the names game's stable set (12): a few fixed items, asked the same way, without hints; half practiced (treated), half never practiced (untreated). Kept ~3 weeks, then renewed; the old set is probed once more later (maintenance). The framework (`app/probes.py`) is general, so 17.5 adds its areas to it.
 - **A baseline first:** a new probe set is asked in 2 sessions before practice with it starts.
 - **For the patient: naming and connected speech only.** Naming already has one (the names game, 12). Connected speech gets one: a fixed short story she tells and he retells, asked the same way, scored by the main ideas he conveyed.
 - **Scored by code** from what he said, not by the agent's impression. The agent's per-session levels (15.5) stay, labeled as its impression.
@@ -74,4 +74,4 @@ Part of the [master design](00-master-design.md). After [15.5](15.5-first-sessio
 - [ ] `pytest` passes.
 
 ## Commit
-`Sub-plan 16: measuring progress like a therapist, and a summarizing activity`
+`Sub-plan 17: measuring progress like a therapist, and a summarizing activity`
