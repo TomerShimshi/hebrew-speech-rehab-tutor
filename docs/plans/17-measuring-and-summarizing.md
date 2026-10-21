@@ -1,10 +1,11 @@
-# Sub-plan 17: Measuring progress the way therapists do, and a summarizing activity
+# Sub-plan 17: Measuring progress like a therapist, and adjusting to it -- plus a summarizing activity
 
-Part of the [master design](00-master-design.md). After [16](16-memory-built-by-code.md), before [17.5](17.5-practicing-the-missing-areas.md). Requested by Tomer (2026-10-15); split from the first plan 16 (2026-10-16; renumbered 16 -> 17 on 2026-10-19) -- this half is what touches the patient's sessions and the family's view; practice in the missing areas is [17.5](17.5-practicing-the-missing-areas.md). **Reviewed; to build.**
+Part of the [master design](00-master-design.md). After [16](16-memory-built-by-code.md), before [17.5](17.5-practicing-the-missing-areas.md). Requested by Tomer (2026-10-15); split from the first plan 16 (2026-10-16; renumbered 16 -> 17 on 2026-10-19) -- this half is what touches the patient's sessions and the family's view; practice in the missing areas is [17.5](17.5-practicing-the-missing-areas.md). Updated 2026-10-21: the app adjusts the plans to his measured progress, like a therapist, with the family's veto (E). **Reviewed; to build.**
 
 ## Why
 - **The way progress is measured today is weak.** After each session the memory agent rates each area from what it heard (15.5): a judgment, on whatever that session happened to contain, asked differently every time. Therapists measure differently (below), and their way can be borrowed.
 - **His kind of difficulty** (mild, high-level: proper names, longer speech) has a practice the app doesn't offer yet: summarizing a short text in his own words.
+- **Measurements alone don't help him.** A therapist changes the plan as the patient improves or struggles; until now the app only showed the data (and, for the patient, left every change to the family).
 - **A gap found in testing 15.5 (15.10):** the first needs-check session ran out of time after 3 of its steps (he talked about his project in the opening for 5.5 minutes -- the tutor staying with what he brings up, as intended). The repetition and goals checks never happened, and the fixed second session doesn't include them, so they were lost.
 
 ## What the research says
@@ -13,6 +14,8 @@ Part of the [master design](00-master-design.md). After [16](16-memory-built-by-
 - **Home practice on a device improves the practiced skill, not automatically conversation.** The largest trial of self-managed computer therapy at home (Big CACTUS, 278 people) found a clear improvement in finding the practiced words, which did **not** carry over to conversation ([Big CACTUS](https://pmc.ncbi.nlm.nih.gov/articles/PMC7232133)). So conversation must be measured on its own.
 - **What clinicians and researchers agree to measure** (the ROMA core outcome set): language (WAB-R), communication (the Scenario Test), emotional wellbeing (GHQ-12), quality of life (SAQOL-39), and the patient's own view of treatment ([ROMA](https://ro.ecu.edu.au/ecuworkspost2013/5802); [ROMA-2](https://pmc.ncbi.nlm.nih.gov/articles/PMC10946976)). The app can't and shouldn't run these, but the therapist's formal scores and **his own view** belong next to the practice data.
 - **For mild word-finding difficulty:** practice works better when he RETRIEVES the word himself than when he hears and repeats it, and better spaced over sessions than massed (Middleton et al.: [JSLHR 2016](https://pubs.asha.org/doi/10.1044/2016_JSLHR-L-15-0303), [learning principles](https://pmc.ncbi.nlm.nih.gov/articles/PMC5345556)). At the discourse level, reading a short text and summarizing it aloud (ARCS) showed carry-over to untrained speech in mild aphasia ([AJSLP 2017](https://pubs.asha.org/doi/10.1044/2017_AJSLP-16-0200); [ARCS-W, AJSLP 2020](https://pubs.asha.org/doi/10.1044/2020_AJSLP-19-00078)) -- small studies (1-5 participants).
+- **Therapists adjust from measured progress, by explicit rules.** Goals are changed from repeated measures ([conversation-analysis study](https://scholarlycommons.pacific.edu/phs-facarticles/171)); a trial protocol: no gain over 3 consecutive visits -> change the approach, still none -> stop that exercise ([NCT03600987](https://cdn.clinicaltrials.gov/large-docs/87/NCT03600987/Prot_SAP_001.pdf)); progress -> new goals, less cueing; and decision frameworks try to make these choices explicit ([Barrow](https://barrowneuro.org/wp-content/uploads/BARROW.-Carpenter.-10.2024.-FINAL.pdf)). No agreed mastery threshold exists -- each program sets its own.
+- **Adaptive digital programs:** adapting difficulty to performance is standard in them; an adaptive app beat workbooks in a small controlled trial ([Constant Therapy, 2021](https://pmc.ncbi.nlm.nih.gov/articles/PMC7907641)), though no study isolates the adaptivity itself; automatic decision-making for self-managed practice is active research ([therapy calculator, preprint](https://www.medrxiv.org/content/10.64898/2026.01.22.26344656.full.pdf)).
 - **Testing what is preserved isn't worth it:** re-testing areas his assessment found preserved adds nothing his therapist doesn't know, takes time from what he needs, makes sessions feel like tests, and invites false alarms (a mishearing read as a difficulty). Ordinary conversation, which the app already rates (15.5), is enough to notice a change.
 
 ## Goal
@@ -20,20 +23,22 @@ Part of the [master design](00-master-design.md). After [16](16-memory-built-by-
 2. **Conversation is measured on its own**, so the family sees whether practice reaches real talk.
 3. **His own view and his therapist's formal scores** sit next to the app's data.
 4. **A summarizing activity**, taking turns with the sequencing task.
-5. **For an uploaded profile, the app watches, confirms and suggests** -- changes to what he practices go through the family and his therapist.
+5. **The plans follow his measured progress, like a therapist** (E): harder or easier within an area, more or less time on it, a new confirmed weakness added gradually -- by explicit rules, every change logged with its reason, and the family can lock an area or undo a change.
 6. **No needs check is lost** when the first session runs out of time.
 
 ## Design
 
-### A. An account with an uploaded profile (the patient) -- decided 2026-10-15
-- **No new checks in his sessions.** The areas his assessment found preserved are not tested; the app keeps rating every area from his ordinary conversation (15.5) -- for the family's eyes.
-- **A new difficulty:** if an area shows a difficulty in 2 of 3 sessions of ordinary talk, the card marks it "confirmed" and the app suggests a point for his therapist. Practice in it starts only if the family sets the level on the card (then as in 17.5). A sudden, steep decline is a different matter, handled today: the "sudden decline" flag and the tutor's safety rule.
-- **A difficulty that eases:** his focus (names, longer speech) comes from his profile and his therapist, so the app doesn't move it. When the probes (B) show ~3 weeks of success, including untreated items, it suggests a point for his therapist ("names seem to be improving -- is it worth shifting the focus?"). If the family updates his profile or the card, the plans follow.
+### A. An account with an uploaded profile (the patient) -- decided 2026-10-15, updated 2026-10-21
+- **No new checks in his sessions.** The areas his assessment found preserved are not tested; the app keeps rating every area from his ordinary conversation (15.5).
+- **His profile and his therapist's plan are the starting point**; from there the plans follow his measured progress (E), with the family's veto -- not only the family's say, as first decided.
+- **A new difficulty:** if an area shows a difficulty in 2 of 3 sessions of ordinary talk, it is "confirmed": the app adds it gradually (E) and tells the family (a notice on the card, and a point for his therapist); the family can cancel. A sudden, steep decline is a different matter, handled today: the "sudden decline" flag and the tutor's safety rule.
+- **A difficulty that eases:** mastered (E) -> harder items and less time on it, and a point for his therapist ("names seem to be improving -- is it worth shifting the focus?").
 - Already adapting by itself, as today: the names game rotation and the word bank's spacing (12), the sequencing task's size (14).
 
 ### B. A summarizing activity (ARCS-style, by voice)
 - **She reads him a short paragraph** (3-4 sentences) on something he cares about (technology, a place, a podcast topic -- written in simple Hebrew by the plan builder, never from his private life), then asks him to tell it in his own words; then one follow-up on his opinion.
 - A step class with a builder tool (`add_summary`); the builder lists the paragraph's 3-5 main ideas; the memory agent reports which ones he conveyed; code scores (a progress series).
+- **Its size adapts, like the sequencing task's:** code recommends the number of sentences and main ideas from his last results (grow after success, shrink when hard), and the tool checks the paragraph against it.
 - **It takes turns with the sequencing task (14)** (decided 2026-10-15): one session has a sequencing task, the next a summary -- both discourse-level, ~2-3 minutes, so the session keeps its length. `finish` refuses a regular plan without the one whose turn it is. Sequencing's own two kinds keep taking turns among its sessions (each kind every fourth session).
 - **Retrieval first:** the transcripts are checked that she gives a hint only AFTER he has really tried, in the names game and practice -- a prompt fix if not.
 
@@ -49,10 +54,23 @@ Part of the [master design](00-master-design.md). After [16](16-memory-built-by-
 ### D. Missed needs checks carry over (found 15.10)
 - After the first needs-check session, the code sees which check steps were never reached (the session's `steps_done` against its agenda) and puts them into the second session, each between two conversation topics -- never two checks in a row, never right after the greeting. If the second session runs out too, the plan builder's third session gets the rest (at most one per session).
 
-### E. The caregiver page and the export
+### E. Adjusting to his progress, like a therapist (decided 2026-10-21)
+- **HIS PROGRESS in the plan builder's context:** per practiced area (names, connected speech, summarizing; for a new account, every area it practices), the probe scores over time -- treated and untreated -- the summary and sequencing scores, and the area's current setting (level, share of the session) with the last decision and its reason.
+- **Decisions by code, by explicit rules, per area -- never from one session,** only from code-scored probes, and never counting an attempt marked low-confidence (a doubtful transcription):
+  - **Mastered:** about 80% on 3 probe sessions in a row, untreated items included -> the next level (harder items, longer tasks, fewer hints) and a smaller share of the session.
+  - **Stalled:** no gain over about 3 probe sessions -> change the approach in that area (another kind of task or cue), and a point for his therapist.
+  - **Getting worse** over 2-3 sessions -> easier items, a larger share, and a point for his therapist.
+  - **A new confirmed weakness** (A, 17.5) -> added gradually: one short step every other session, growing while it stays.
+- **The plan builder follows the setting:** each area's level and share go to it as part of HIS PROGRESS ("names: level 3, ~2 minutes; summarizing: 4 ideas"), and its tools check them (like the sequencing size); it chooses the content, the code chooses the dose.
+- **Every change logged with its reason** ("names: 85% three probe sessions in a row -> harder names"), shown on the caregiver page and in the therapist export.
+- **The family's veto:** lock an area ("from the therapist: keep it as it is") so the app never changes it; undo a decision (back to the previous setting). A lock or an undo is logged too.
+- The thresholds (80%, 3 sessions) are our choice -- no agreed standard exists -- and are constants in one place, to tune after watching them work.
+
+### F. The caregiver page and the export
 - Per area: the baseline, then the probe scores over time (treated vs untreated, two lines), and maintenance points.
 - The summary scores; conversation measures and his own view, as their own charts; the therapist's scores as markers.
 - The therapist export (09) gets a page per area: probe items, scores, dates -- and the points for his therapist (15.5).
+- **"Changes the app made":** each area's current level and share, the log of decisions with their reasons, and the lock / undo buttons.
 
 ## Files
 | File | Purpose |
@@ -61,17 +79,19 @@ Part of the [master design](00-master-design.md). After [16](16-memory-built-by-
 | `app/probes.py` (new) | Probe sets per area: choose, rotate, baseline, score (like `check_in_set.py`); naming and connected speech. |
 | `app/agent/memory_tools.py`, `app/agent/memory_update.py`, `prompts/memory_update.yaml` | Report summary ideas and probe answers; his own view; "confirmed" and "lasting improvement" points for an uploaded profile. |
 | `app/class_plan.py`, `app/agent/next_class.py` | Missed needs checks carry over. |
+| `app/progress.py` (new) | The decision rules per area (mastered / stalled / worse / new), the setting (level, share), the log; locks and undo. |
+| `app/agent/next_class.py`, `app/agent/plan_tools.py`, `prompts/next_class.yaml` | HIS PROGRESS in the builder's context; the tools check the area settings; the summary size. |
 | `prompts/tutor.yaml` (if needed) | Retrieval first. |
 | `app/caregiver_api.py`, `static/caregiver.*` | Probe charts, the summary series, conversation measures, his view, the therapist's scores, the export. |
-| `tests/` | The summary step and its turn; probe scoring; baseline; treated vs untreated; carry-over; the export. |
+| `tests/` | The summary step, its turn and its size; probe scoring; baseline; treated vs untreated; carry-over; each decision rule (and that one session or a low-confidence attempt never decides); locks and undo; the export. |
 
 ## Done when
-- [ ] For the patient: no new checks; a confirmed change or a lasting improvement becomes a point for his therapist; his focus changes only through the family.
-- [ ] The summarizing activity works, takes turns with sequencing, and is scored by main ideas.
+- [ ] For the patient: no new checks; the plans follow his measured progress by the rules (E), every change logged with its reason; a confirmed weakness is added gradually with a notice; the family can lock an area or undo a change.
+- [ ] The summarizing activity works, takes turns with sequencing, adapts its size, and is scored by main ideas.
 - [ ] Naming and connected speech have probe sets with a baseline, treated and untreated items, scored by code, shown over time.
 - [ ] Conversation and his own view are shown on their own; the therapist's scores can be added.
 - [ ] A needs check missed in the first session happens in the next.
 - [ ] `pytest` passes.
 
 ## Commit
-`Sub-plan 17: measuring progress like a therapist, and a summarizing activity`
+`Sub-plan 17: measuring progress like a therapist and adjusting to it, and a summarizing activity`
