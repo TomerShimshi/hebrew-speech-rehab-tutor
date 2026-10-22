@@ -363,7 +363,7 @@ def test_progress_numbers():
     assert (pts[-1]["treated"], pts[-1]["untreated"], pts[-1]["mood"]) == (100, 0, 3)
     assert (pts[-2]["treated"], pts[-2]["untreated"]) == (50, 100)
     assert pts[-3] == {"date": dt.datetime(2026, 10, 10), "treated": None, "untreated": None, "items": 0, "mood": 1,
-                       "self_found": 0, "not_found": 0, "sequencing": None, "sequencing_task": None}
+                       "self_found": 0, "not_found": 0, "sequencing": None, "sequencing_task": None, "summarizing": None, "story": None, "his_view": None, "avg_words": None}
     # last 5 sessions with check-ins (12, 11, 8, 7, 6) vs the ones before (5, 4)
     assert data["compare"]["recent"] == {"treated": 30, "untreated": 20, "sessions": 5}
     assert data["compare"]["before"] == {"treated": 0, "untreated": 0, "sessions": 2}

@@ -187,6 +187,38 @@ Record the SEQUENCING task of TODAY'S PLAN (only if the plan has one): the order
 | `skipped` | boolean |  |  | true if she didn't run it (e.g. he was tired). |
 | `note` | string |  |  | ENGLISH, one short sentence: how it went. |
 
+### `record_summary`
+
+Record the SUMMARY task of TODAY'S PLAN (only if the plan has one, 'Summarizing'): which of its main ideas he conveyed in his own words. Call once.
+
+| Parameter | Type | Required | Allowed values | Description |
+|---|---|---|---|---|
+| `conveyed` | list of integer | yes |  | The numbers of the main ideas (as numbered in TODAY'S PLAN) he conveyed in his first telling, by meaning, in his own words -- before any help. |
+| `needed_help` | boolean |  |  | true if she had to help or read it again. |
+| `low_confidence` | boolean |  |  | true if the two transcript versions disagree in a way that changes the result. |
+| `skipped` | boolean |  |  | true if she didn't run it (e.g. he was tired). |
+| `note` | string |  |  | ENGLISH, one short sentence: how it went. |
+
+### `record_story_probe`
+
+Record the STORY TO RETELL of TODAY'S PLAN (only if the plan has one): which of its main ideas he conveyed when he retold it -- his own words, by meaning. Call once.
+
+| Parameter | Type | Required | Allowed values | Description |
+|---|---|---|---|---|
+| `conveyed` | list of integer | yes |  | The numbers of the main ideas (as numbered in TODAY'S PLAN) he conveyed. |
+| `low_confidence` | boolean |  |  | true if the two transcript versions disagree in a way that changes the result. |
+| `skipped` | boolean |  |  | true if she didn't run it. |
+
+### `record_his_view`
+
+Record HIS OWN VIEW (only if TODAY'S PLAN has the step 'His own view'): how talking with people has been for him lately, as he put it -- 1 very hard, 2 hard, 3 so-so, 4 mostly fine, 5 easy. Call once.
+
+| Parameter | Type | Required | Allowed values | Description |
+|---|---|---|---|---|
+| `score` | integer | yes |  | 1-5, from what he said (not from how he spoke). |
+| `quote` | string | yes |  | HEBREW: his words, exactly. |
+| `note` | string |  |  | ENGLISH, one short sentence. |
+
 ### `record_names_game`
 
 Record what happened to the NAMES GAME of TODAY'S PLAN (only if the plan has one). Call once.
@@ -308,6 +340,16 @@ A sequencing task -- telling things in order, as his speech therapist practices 
 | `task` | string | yes | `scrambled`, `retell` | 'scrambled' or 'retell'. |
 | `title` | string | yes |  | ENGLISH: a short title for the family, e.g. 'buying a gift'. |
 | `events` | list of string | yes |  | HEBREW: the events in the CORRECT order, one short sentence each. |
+
+### `add_summary`
+
+A summarizing task (ARCS-style, as in mild aphasia therapy): she reads him a short paragraph, he tells it in his own words. paragraph: simple, natural HEBREW, 3-5 short sentences, on something he cares about (technology, a place, a podcast or news topic -- from his interests), NEVER from his private life, with no rare words. main_ideas: its main ideas in ENGLISH, one per item, in order -- exactly the number HIS SUMMARIZING recommends (+-1); each must be stated in the paragraph. Only when HIS DISCOURSE TASK says it's a summary's turn.
+
+| Parameter | Type | Required | Allowed values | Description |
+|---|---|---|---|---|
+| `title` | string | yes |  | ENGLISH: a short title for the family, e.g. 'a new train line'. |
+| `paragraph` | string | yes |  | HEBREW: the paragraph she reads, 3-5 short sentences. |
+| `main_ideas` | list of string | yes |  | ENGLISH: the paragraph's main ideas, in order, one per item. |
 
 ### `set_closing`
 

@@ -180,7 +180,7 @@ function namesGameLine(s) {
 }
 
 // Steps mode (13): how far through the agenda the session got, and what she reported.
-const STEP_KIND = { check: "היכרות: רגע של בדיקה", sequencing: "סיפור לפי סדר", opening: "פתיחה", conversation: "שיחה", names_game: "משחק השמות", practice: "תרגול",
+const STEP_KIND = { story_probe: "סיפור לשחזר (מדידה)", his_view: "איך הוא מרגיש", summary: "סיכום במילים שלו", check: "היכרות: רגע של בדיקה", sequencing: "סיפור לפי סדר", opening: "פתיחה", conversation: "שיחה", names_game: "משחק השמות", practice: "תרגול",
                     activity: "פעילות", games_activity: "פעילות מהמשחקים", reserve: "רזרבה",
                     thread: "נושא לשיחה" };
 const stepName = (a) => `${STEP_KIND[a.kind] || a.kind}${a.label ? ` ${a.label}` : ""}`;
@@ -241,6 +241,17 @@ function sequencingLine(s) {
   if (q.status !== "done") return p(`${head}לא דווח`, "kv muted");
   return p(`${head}${q.order_pct}% בסדר הנכון · ${q.events_included} מתוך ${q.events} אירועים · ` +
            `${q.needed_help ? "עם עזרה" : "בלי עזרה"}${q.low_confidence ? " · תמלול לא בטוח" : ""}`, "kv");
+}
+
+// A short text in his own words (17): how many of its main ideas he conveyed.
+function summarizingLine(s) {
+  const q = s.summarizing;
+  if (!q) return null;
+  const head = `סיכום במילים שלו (${q.ideas} רעיונות${q.title ? `, ${q.title}` : ""}): `;
+  if (q.status === "skipped") return p(`${head}דולג${q.note ? ` (${q.note})` : ""}`, "kv muted");
+  if (q.status !== "done") return p(`${head}לא דווח`, "kv muted");
+  return p(`${head}${q.ideas_conveyed} מתוך ${q.ideas} (${q.ideas_pct}%) · ${q.needed_help ? "עם עזרה" : "בלי עזרה"}` +
+           `${q.low_confidence ? " · תמלול לא בטוח" : ""}`, "kv");
 }
 
 // Names he went for on his own in free talk (12): found / couldn't find.
@@ -347,6 +358,7 @@ function renderSessions(sessions) {
       namesGameLine(s),
       ownNamesLine(s),
       sequencingLine(s),
+      summarizingLine(s),
       stepsLine(s),
       voiceLine(s),
       el("div", { class: "cg-actions" }, button, promptButton, recordingButton(s), processButton),
@@ -861,6 +873,56 @@ function renderTherapistPoints(points) {
   }));
 }
 
+// The app's adjustments (17): per area its level and time, the last decision, lock / undo; the log.
+const ADJ_AREA = { naming: "שליפת שמות", connected_speech: "דיבור רציף (סיפור לשחזר)", summarizing: "סיכום במילים שלו",
+                   sequencing: "סיפור לפי סדר" };
+const ADJ_RULE = { mastered: "שולט -- רמה עולה", worse: "ירידה -- רמה יורדת, יותר זמן", stalled: "תקוע -- משנים גישה",
+                   undo: "בוטל ע\"י המשפחה", lock: "ננעל", unlock: "שוחרר" };
+const SHARE = { less: "פחות זמן", normal: "זמן רגיל", more: "יותר זמן" };
+function renderAdjust(doc) {
+  const areas = doc?.areas || {};
+  const rows = Object.entries(ADJ_AREA).filter(([a]) => areas[a]).map(([a, name]) => {
+    const st = areas[a];
+    const lock = el("button", { class: `small${st.lock ? " on" : ""}`, type: "button", text: st.lock ? "נעול 🔒" : "נעילה" });
+    lock.addEventListener("click", async () => {
+      lock.disabled = true;
+      try { await api(acct(`/progress/${a}/lock`), { lock: !st.lock }); await loadAccount(); } catch { lock.disabled = false; }
+    });
+    const undo = st.last ? el("button", { class: "small", type: "button", text: "ביטול השינוי האחרון" }) : null;
+    undo?.addEventListener("click", async () => {
+      undo.disabled = true;
+      try { await api(acct(`/progress/${a}/undo`), {}); await loadAccount(); } catch { undo.disabled = false; }
+    });
+    return el("div", { class: "need" },
+      el("div", { class: "need-head" }, el("b", { text: name }),
+        el("span", { class: "muted", text: ` · רמה ${st.level}/5 · ${SHARE[st.share] || st.share}` +
+                                           `${st.change_approach ? " · משנים גישה" : ""}` })),
+      st.last ? p(`${st.last.date}: ${ADJ_RULE[st.last.rule] || st.last.rule} (${st.last.reason})`, "muted kv") : null,
+      el("div", { class: "cg-actions" }, lock, undo));
+  });
+  const log = (doc?.log || []).slice(-12).reverse();
+  $("adjust").replaceChildren(
+    ...(rows.length ? rows : [p("עדיין אין מספיק תוצאות כדי להחליט (צריך 3 תוצאות לפחות בתחום).", "muted kv")]),
+    log.length ? el("details", {}, el("summary", { class: "muted", text: "יומן השינויים" }),
+      el("ul", {}, log.map((e) => el("li", { dir: "auto",
+        text: `${e.date} · ${ADJ_AREA[e.area] || e.area} · ${ADJ_RULE[e.rule] || e.rule}${e.reason ? ` -- ${e.reason}` : ""}` })))) : null);
+  const scores = doc?.therapist_scores || [];
+  $("therapist-scores").replaceChildren(scores.length
+    ? el("ul", {}, scores.map((t, i) => {
+        const x = el("button", { class: "small x", type: "button", text: "✕" });
+        x.addEventListener("click", async () => { await api(acct(`/therapist-scores/${i}`), null, "DELETE"); await loadAccount(); });
+        return el("li", { dir: "auto" }, `${t.date} · ${t.test}: ${t.score}${t.note ? ` (${t.note})` : ""} `, x);
+      }))
+    : p("עדיין אין.", "muted kv"));
+}
+$("ts-add").addEventListener("click", async () => {
+  const body = { date: $("ts-date").value, test: $("ts-test").value, score: $("ts-score").value, note: $("ts-note").value };
+  if (!body.date || !body.test || !body.score) return;
+  $("ts-add").disabled = true;
+  try { await api(acct("/therapist-scores"), body); await loadAccount(); ["ts-test", "ts-score", "ts-note"].forEach((id) => { $(id).value = ""; }); }
+  finally { $("ts-add").disabled = false; }
+});
+
 async function saveNeed(area, level, note, button) {
   if (area !== "goals" && !level) { $("needs-status").textContent = "צריך לבחור רמה."; return; }
   button.disabled = true;
@@ -962,6 +1024,31 @@ function renderProgress(data) {
       lineChart(withSeq, [{ key: "sequencing", color: COLORS.treated }]),
       p("משימות כמו אצל הקלינאית: אירועים מעורבבים שהוא מסדר, או סיפור קצר שהוא מספר מחדש. " +
         "המשימה גדלה (עד 6 אירועים) כשהוא מצליח, וקטנה כשקשה לו.", "muted kv"));
+  }
+  const has = (k) => data.points.filter((pt) => pt[k] !== null && pt[k] !== undefined);
+  const withStory = has("story");
+  if (withStory.length) {
+    out.push(el("h3", { text: "דיבור רציף: סיפור קצר שהוא מספר מחדש (מדידה קבועה)" }),
+      lineChart(withStory, [{ key: "story", color: COLORS.treated }]),
+      p("אותם סיפורים, באותה דרך, כל כמה שיחות -- כמו מדידה אצל קלינאית. כמה מהרעיונות העיקריים הוא העביר.", "muted kv"));
+  }
+  const withTalk = has("avg_words");
+  if (withTalk.length) {
+    out.push(el("h3", { text: "שיחה חופשית: אורך התשובות שלו (מילים בממוצע)" }),
+      lineChart(withTalk, [{ key: "avg_words", color: COLORS.own }],
+                { yMax: 30, yTicks: [0, 10, 20, 30], yLabel: (v) => `${v}` }),
+      p("נמדד בנפרד מהתרגול: האם השיפור מגיע לשיחה עצמה.", "muted kv"));
+  }
+  const withView = has("his_view");
+  if (withView.length) {
+    out.push(el("h3", { text: "איך הוא מרגיש שהדיבור הולך (1-5, מהמילים שלו)" }),
+      lineChart(withView, [{ key: "his_view", color: COLORS.hint }], { yMax: 5, yTicks: [1, 3, 5], yLabel: (v) => `${v}` }));
+  }
+  const withSumm = data.points.filter((pt) => pt.summarizing !== null && pt.summarizing !== undefined);
+  if (withSumm.length) {
+    out.push(el("h3", { text: "סיכום במילים שלו: כמה מהרעיונות העיקריים הוא העביר" }),
+      lineChart(withSumm, [{ key: "summarizing", color: COLORS.own }]),
+      p("היא מקריאה פסקה קצרה והוא מספר אותה במילים שלו. הפסקה גדלה (עד 6 רעיונות) כשהוא מצליח, וקטנה כשקשה לו.", "muted kv"));
   }
   const withOwn = data.points.filter((pt) => pt.self_found || pt.not_found);
   if (withOwn.length) {
@@ -1142,6 +1229,7 @@ async function loadAccount() {
     renderProfile(ov.profile);
     renderNeeds(ov.needs);
     renderTherapistPoints(ov.needs?.therapist_points);
+    renderAdjust(ov.progress);
     renderNotes(ov.notes);
     const au = ov.audio || {};
     audioUsage = au.enabled && au.files !== null && au.files !== undefined

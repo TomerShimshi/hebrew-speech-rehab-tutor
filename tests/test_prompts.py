@@ -46,6 +46,8 @@ def test_conversation_flow_rules_present():
     assert "NO summary, NO homework" in text and "end a TOPIC, not the session" in text  # no early goodbyes (12)
     # how the session works comes right after the role, and the steps stay behind the scenes
     with_steps = render_tutor_prompt(steps="Today's steps, in order: 1. opening.").text
+    # 21.10: after next_step she skipped reacting to his answer ~1/3 of step changes (voice only)
+    assert "ALWAYS open with one short sentence reacting to what he just said" in " ".join(with_steps.split())
     assert with_steps.index("## ROLE") < with_steps.index("## HOW THE SESSION WORKS") < with_steps.index("## HOW YOU TALK")
     flat = " ".join(with_steps.split())
     assert "He must never notice" in flat and "follow the HOW exactly" in flat and "FIRST call next_step" in flat

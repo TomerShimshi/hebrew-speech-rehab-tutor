@@ -187,6 +187,23 @@
         </div>
       </details>
 
+      <details class="cg-card" id="sec-adjust">
+        <summary>התאמות שהאפליקציה עשתה</summary>
+        <p class="muted">כמו קלינאית: לפי תוצאות שהקוד מחשב (לא שיחה אחת, ולא תמלול לא בטוח), האפליקציה מעלה או מורידה רמה
+          ומשנה כמה זמן מקדישים לכל תחום. כל שינוי נרשם עם הסיבה. אפשר לנעול תחום ("כך הקלינאית רוצה") או לבטל שינוי.</p>
+        <div id="adjust"></div>
+        <h3>ציונים מהקלינאית</h3>
+        <p class="muted">תוצאה של מבדק רשמי (למשל WAB-R) עם תאריך -- מוצגת ליד הנתונים של האפליקציה.</p>
+        <div id="therapist-scores"></div>
+        <div class="cg-actions need">
+          <input id="ts-date" type="date">
+          <input id="ts-test" type="text" maxlength="60" placeholder="מבדק (למשל WAB-R AQ)" dir="auto">
+          <input id="ts-score" type="text" maxlength="30" placeholder="ציון" dir="auto">
+          <input id="ts-note" type="text" maxlength="200" placeholder="הערה" dir="auto">
+          <button id="ts-add" class="small" type="button">הוספה</button>
+        </div>
+      </details>
+
       <details class="cg-card" id="sec-needs">
         <summary>מה הוא צריך</summary>
         <p class="muted">לכל תחום: עד כמה זה קשה לו לפי מה שהאפליקציה שמעה בשיחות (מתעדכן אחרי כל שיחה), או מה

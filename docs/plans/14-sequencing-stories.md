@@ -91,7 +91,7 @@ class SequencingStep(Step):
 - **Progress:** a new series, the share in the right order over time (by type), and the recommended number of events.
 - **The therapist export:** the tasks and their scores. Useful to his speech therapist, since it's her kind of task.
 
-## Later: pictures like the therapist's → [plan 19](19-picture-sequences.md)
+## Later: pictures like the therapist's → [plan 20](20-picture-sequences.md)
 Not in this round. Decide after seeing how the voice-only version goes.
 
 ## Files

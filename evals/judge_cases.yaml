@@ -1,0 +1,53 @@
+# Hand-labeled turns for checking the judge (python -m evals.check_judge). Neutral, made-up examples --
+# nothing from anyone's sessions (the repo is public). Each case: his answer, her turn (<...> = app
+# events), and the expected verdict; leave a field out to not check it. Add a case whenever the judge
+# gets one wrong.
+cases:
+  - name: reacts, then the next step
+    his: "דני מצא את המפתחות במקרר והגיע באיחור."
+    her: "<next_step:advanced> איזה סיפור, המפתחות במקרר! עכשיו אקריא לך משהו קצר. ספר לי במילים שלך מה שמעת."
+    expect: {reacted: true, real_questions: 1, invites_answer: true, reads_instructions: false}
+  - name: jumps to the next topic, no reaction
+    his: "גרתי חמש שנים בתל אביב וחמש ברמת גן."
+    her: "<next_step:advanced> בוא נדבר על משהו אחר. איזו מוזיקה אתה אוהב לשמוע?"
+    expect: {reacted: false, real_questions: 1, invites_answer: true}
+  - name: generic transition is not a reaction
+    his: "עם חברים זה יותר קל."
+    her: "<next_step:advanced> בוא נעבור לנושא הבא. מה עשית השבוע?"
+    expect: {reacted: false}
+  - name: a confirming tag is not a question
+    his: "הלכתי לשוק בבוקר."
+    her: "השוק בבוקר הכי נעים, נכון? מה קנית שם?"
+    expect: {reacted: true, real_questions: 1, invites_answer: true}
+  - name: two questions glued with "או ש"
+    his: "עשיתי טסט לרכב בשבוע שעבר."
+    her: "יפה! קרה לך פעם לעשות טסט לרכב, או שזה תמיד דורש קצת סבלנות?"
+    expect: {real_questions: 2}
+  - name: one question with two real options
+    his: "אני אוהב לטייל."
+    her: "גם אני! אתה מעדיף לטייל בקיץ או בחורף?"
+    expect: {real_questions: 1, invites_answer: true}
+  - name: a request to speak, without a question mark
+    his: "בסדר."
+    her: "יש לי סיפור קצר בשבילך. רותי ויואב תכננו חתונה בגן. ספר לי את הסיפור במילים שלך"
+    expect: {real_questions: 1, invites_answer: true}
+  - name: a statement only -- dangling
+    his: "עם חברים זה יותר קל."
+    her: "זה מובן לגמרי, שיחות עם חברים הן לרוב הרבה יותר טבעיות וזורמות."
+    expect: {reacted: true, real_questions: 0, invites_answer: false}
+  - name: two separate questions
+    his: "היה יום עמוס."
+    her: "אני מבינה. מה עשית היום? ואיך אתה מרגיש עכשיו?"
+    expect: {real_questions: 2, invites_answer: true}
+  - name: instructions read aloud
+    his: "כן."
+    her: "CURRENT STEP: practice. אוקיי, איך נקראת העיר על שפת הכנרת?"
+    expect: {reads_instructions: true, real_questions: 1}
+  - name: a question without a question mark (punctuation lost)
+    his: "נסעתי לים."
+    her: "איזה כיף לנסוע לים איזה חוף אתה הכי אוהב"
+    expect: {reacted: true, real_questions: 1, invites_answer: true}
+  - name: a goodbye is not dangling (he says goodbye back)
+    his: "ביי, יום טוב."
+    her: "להתראות, שיהיה לך יום נפלא!"
+    expect: {reacted: true, invites_answer: true, real_questions: 0}

@@ -77,6 +77,38 @@ def prepare_for_session(plan: ClassPlan | None, current_set: dict | None) -> Cla
     return plan.model_copy(update={"steps": steps})
 
 
+# ---- needs checks that a session didn't reach (17, found 15.10) ---------------------------------------
+CARRY_THREAD = {"kind": "thread", "topic": "something he told you earlier today",
+                "question": "סיפרת לי קודם על משהו מעניין -- תספר לי עוד קצת?",
+                "follow_ups": "A detail he mentioned; how it went on."}
+
+
+def missed_checks(session: dict) -> list[dict]:
+    """The needs-check steps of a finished session that it never finished: every check from the step she
+    was on when it ended (steps_done counts the finished ones, in order)."""
+    steps = ((session.get("class_plan") or {}).get("steps")) or []
+    done = len(session.get("steps_done") or [])
+    return [s for s in steps[done:] if s.get("kind") == "check"]
+
+
+def with_checks(steps: list[dict], checks: list[dict]) -> list[dict]:
+    """`steps` with `checks` added at the end, each after a short conversation topic -- never two checks
+    in a row, never right after the greeting."""
+    out = list(steps)
+    for check in checks:
+        out += [dict(CARRY_THREAD), check]
+    return out
+
+
+def add_one_check(steps: list[dict], check: dict) -> list[dict]:
+    """One carried-over check inside a built plan: right after a conversation thread that isn't followed
+    by a check (not the greeting); else at the end, after a short topic."""
+    for i, s in enumerate(steps):
+        if i > 0 and s.get("kind") == "thread" and (i + 1 >= len(steps) or steps[i + 1].get("kind") != "check"):
+            return [*steps[:i + 1], check, *steps[i + 1:]]
+    return with_checks(steps, [check])
+
+
 def session_steps(plan: ClassPlan | None) -> list[dict]:
     """The steps the page hands out: kind, a short label, and the exact instruction."""
     steps = plan.steps if plan else [OpeningStep()]

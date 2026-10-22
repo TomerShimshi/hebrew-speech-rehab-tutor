@@ -38,6 +38,7 @@ from app.deps import (
 )
 from app.reminders import TITLE, ReminderSettings, send_to_devices, text_for
 from fastapi.responses import Response
+from app import progress as progress_rules  # 17 (the page also has a `progress` endpoint)
 from app.patient_profile import AREA_NAMES, LEVELS, PROFILE_MAX_CHARS, account_profile, render_inferred
 from app.session_prompt import build_session_prompt
 from app.prompt_archive import PromptArchive
@@ -60,6 +61,7 @@ SESSION_FIELDS = ("id", "status", "started_at", "ended_at", "end_reason", "turn_
                   "summary", "topics", "mood", "highlights", "difficulties", "probe_results",
                   "own_names", "names_game",  # names found / missed in free talk; the names game (12)
                   "sequencing",  # telling things in order (14): the task and its score
+                  "summarizing",  # a short text in his own words (17): its score
                   "agenda", "agenda_after", "steps_done", "steps_held",  # steps mode (13): the steps it ran (exact texts), and her reports
                   "memory_status", "memory_error", "plan_status", "plan_error",
                   "memory_model", "plan_model",  # which model did the work (09)
@@ -160,14 +162,22 @@ def progress_series(sessions: list[dict], word_bank: dict) -> dict:
         own = s.get("own_names") or []  # names in free talk (12), their own series
         seq = s.get("sequencing") or {}  # telling things in order (14), its own series
         seq_pct = seq.get("order_pct") if seq.get("status") == "done" else None
+        summ = s.get("summarizing") or {}
+        summ_pct = summ.get("ideas_pct") if summ.get("status") == "done" else None
+        story = s.get("story_probe") or {}  # 17: the story he retells, scored by code
+        story_pct = story.get("ideas_pct") if story.get("status") == "done" and not story.get("low_confidence") else None
+        view = (s.get("his_view") or {}).get("score") if (s.get("his_view") or {}).get("status") == "done" else None
+        talk = (s.get("talk") or {}).get("avg_words") or None
         mood = MOOD_SCORE.get(s.get("mood") or "")
-        if not results and not own and mood is None and seq_pct is None:
+        if (not results and not own and mood is None and seq_pct is None and summ_pct is None and story_pct is None
+                and view is None and talk is None):
             continue
         points.append({"date": s.get("started_at"), "treated": _own_share(results, "treated"),
                        "untreated": _own_share(results, "untreated"), "items": len(results), "mood": mood,
                        "self_found": sum(o.get("result") == "self_found" for o in own),
                        "not_found": sum(o.get("result") == "not_found" for o in own),
-                       "sequencing": seq_pct, "sequencing_task": seq.get("task") if seq_pct is not None else None})
+                       "sequencing": seq_pct, "sequencing_task": seq.get("task") if seq_pct is not None else None,
+                       "summarizing": summ_pct, "story": story_pct, "his_view": view, "avg_words": talk})
     with_checkins = [p for p in points if p["items"]]
     recent, before = with_checkins[-5:], with_checkins[-10:-5]
     words = list((word_bank or {}).values())
@@ -242,6 +252,7 @@ def overview(pid: str = Depends(account), settings: Settings = Depends(get_setti
                                                "sessions_processed", "updated_at", "last_session_id")},
         "profile": store.get_profile(pid),  # his own profile (15): uploaded here, or inferred (15.5)
         "needs": store.get_needs(pid),  # his needs per area (15.5): inferred, or set by the family
+        "progress": store.get_progress(pid),  # the app's settings per area, the log, the therapist's scores (17)
         "word_bank": _word_rows(memory.get("word_bank")),
         "check_in_set": check_in,
         "check_in_history": [{k: h.get(k) for k in ("id", "created_on", "retired_at", "sessions_played", "items")}
@@ -374,6 +385,58 @@ def therapist_point_status(point_id: str, status: Literal["new", "raised", "dism
             store.save_needs(pid, {**needs, "therapist_points": points})
             return {"ok": True}
     raise HTTPException(status_code=404, detail="Point not found")
+
+
+@router.post("/{email}/progress/{area}/lock")
+def progress_lock(area: str, lock: bool = Body(..., embed=True), pid: str = Depends(account),
+                  caregiver: User = Depends(require_caregiver), store: SessionStore = Depends(get_store)) -> dict:
+    """The family's veto (17): a locked area is never changed by the app."""
+    if area not in progress_rules.AREAS:
+        raise HTTPException(status_code=404, detail="Unknown area")
+    store.save_progress(pid, progress_rules.set_lock(store.get_progress(pid) or {}, area, lock, caregiver.email,
+                                               dt.datetime.now(dt.timezone.utc).date()))
+    return {"ok": True}
+
+
+@router.post("/{email}/progress/{area}/undo")
+def progress_undo(area: str, pid: str = Depends(account), caregiver: User = Depends(require_caregiver),
+                  store: SessionStore = Depends(get_store)) -> dict:
+    """The family's veto (17): back to the setting before the app's last decision in this area."""
+    try:
+        doc = progress_rules.undo(store.get_progress(pid) or {}, area, caregiver.email, dt.datetime.now(dt.timezone.utc).date())
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    store.save_progress(pid, doc)
+    return {"ok": True}
+
+
+@router.post("/{email}/therapist-scores")
+def therapist_score_add(date: str = Body(..., embed=True, max_length=10), test: str = Body(..., embed=True, max_length=60),
+                        score: str = Body(..., embed=True, max_length=30), note: str = Body("", embed=True, max_length=200),
+                        pid: str = Depends(account), caregiver: User = Depends(require_caregiver),
+                        store: SessionStore = Depends(get_store)) -> dict:
+    """A formal result from his therapist (17), e.g. WAB-R AQ 92 on 1.11 -- shown next to the app's data."""
+    try:
+        dt.date.fromisoformat(date)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="date is YYYY-MM-DD") from exc
+    doc = store.get_progress(pid) or {}
+    scores = [*(doc.get("therapist_scores") or []), {"date": date, "test": test.strip(), "score": score.strip(),
+                                                     "note": note.strip(), "by": caregiver.email}]
+    store.save_progress(pid, {**doc, "therapist_scores": sorted(scores, key=lambda x: x["date"])})
+    return {"ok": True}
+
+
+@router.delete("/{email}/therapist-scores/{index}")
+def therapist_score_remove(index: int, pid: str = Depends(account), caregiver: User = Depends(require_caregiver),
+                           store: SessionStore = Depends(get_store)) -> dict:
+    doc = store.get_progress(pid) or {}
+    scores = list(doc.get("therapist_scores") or [])
+    if not 0 <= index < len(scores):
+        raise HTTPException(status_code=404, detail="Not found")
+    scores.pop(index)
+    store.save_progress(pid, {**doc, "therapist_scores": scores})
+    return {"ok": True}
 
 
 @router.put("/{email}/notes")

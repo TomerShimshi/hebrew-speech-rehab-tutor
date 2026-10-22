@@ -13,8 +13,8 @@ from functools import lru_cache
 
 import yaml
 
-from app import check_in_set, sequencing
-from app.steps import SequencingStep
+from app import check_in_set, probes, sequencing, summarizing
+from app.steps import SequencingStep, StoryProbeStep, SummaryStep, ViewStep
 from app.agent.memory_tools import Inferring, MemoryDraft, add_vocabulary, build_memory_tools
 from app.patient_profile import (AREA_NAMES, MAX_HISTORY, MAX_POINTS, account_profile, needs_lines,
                                  render_inferred)
@@ -102,8 +102,8 @@ def save_inferred(store, pid: str, sid: str, draft: MemoryDraft, today: dt.date)
         point.update(id=f"{sid}-{len(inf.points)}", date=today.isoformat(), session=sid)
         inf.points.append(point)
     needs = {"areas": inf.areas, "therapist_points": inf.points[-MAX_POINTS:]}
-    if inf.changed or inf.new_points:
-        store.save_needs(pid, needs)
+    if inf.changed or inf.new_points:  # merged: the doc also keeps other things (e.g. pending checks, 17)
+        store.save_needs(pid, {**(store.get_needs(pid) or {}), **needs})
     if not inf.profile or account_profile(store, pid).source == "uploaded":
         return  # an uploaded profile is never touched
     for own in draft.own_names:
@@ -126,6 +126,22 @@ def sequencing_result(plan, reported: dict | None) -> dict | None:
         return {**base, "status": "skipped", "note": reported.get("note", "")}
     return {**base, "status": "done", **sequencing.score(reported["told_order"], len(step.events)),
             "told_order": reported["told_order"], "needed_help": reported["needed_help"],
+            "low_confidence": reported["low_confidence"], "note": reported.get("note", "")}
+
+
+def summarizing_result(plan, reported: dict | None) -> dict | None:
+    """The session's summary result (17): the title and size, and the score computed by code from the
+    main ideas the agent heard -- or skipped / not reported."""
+    step = next((s for s in (plan.steps if plan else []) if isinstance(s, SummaryStep)), None)
+    if step is None:
+        return None
+    base = {"title": step.title, "ideas": len(step.main_ideas)}
+    if not reported:
+        return {**base, "status": "not_reported"}
+    if reported.get("skipped"):
+        return {**base, "status": "skipped", "note": reported.get("note", "")}
+    return {**base, "status": "done", **summarizing.score(reported["conveyed"], len(step.main_ideas)),
+            "conveyed": reported["conveyed"], "needed_help": reported["needed_help"],
             "low_confidence": reported["low_confidence"], "note": reported.get("note", "")}
 
 
@@ -207,11 +223,14 @@ def run_memory_update(
 
         # The sequencing task must be reported (13.10: the agent skipped it, so no score): one
         # short extra round with only that tool when the plan had one and it's missing.
-        if plan and any(isinstance(s, SequencingStep) for s in plan.steps) and draft.sequencing is None:
-            seq_tool = [t for t in build_memory_tools(draft) if t.name == "record_sequencing"]
-            run_tool_loop(client, models, prompts["tool_phase"] + "\n\nYOU MISSED ONE: TODAY'S PLAN had a "
-                          "sequencing task and you didn't record it. Call record_sequencing now (skipped=true if "
-                          "she didn't run it).", context, seq_tool, max_rounds=2, generate_fn=generate_fn)
+        for cls, field_, tool_name, what in ((SequencingStep, "sequencing", "record_sequencing", "a sequencing task"),
+                                             (SummaryStep, "summarizing", "record_summary", "a summary task"),
+                                             (StoryProbeStep, "story_probe", "record_story_probe", "a story to retell")):
+            if plan and any(isinstance(s, cls) for s in plan.steps) and getattr(draft, field_) is None:
+                missed = [t for t in build_memory_tools(draft) if t.name == tool_name]
+                run_tool_loop(client, models, prompts["tool_phase"] + f"\n\nYOU MISSED ONE: TODAY'S PLAN had {what} "
+                              f"and you didn't record it. Call {tool_name} now (skipped=true if she didn't run it).",
+                              context, missed, max_rounds=2, generate_fn=generate_fn)
 
         # ---- save -------------------------------------------------------------------
         if draft.summary:
@@ -241,6 +260,14 @@ def run_memory_update(
             "own_names": draft.own_names,  # names he found / couldn't find in free talk (12)
             "names_game": draft.names_game,
             "sequencing": sequencing_result(plan, draft.sequencing),  # telling things in order (14)
+            "summarizing": summarizing_result(plan, draft.summarizing),  # a short text in his own words (17)
+            # measuring like a therapist (17): the story probe, his own view, how he talked (by code)
+            "story_probe": probes.story_result(next((s for s in (plan.steps if plan else [])
+                                                     if isinstance(s, StoryProbeStep)), None), draft.story_probe),
+            "his_view": ({**draft.his_view, "status": "done"} if draft.his_view else
+                         ({"status": "not_reported"} if plan and any(isinstance(s, ViewStep) for s in plan.steps)
+                          else None)),
+            "talk": probes.talk_measures(turns),
             "memory_error": None,
             "memory_model": run.models[-1] if run.models else None,
             "memory_attempts": run.attempts,

@@ -1,6 +1,6 @@
 # Sub-plan 17: Measuring progress like a therapist, and adjusting to it -- plus a summarizing activity
 
-Part of the [master design](00-master-design.md). After [16](16-memory-built-by-code.md), before [17.5](17.5-practicing-the-missing-areas.md). Requested by Tomer (2026-10-15); split from the first plan 16 (2026-10-16; renumbered 16 -> 17 on 2026-10-19) -- this half is what touches the patient's sessions and the family's view; practice in the missing areas is [17.5](17.5-practicing-the-missing-areas.md). Updated 2026-10-21: the app adjusts the plans to his measured progress, like a therapist, with the family's veto (E). **Reviewed; to build.**
+Part of the [master design](00-master-design.md). After [16](16-memory-built-by-code.md), before [17.5](17.5-practicing-the-missing-areas.md). Requested by Tomer (2026-10-15); split from the first plan 16 (2026-10-16; renumbered 16 -> 17 on 2026-10-19) -- this half is what touches the patient's sessions and the family's view; practice in the missing areas is [17.5](17.5-practicing-the-missing-areas.md). Updated 2026-10-21: the app adjusts the plans to his measured progress, like a therapist, with the family's veto (E). **Built 2026-10-21** (what's left: below).
 
 ## Why
 - **The way progress is measured today is weak.** After each session the memory agent rates each area from what it heard (15.5): a judgment, on whatever that session happened to contain, asked differently every time. Therapists measure differently (below), and their way can be borrowed.
@@ -85,13 +85,29 @@ Part of the [master design](00-master-design.md). After [16](16-memory-built-by-
 | `app/caregiver_api.py`, `static/caregiver.*` | Probe charts, the summary series, conversation measures, his view, the therapist's scores, the export. |
 | `tests/` | The summary step, its turn and its size; probe scoring; baseline; treated vs untreated; carry-over; each decision rule (and that one session or a low-confidence attempt never decides); locks and undo; the export. |
 
+## What was built (2026-10-21)
+- **The summary (B):** `SummaryStep` / `add_summary` (a Hebrew paragraph and its main ideas; one per session), `app/summarizing.py` (score, recommended size 3-6), `record_summary` (+ the extra round when it's missed), the session's `summarizing` result, a progress series. **Turns:** `discourse_turn` -- the other one than the last regular session's; HIS DISCOURSE TASK in the builder's context; `add_sequencing` / `add_summary` refuse the wrong one and `finish` requires the right one.
+- **Carry-over (D):** `missed_checks` from the session's steps and `steps_done`; into the fixed second session (each after a short topic), then one per built plan (`add_one_check`), kept as `pending_checks` with the needs (the memory update merges into that doc now, instead of replacing it).
+- **Measuring (C):** `app/probes.py` + `prompts/probe_stories.yaml` (6 everyday stories, 5 main ideas each): a story to retell every other regular session, each told twice, placed by code after the opening's next step; `record_story_probe`. His own view every ~14 days (`ViewStep`, placed before the last two steps so the wrap-up note doesn't cut it), `record_his_view` (1-5 with his words). Conversation measures by code per session (`talk`: answers, average words, long answers). The therapist's scores: entered on the caregiver page.
+- **Adjusting (E):** `app/progress.py` -- series per area (naming from the names game, untreated included; connected speech from the story probe; summarizing; sequencing), the rules (mastered / worse / stalled), 3 new results between decisions, never a low-confidence result; a dry run on the real data (21.10) tightened them: worse and stalled need 3 earlier results, and no "stalled" at the top of the scale. Run before every plan (`apply_progress`): HIS PROGRESS in the builder's context, new decisions logged and turned into points for the therapist; the naming time is checked by `finish` (more: 2+ practice steps, less: at most 1). Lock / undo on the caregiver page.
+- **The caregiver page (F):** "התאמות שהאפליקציה עשתה" (per area level, time, last decision, lock, undo, the log), the therapist's scores, charts for the story probe, answer length and his view; the session's summary line.
+- Prompts: plan builder 0.22, memory update 0.14. `docs/tools.md` regenerated. Tests: `test_summarizing.py`, `test_progress.py`, carry-over in `test_needs_check.py`. `pytest`: 313 passed.
+- **Checked end to end** on the test account's real data: the plan got the summary (its turn), the story probe and his view; the rules logged one decision.
+- **Dry run for the patient** (21.10): naming "stalled" (78% average, no gain over two 3-session windows) -- it will become a point for his therapist and a "try another cue" note for the builder at his next plan; the family can lock or undo it.
+
+**Not done yet:**
+- The therapist export pages per area (F) -- the data is on the caregiver page.
+- The "retrieval first" check of the transcripts (B).
+- A new confirmed weakness in an area the app doesn't practice is only noted (practice for those areas is 17.5); in the practiced areas a decline already gives more time.
+- The probe and view steps are placed outside the builder's time budget: a session with both is ~2 minutes longer than planned -- to watch.
+
 ## Done when
-- [ ] For the patient: no new checks; the plans follow his measured progress by the rules (E), every change logged with its reason; a confirmed weakness is added gradually with a notice; the family can lock an area or undo a change.
-- [ ] The summarizing activity works, takes turns with sequencing, adapts its size, and is scored by main ideas.
-- [ ] Naming and connected speech have probe sets with a baseline, treated and untreated items, scored by code, shown over time.
-- [ ] Conversation and his own view are shown on their own; the therapist's scores can be added.
-- [ ] A needs check missed in the first session happens in the next.
-- [ ] `pytest` passes.
+- [x] For the patient: no new checks; the plans follow his measured progress by the rules (E), every change logged with its reason; a confirmed weakness is added gradually with a notice; the family can lock an area or undo a change.
+- [x] The summarizing activity works, takes turns with sequencing, adapts its size, and is scored by main ideas.
+- [x] Naming and connected speech have probe sets with a baseline, treated and untreated items, scored by code, shown over time.
+- [x] Conversation and his own view are shown on their own; the therapist's scores can be added.
+- [x] A needs check missed in the first session happens in the next.
+- [x] `pytest` passes.
 
 ## Commit
 `Sub-plan 17: measuring progress like a therapist and adjusting to it, and a summarizing activity`

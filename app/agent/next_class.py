@@ -19,12 +19,13 @@ from functools import lru_cache
 import yaml
 from google.genai import types
 
-from app import check_in_set, sequencing, word_bank
+from app import check_in_set, probes, progress, sequencing, summarizing, word_bank
 from app.agent.memory_update import format_memory
 from app.agent.research import personal_terms, research_technique, search_available
+from app.steps import StoryProbeStep, ViewStep
 from app.agent.plan_tools import BUDGET_MINUTES, MIN_ACCEPT, PlanDraft, build_plan_tools
 from app.agent.runner import Tool, run_tool_loop
-from app.class_plan import fixed_plan
+from app.class_plan import add_one_check, fixed_plan, missed_checks, with_checks
 from app.patient_profile import account_profile, needs_lines
 from app.config import REPO_ROOT, Settings
 from app.games import render_games_for_plan
@@ -216,12 +217,61 @@ def sequencing_history(store: SessionStore, pid: str) -> tuple[list[dict], str]:
     return results[:5], "retell" if last_task == "scrambled" else "scrambled"
 
 
+def apply_progress(store: SessionStore, pid: str, today: dt.date) -> tuple[str, str]:
+    """Runs the progress rules (17) on his results, saves the settings and the log, turns new
+    decisions into points for his therapist. Returns HIS PROGRESS and the naming share."""
+    sessions = store.list_sessions(pid, 40)
+    doc, decisions = progress.update(store.get_progress(pid), sessions, today)
+    store.save_progress(pid, {**(store.get_progress(pid) or {}), **doc})
+    if decisions:
+        needs = store.get_needs(pid) or {}
+        points = list(needs.get("therapist_points") or [])
+        for d in decisions:
+            _log(f"progress: {d['area']} {d['rule']} -- {d['reason']}")
+            if all(p.get("text") != d["point"] for p in points):
+                points.append({"id": f"progress-{today.isoformat()}-{d['area']}", "text": d["point"],
+                               "why": f"{d['rule']}: {d['reason']}", "evidence": [], "status": "new",
+                               "date": today.isoformat(), "session": None})
+        store.save_needs(pid, {**needs, "therapist_points": points[-60:]})
+    naming = (doc.get("areas") or {}).get("naming") or {}
+    return progress.render(doc, progress.series(sessions)), naming.get("share", "normal")
+
+
+def discourse_turn(store: SessionStore, pid: str) -> str:
+    """Which discourse task the next plan has (17): the sequencing task and the summary take turns,
+    session by session -- the other one than his last regular session that had either."""
+    for s in store.list_sessions(pid, 12):
+        if s.get("status") != ENDED or (s.get("class_plan") or {}).get("plan_type") != "regular":
+            continue
+        if s.get("sequencing"):
+            return "summary"
+        if s.get("summarizing"):
+            return "sequencing"
+    return "sequencing"
+
+
+def summarizing_history(store: SessionStore, pid: str) -> list[dict]:
+    """His recent summary results (17), newest first (done only)."""
+    out = []
+    for s in store.list_sessions(pid, 12):
+        r = s.get("summarizing") or {}
+        if s.get("status") == ENDED and r.get("status") == "done":
+            out.append(r)
+    return out[:5]
+
+
+def render_summarizing(results: list[dict], recommended: int) -> str:
+    lines = [f"- {r.get('title')}: {r.get('ideas_conveyed')}/{r.get('ideas')} main ideas "
+             f"({r.get('ideas_pct')}%){', with help' if r.get('needed_help') else ''}" for r in results]
+    return "\n".join((lines or ["(no summaries yet)"]) + [f"Recommended size of the next summary: {recommended} main ideas."])
+
+
 def render_sequencing(results: list[dict], recommended: int, task: str) -> str:
     lines = [f"- {r.get('task')}: {r.get('title')}, {r.get('events')} events -> {r.get('order_pct')}% in order, "
              f"{r.get('events_included')}/{r.get('events')} included{', with help' if r.get('needed_help') else ''}"
              for r in results] or ["(no sequencing tasks yet)"]
     lines.append(f"Recommended size of the next task: {recommended} events.")
-    lines.append(f"REQUIRED in every plan. This time: task={task} (the two kinds take turns).")
+    lines.append(f"Its kind when it's due: task={task} (the two kinds take turns).")
     return "\n".join(lines)
 
 
@@ -318,7 +368,8 @@ def build_context(memory_raw: dict, recent_plans: list[dict], profile_text: str,
                   games_text: str = "(no games account linked)", notes_text: str = "(none yet)",
                   caregiver_notes: str = "", check_in: dict | None = None,
                   pace: list[dict] | None = None, sequencing_text: str = "(no sequencing tasks yet)",
-                  needs_text: str = "") -> str:
+                  needs_text: str = "", summarizing_text: str = "(no summaries yet)",
+                  discourse: str = "sequencing", progress_text: str = "") -> str:
     memory = MemoryDoc(**memory_raw)
     due = word_bank.due_words(memory.word_bank, today)
     bank = ", ".join(
@@ -341,7 +392,12 @@ def build_context(memory_raw: dict, recent_plans: list[dict], profile_text: str,
         f"{render_check_in_set(check_in)}\n\n"
         f"# RECENT SESSIONS (oldest first)\n{recent}\n\n"
         f"# HIS PACE (newest first; size the plan to fill ~9 minutes at this pace)\n{render_pace(pace or [])}\n\n"
+        f"# HIS DISCOURSE TASK (REQUIRED in every plan: the sequencing task and the summary take turns)\n"
+        f"This time: {'a SUMMARY (add_summary)' if discourse == 'summary' else 'a SEQUENCING task (add_sequencing)'}.\n\n"
         f"# HIS SEQUENCING (telling things in order; newest first)\n{sequencing_text}\n\n"
+        f"# HIS SUMMARIZING (telling a short text in his own words; newest first)\n{summarizing_text}\n\n"
+        f"# HIS PROGRESS (measured by code; the app's settings per area -- follow them)\n"
+        f"{progress_text or '(not enough results yet)'}\n\n"
         f"# HIS NEEDS (per area, from his first sessions and the family; not a diagnosis)\n"
         f"{needs_text or '(none recorded: plan from the profile)'}\n\n"
         f"# RECENT PLANS' GOALS (newest first)\n{_recent_plans_text(recent_plans)}\n\n"
@@ -407,10 +463,21 @@ def build_next_plan(
             # Nothing to build on: the next session will be the intro plan.
             store.update_session(pid, sid, {"plan_status": PLAN_DONE, "plan_model": None})
             return PLAN_DONE
+        # Needs checks a session didn't reach carry over (17): into the fixed second session, then one
+        # per built plan. Kept with the needs, so nothing is lost if a plan is rebuilt.
+        finished_session = store.get_session(pid, sid) or {}
+        finished = finished_session.get("class_plan") or {}
+        needs_doc = store.get_needs(pid) or {}
+        pending = list(needs_doc.get("pending_checks") or [])
+        for check in missed_checks(finished_session):
+            if all(p.get("area") != check.get("area") for p in pending):
+                pending.append(check)
         # The needs check's second session (15.5) is fixed: saved as the next plan, no LLM.
-        finished = (store.get_session(pid, sid) or {}).get("class_plan") or {}
         if finished.get("plan_type") == "intro" and finished.get("intro_part") == 1:
-            store.save_next_plan(pid, sid, fixed_plan("intro_needs_2").model_dump(mode="json"))
+            second = fixed_plan("intro_needs_2").model_dump(mode="json")
+            second["steps"] = with_checks(second["steps"], pending)
+            store.save_next_plan(pid, sid, second)
+            store.save_needs(pid, {**needs_doc, "pending_checks": []})
             store.update_session(pid, sid, {"plan_status": PLAN_DONE, "plan_model": "fixed: intro_needs_2",
                                             "plan_error": None})
             _log(f"{sid}: next plan = the needs check's second session (fixed)")
@@ -422,7 +489,14 @@ def build_next_plan(
         recent_plans = store.recent_session_plans(pid, 5)
         seq_results, seq_task = sequencing_history(store, pid)
         seq_events = sequencing.recommended_events(seq_results)
+        # Adjusting to his progress, like a therapist (17): the rules, then HIS PROGRESS for the builder.
+        progress_text, naming_share = apply_progress(store, pid, today)
+        sum_results = summarizing_history(store, pid)
+        sum_ideas = summarizing.recommended_ideas(sum_results)
+        discourse = discourse_turn(store, pid)
         context_args = dict(sequencing_text=render_sequencing(seq_results, seq_events, seq_task),
+                            summarizing_text=render_summarizing(sum_results, sum_ideas), discourse=discourse,
+                            progress_text=progress_text,
                             games_text=render_games_for_plan(games),
                             notes_text=render_notes(store.recent_technique_notes(pid, 3)),
                             caregiver_notes=caregiver_notes, pace=speaking_pace(store, pid),
@@ -455,7 +529,8 @@ def build_next_plan(
             draft, check_practice=practice_checker(known, check_in_set.untreated_targets(current_set)),
             his_games={gid for gid, g in his_games.items() if g.route},
             set_names={i["target"] for i in (current_set or {}).get("items") or []},
-            seq_events=seq_events, seq_task=seq_task)
+            seq_events=seq_events, seq_task=seq_task, summary_ideas=sum_ideas, discourse=discourse,
+            naming_share=naming_share)
         run = run_tool_loop(client, _models(settings), load_prompt()["system"], context, tools,
                             max_rounds=PLAN_MAX_ROUNDS, generate_fn=generate_fn)
         if not draft.finished:
@@ -469,8 +544,24 @@ def build_next_plan(
             h.model_copy(update={"name_he": his_games[h.game_id].name_he or h.game_id}) for h in plan.game_homework]})
         for rec in draft.games_feedback:
             store.add_games_recommendation(pid, sid, rec.model_dump(mode="json"))
+        plan_dict = plan.model_dump(mode="json")
+        # Measuring like a therapist (17): the story probe every other session, after the opening's next
+        # step; his own view every ~2 weeks, at the end. Placed by code, the same way every time.
+        recent_sessions = store.list_sessions(pid, 30)
+        story = probes.story_due(recent_sessions)
+        if story:
+            probe = StoryProbeStep(story_id=story["id"], title=story["title"], story=" ".join(story["story"].split()),
+                                   main_ideas=story["main_ideas"]).model_dump(mode="json")
+            plan_dict["steps"] = [*plan_dict["steps"][:2], probe, *plan_dict["steps"][2:]]
+        if probes.view_due(recent_sessions, today):  # before the last two steps: the wrap-up note may come first
+            cut = max(2, len(plan_dict["steps"]) - 2)
+            plan_dict["steps"] = [*plan_dict["steps"][:cut], ViewStep().model_dump(mode="json"), *plan_dict["steps"][cut:]]
+        if pending and account_profile(store, pid).source != "uploaded":
+            plan_dict["steps"] = add_one_check(plan_dict["steps"], pending.pop(0))  # one per plan (17)
+        if pending != list(needs_doc.get("pending_checks") or []):
+            store.save_needs(pid, {**needs_doc, "pending_checks": pending})
         store.save_next_plan(pid, sid, {
-            **plan.model_dump(mode="json"),
+            **plan_dict,
             "prompt_version": str(load_prompt().get("prompt_version")),
             # which version of the caregiver notes this plan saw (the page warns when they changed since)
             "notes_used_at": notes_doc.get("updated_at") if caregiver_notes.strip() else None,

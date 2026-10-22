@@ -58,6 +58,9 @@ class MemoryDraft:
     own_names: list[dict] = field(default_factory=list)
     names_game: dict | None = None  # {status, note} (12)
     sequencing: dict | None = None  # {told_order, needed_help, low_confidence, skipped, note} (14)
+    summarizing: dict | None = None  # {conveyed, needed_help, low_confidence, skipped, note} (17)
+    story_probe: dict | None = None  # {conveyed, low_confidence, skipped} (17)
+    his_view: dict | None = None  # {score 1-5, quote, note} (17)
     inferring: Inferring | None = None  # no uploaded profile (15.5); None = the tools aren't offered
     focus: list[str] | None = None  # 2-4 focus points for the next session (16); None = keep the old ones
 
@@ -144,6 +147,33 @@ def build_memory_tools(draft: MemoryDraft) -> list[Tool]:
         draft.sequencing = {"told_order": [int(t) for t in told], "needed_help": bool(args.get("needed_help")),
                             "low_confidence": bool(args.get("low_confidence")), "skipped": bool(args.get("skipped")),
                             "note": str(args.get("note", ""))[:300]}
+        return {"ok": True}
+
+    def record_summary(args: dict) -> dict:
+        conveyed = args.get("conveyed") or []
+        if not isinstance(conveyed, list) or not all(isinstance(c, (int, float)) for c in conveyed):
+            raise ValueError("conveyed is a list of the main ideas' numbers, e.g. [1, 2, 4]")
+        draft.summarizing = {"conveyed": [int(c) for c in conveyed], "needed_help": bool(args.get("needed_help")),
+                             "low_confidence": bool(args.get("low_confidence")), "skipped": bool(args.get("skipped")),
+                             "note": str(args.get("note", ""))[:300]}
+        return {"ok": True}
+
+    def record_story_probe(args: dict) -> dict:
+        conveyed = args.get("conveyed") or []
+        if not isinstance(conveyed, list) or not all(isinstance(c, (int, float)) for c in conveyed):
+            raise ValueError("conveyed is a list of the main ideas' numbers, e.g. [1, 2, 4]")
+        draft.story_probe = {"conveyed": [int(c) for c in conveyed], "low_confidence": bool(args.get("low_confidence")),
+                             "skipped": bool(args.get("skipped"))}
+        return {"ok": True}
+
+    def record_his_view(args: dict) -> dict:
+        score = args.get("score")
+        if not isinstance(score, (int, float)) or not 1 <= int(score) <= 5:
+            raise ValueError("score is 1-5 (1 = very hard, 5 = easy)")
+        quote = _norm(str(args.get("quote", "")))[:300]
+        if not quote:
+            raise ValueError("quote his words (HEBREW, exact)")
+        draft.his_view = {"score": int(score), "quote": quote, "note": _norm(str(args.get("note", "")))[:300]}
         return {"ok": True}
 
     def record_names_game(args: dict) -> dict:
@@ -367,6 +397,58 @@ def build_memory_tools(draft: MemoryDraft) -> list[Tool]:
                 "required": ["told_order"],
             },
             record_sequencing,
+        ),
+        Tool(
+            "record_summary",
+            "Record the SUMMARY task of TODAY'S PLAN (only if the plan has one, 'Summarizing'): which of its main "
+            "ideas he conveyed in his own words. Call once.",
+            {
+                "type": "object",
+                "properties": {
+                    "conveyed": {"type": "array", "items": {"type": "integer"}, "description": (
+                        "The numbers of the main ideas (as numbered in TODAY'S PLAN) he conveyed in his first "
+                        "telling, by meaning, in his own words -- before any help.")},
+                    "needed_help": {"type": "boolean", "description": "true if she had to help or read it again."},
+                    "low_confidence": {"type": "boolean", "description": (
+                        "true if the two transcript versions disagree in a way that changes the result.")},
+                    "skipped": {"type": "boolean", "description": "true if she didn't run it (e.g. he was tired)."},
+                    "note": {"type": "string", "description": "ENGLISH, one short sentence: how it went."},
+                },
+                "required": ["conveyed"],
+            },
+            record_summary,
+        ),
+        Tool(
+            "record_story_probe",
+            "Record the STORY TO RETELL of TODAY'S PLAN (only if the plan has one): which of its main ideas he "
+            "conveyed when he retold it -- his own words, by meaning. Call once.",
+            {
+                "type": "object",
+                "properties": {
+                    "conveyed": {"type": "array", "items": {"type": "integer"}, "description": (
+                        "The numbers of the main ideas (as numbered in TODAY'S PLAN) he conveyed.")},
+                    "low_confidence": {"type": "boolean", "description": (
+                        "true if the two transcript versions disagree in a way that changes the result.")},
+                    "skipped": {"type": "boolean", "description": "true if she didn't run it."},
+                },
+                "required": ["conveyed"],
+            },
+            record_story_probe,
+        ),
+        Tool(
+            "record_his_view",
+            "Record HIS OWN VIEW (only if TODAY'S PLAN has the step 'His own view'): how talking with people has "
+            "been for him lately, as he put it -- 1 very hard, 2 hard, 3 so-so, 4 mostly fine, 5 easy. Call once.",
+            {
+                "type": "object",
+                "properties": {
+                    "score": {"type": "integer", "description": "1-5, from what he said (not from how he spoke)."},
+                    "quote": {"type": "string", "description": "HEBREW: his words, exactly."},
+                    "note": {"type": "string", "description": "ENGLISH, one short sentence."},
+                },
+                "required": ["score", "quote"],
+            },
+            record_his_view,
         ),
         Tool(
             "record_names_game",

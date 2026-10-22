@@ -108,6 +108,8 @@ class SessionStore(Protocol):
     def save_notes(self, pid: str, text: str, by: str) -> None: ...
     def get_profile(self, pid: str) -> dict | None: ...  # his profile (15): {text, source, updated_by, updated_at}
     def save_profile(self, pid: str, text: str, source: str, by: str, extra: dict | None = None) -> None: ...
+    def get_progress(self, pid: str) -> dict | None: ...  # 17: {areas: {area: setting}, log, therapist_scores}
+    def save_progress(self, pid: str, doc: dict) -> None: ...
     def get_needs(self, pid: str) -> dict | None: ...  # the needs profile (15.5): {areas: {area: {...}}}
     def save_needs(self, pid: str, needs: dict) -> None: ...
     def save_session_prompt(self, pid: str, sid: str, text: str, version: str) -> None: ...
@@ -138,6 +140,7 @@ class InMemorySessionStore:
     def __init__(self) -> None:
         self.profiles: dict[str, dict] = {}  # his profile (15)
         self.needs: dict[str, dict] = {}  # his needs profile (15.5)
+        self.progress_docs: dict[str, dict] = {}  # adjusting to his progress (17)
         self.sessions: dict[tuple[str, str], dict] = {}
         self.turns: dict[tuple[str, str], dict[str, dict]] = {}
         self.memory: dict[str, dict] = {}
@@ -344,6 +347,12 @@ class InMemorySessionStore:
 
     def get_needs(self, pid):
         return self.needs.get(pid)
+
+    def get_progress(self, pid):
+        return self.progress_docs.get(pid)
+
+    def save_progress(self, pid, doc):
+        self.progress_docs[pid] = {**doc, "updated_at": _now()}
 
     def save_needs(self, pid, needs):
         self.needs[pid] = {**needs, "updated_at": _now()}
@@ -654,6 +663,14 @@ class FirestoreSessionStore:
     def get_needs(self, pid):
         snap = self._patient(pid).collection("caregiver").document("needs").get()
         return snap.to_dict() if snap.exists else None
+
+    def get_progress(self, pid):
+        snap = self._patient(pid).collection("caregiver").document("progress").get()
+        return snap.to_dict() if snap.exists else None
+
+    def save_progress(self, pid, doc):
+        self._patient(pid).collection("caregiver").document("progress").set(
+            {**doc, "updated_at": self._fs.SERVER_TIMESTAMP})
 
     def save_needs(self, pid, needs):
         self._patient(pid).collection("caregiver").document("needs").set(

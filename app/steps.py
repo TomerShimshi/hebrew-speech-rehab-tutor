@@ -312,11 +312,89 @@ class CheckStep(Step):
         return self.area
 
 
-PlanStep = Annotated[Union[OpeningStep, NamesGameStep, PracticeStep, ActivityStep, GamesActivityStep, ThreadStep,
-                           SequencingStep, CheckStep], Field(discriminator="kind")]
-BUILDABLE = (OpeningStep, NamesGameStep, PracticeStep, ActivityStep, GamesActivityStep, ThreadStep, SequencingStep)
+class SummaryStep(Step):
+    """Summarizing a short text in his own words (17; ARCS-style, by voice). Takes turns with the
+    sequencing task, session by session."""
+    kind: Literal["summary"] = "summary"
+    TOOL: ClassVar[str] = "add_summary"
+    GUIDE: ClassVar[str] = (
+        "A summarizing task (ARCS-style, as in mild aphasia therapy): she reads him a short paragraph, he tells "
+        "it in his own words. paragraph: simple, natural HEBREW, 3-5 short sentences, on something he cares about "
+        "(technology, a place, a podcast or news topic -- from his interests), NEVER from his private life, with "
+        "no rare words. main_ideas: its main ideas in ENGLISH, one per item, in order -- exactly the number HIS "
+        "SUMMARIZING recommends (+-1); each must be stated in the paragraph. Only when HIS DISCOURSE TASK says it's "
+        "a summary's turn.")
+    RULES: ClassVar[str] = (
+        "Introduce it lightly (\"אקריא לך משהו קצר, ואחר כך תספר לי במילים שלך מה שמעת\"), then read the "
+        "paragraph in ONE turn, slowly and clearly, and only then ask him to tell it in his own words. Let him tell "
+        "it ALL the way without correcting him or filling in; read it again once only if he asks. Then react "
+        "warmly to what he told, and ask ONE question about his opinion of it, for an exchange or two. Never "
+        "quiz him on details. Skip it, without mentioning it, if he seems tired.")
+    MINUTES: ClassVar[float] = 2.5
+    MIN_MINUTES: ClassVar[float] = 2.0
+    MIN_ANSWERS: ClassVar[int] = 2
+    title: str = Field(description="ENGLISH: a short title for the family, e.g. 'a new train line'.")
+    paragraph: str = Field(description="HEBREW: the paragraph she reads, 3-5 short sentences.")
+    main_ideas: list[str] = Field(description="ENGLISH: the paragraph's main ideas, in order, one per item.")
 
-STEP_CLASSES = {cls.model_fields["kind"].default: cls for cls in (*BUILDABLE, CheckStep)}
+    def content(self) -> str:
+        ideas = " ".join(f"{i}) {x}" for i, x in enumerate(self.main_ideas, 1))
+        return f"Summarizing ({self.title}): read him this paragraph: \"{self.paragraph}\" (its main ideas: {ideas})."
+
+    def label(self) -> str:
+        return self.title
+
+
+class StoryProbeStep(Step):
+    """The connected-speech probe (17): a fixed short story he retells, asked the same way every time.
+    Placed by code (app/probes.py), never by the plan builder."""
+    kind: Literal["story_probe"] = "story_probe"
+    RULES: ClassVar[str] = (
+        "Say lightly that you have a very short story for him (\"יש לי סיפור קצר בשבילך\"), tell it EXACTLY as "
+        "written, slowly, in one turn, then ask: \"ספר לי את הסיפור במילים שלך\". Let him tell it all the way: no "
+        "help, no hints, no questions about details, don't tell it again. Then react to the STORY itself, warmly, "
+        "like a person who enjoyed it (\"איזה סיפור -- המפתחות במקרר!\") -- never count or grade what he "
+        "remembered -- and ask ONE short question linking it to his life (\"גם לך קרה פעם ש...?\"). The step is "
+        "finished after his answer to that.")
+    MINUTES: ClassVar[float] = 2.0
+    # 2: the retelling, then the link to his life -- with 1 she moved on without a word about his story (21.10)
+    MIN_ANSWERS: ClassVar[int] = 2
+    story_id: str
+    title: str
+    story: str  # HEBREW, told exactly
+    main_ideas: list[str]  # ENGLISH, in order
+
+    def content(self) -> str:
+        ideas = " ".join(f"{i}) {x}" for i, x in enumerate(self.main_ideas, 1))
+        return f"A short story to retell ({self.title}). Tell it exactly: \"{self.story}\" (its main ideas: {ideas})."
+
+    def label(self) -> str:
+        return self.title
+
+
+class ViewStep(Step):
+    """His own view (17): every ~2 weeks, one short question near the end. Placed by code."""
+    kind: Literal["his_view"] = "his_view"
+    RULES: ClassVar[str] = (
+        "Ask him, simply and warmly: \"איך היה לך לדבר עם אנשים בשבוע האחרון?\" Listen; one follow-up on his own "
+        "words (what was easier, what was harder), and react to it. No scale, no numbers, never a test.")
+    MINUTES: ClassVar[float] = 1.0
+    # 2: his answer, then the follow-up -- with 1 she moved on without reacting to it (21.10)
+    MIN_ANSWERS: ClassVar[int] = 2
+
+    def content(self) -> str:
+        return "His own view of how talking is going."
+
+    def label(self) -> str:
+        return "his view"
+
+
+PlanStep = Annotated[Union[OpeningStep, NamesGameStep, PracticeStep, ActivityStep, GamesActivityStep, ThreadStep,
+                           SequencingStep, SummaryStep, CheckStep, StoryProbeStep, ViewStep], Field(discriminator="kind")]
+BUILDABLE = (OpeningStep, NamesGameStep, PracticeStep, ActivityStep, GamesActivityStep, ThreadStep, SequencingStep,
+             SummaryStep)
+
+STEP_CLASSES = {cls.model_fields["kind"].default: cls for cls in (*BUILDABLE, CheckStep, StoryProbeStep, ViewStep)}
 
 
 def min_answers(kind: str) -> int:
@@ -335,7 +413,7 @@ FOLLOW_UP = ("Follow-up: go back to something he told you earlier today (a detai
 FREE_CONVERSATION = ("Conversation: ask whether there is something special he'd like to talk about today; follow his "
                      "choice, one thread at a time, with follow-ups on his own words.")
 
-NAMES = {"check": "getting-to-know check", "sequencing": "telling things in order", "opening": "opening", "names_game": "names game", "practice": "practice", "activity": "activity",
+NAMES = {"story_probe": "a story to retell", "his_view": "his own view", "summary": "summarizing", "check": "getting-to-know check", "sequencing": "telling things in order", "opening": "opening", "names_game": "names game", "practice": "practice", "activity": "activity",
          "games_activity": "game-linked activity", "thread": "conversation thread", "conversation": "conversation"}
 
 

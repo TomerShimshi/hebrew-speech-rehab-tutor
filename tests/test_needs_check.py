@@ -229,3 +229,26 @@ def test_the_family_marks_a_point_raised(env):
     assert env.store.get_needs(DAD)["therapist_points"][0]["status"] == "raised"
     assert env.client.put(f"/api/caregiver/{DAD}/therapist-points/nope", headers=auth("tok-tomer"),
                           json={"status": "raised"}).status_code == 404
+
+
+# ---- needs checks a session didn't reach carry over (17) ---------------------------------------------
+
+def test_missed_checks_go_into_the_second_session_and_then_one_per_plan():
+    from app.class_plan import add_one_check, missed_checks
+    first = fixed_plan("intro_needs_1").model_dump(mode="json")
+    session = {"class_plan": first, "steps_done": [{"done": "a"}, {"done": "b"}, {"done": "c"}]}  # 3 of 7
+    assert [c["area"] for c in missed_checks(session)] == ["repetition", "goals"]  # naming was reached
+    store = InMemorySessionStore()
+    store.save_memory(NEW, "s0", {"memory_prompt": "He is new."}, None)
+    sid = ended(store, NEW, fixed_plan("intro_needs_1"))
+    store.update_session(NEW, sid, {"steps_done": session["steps_done"]})
+    store.save_needs(NEW, {"areas": {"naming": {"level": "ok", "set_by": "app"}}})
+    build_next_plan(store, FakeClient(), SETTINGS, NEW, sid, generate_fn=gen)
+    kinds = [(s["kind"], s.get("area")) for s in store.get_next_plan(NEW)["steps"]]
+    assert kinds[-4:] == [("thread", None), ("check", "repetition"), ("thread", None), ("check", "goals")]
+    assert all(not (a[0] == b[0] == "check") for a, b in zip(kinds, kinds[1:]))  # never two in a row
+    assert store.get_needs(NEW)["pending_checks"] == [] and "naming" in store.get_needs(NEW)["areas"]  # kept
+    # inside a built plan: after a thread that isn't followed by a check
+    steps = [{"kind": "opening"}, {"kind": "thread"}, {"kind": "check"}, {"kind": "thread"}, {"kind": "practice"}]
+    out = add_one_check(steps, {"kind": "check", "area": "goals"})
+    assert [s["kind"] for s in out] == ["opening", "thread", "check", "thread", "check", "practice"]

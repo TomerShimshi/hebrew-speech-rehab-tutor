@@ -1,0 +1,364 @@
+# Connected-speech probe stories (sub-plan 17): fixed short stories he retells, asked the same way
+# every time and scored by the main ideas he conveyed -- the way therapists measure (a fixed set, a
+# baseline, repeated over weeks). Everyday adult situations, never from his life. Used in this order
+# (app/probes.py): each story twice, every other regular session -- 30 stories, months without a
+# repeat. Main ideas in English, in order; each is stated in the story.
+# The first 6 were written by hand; the other 24 (2026-10-21) were generated under strict rules (4
+# sentences, 35-50 words, 5 ideas, simple everyday Hebrew, nothing from any account's life), checked
+# by code and by a second model call (every idea stated), and read before going in. Append new stories
+# at the end: the order is the rotation.
+stories:
+  - id: lost_keys
+    title: the lost keys
+    story: >-
+      דני יצא בבוקר לעבודה ושם לב שהמפתחות של הרכב לא בכיס. הוא חיפש אותם בכל הבית ולא מצא.
+      בסוף הבת שלו מצאה אותם בתוך המקרר, ליד החלב. כולם צחקו, ודני הגיע לעבודה באיחור קטן.
+    main_ideas:
+      - Danny was leaving for work in the morning
+      - His car keys were missing
+      - He searched the whole house
+      - His daughter found them in the fridge
+      - Everyone laughed and he was a little late
+  - id: rain_wedding
+    title: rain at the wedding
+    story: >-
+      רותי ויואב תכננו חתונה בגן פתוח. בבוקר החתונה התחיל גשם חזק. בעל האולם הביא אוהל גדול,
+      והאורחים רקדו מתחתיו. בסוף אמרו כולם שזאת הייתה החתונה הכי שמחה שהיו בה.
+    main_ideas:
+      - Ruti and Yoav planned an outdoor wedding
+      - It started raining hard that morning
+      - The owner brought a big tent
+      - The guests danced under the tent
+      - Everyone said it was the happiest wedding
+  - id: the_puppy
+    title: a puppy at the door
+    story: >-
+      בערב אחד שמעה מיכל רעש ליד הדלת. כשפתחה, מצאה כלבלב קטן ורטוב. היא נתנה לו מים ושמיכה,
+      ותלתה מודעה בשכונה. אחרי יומיים לא בא אף אחד, ומיכל החליטה להשאיר אותו.
+    main_ideas:
+      - Michal heard a noise at the door one evening
+      - She found a small wet puppy
+      - She gave it water and a blanket
+      - She put up a notice in the neighborhood
+      - Nobody came, so she kept it
+  - id: the_flat_tire
+    title: a flat tire on the way
+    story: >-
+      משה נסע לבקר את אמא שלו בחיפה. באמצע הדרך שמע פיצוץ, והגלגל התפנצ'ר. נהג משאית עצר ועזר
+      לו להחליף את הגלגל. משה הגיע מאוחר, אבל אמא שלו חיכתה לו עם ארוחה חמה.
+    main_ideas:
+      - Moshe drove to visit his mother in Haifa
+      - Halfway there a tire went flat
+      - A truck driver stopped and helped him change it
+      - He arrived late
+      - His mother was waiting with a hot meal
+  - id: the_concert
+    title: tickets to the concert
+    story: >-
+      נועה קנתה כרטיסים להופעה של הזמר האהוב עליה. ביום ההופעה היא חלתה ולא יכלה ללכת. היא
+      נתנה את הכרטיסים לשכן שלה, שהלך עם הבן שלו. למחרת הוא הביא לה תמונה חתומה של הזמר.
+    main_ideas:
+      - Noa bought tickets to her favorite singer's concert
+      - On the day she got sick
+      - She gave the tickets to her neighbor
+      - He went with his son
+      - The next day he brought her a signed photo
+  - id: the_garden
+    title: the neighborhood garden
+    story: >-
+      בשכונה של אבי היה מגרש ריק ומלוכלך. אבי הציע לשכנים לנקות אותו ביחד. בכל שבת הם שתלו שם
+      עצים ופרחים. אחרי שנה המגרש הפך לגינה יפה, והילדים משחקים שם כל ערב.
+    main_ideas:
+      - There was an empty, dirty lot in Avi's neighborhood
+      - Avi suggested cleaning it together with the neighbors
+      - Every Saturday they planted trees and flowers
+      - After a year it became a beautiful garden
+      - Children play there every evening
+  - id: train_trip
+    title: the train trip
+    story: >-
+      תמר עלתה בבוקר על הרכבת כדי לפגוש חברה טובה בעיר הגדולה. בגלל שהייתה עייפה, היא נרדמה
+      בנסיעה ופספסה את התחנה שלה. הסדרן הנחמד העיר אותה ועזר לה לעלות על רכבת חזרה. בסוף היא
+      פגשה את החברה ושמחה מאוד.
+    main_ideas:
+      - Tamar took the train in the morning to meet a friend
+      - She fell asleep and missed her station
+      - A nice conductor woke her up
+      - He helped her board a train back
+      - She met her friend and was very happy
+  - id: cooking_for_guests
+    title: cooking for guests
+    story: >-
+      יובל הכין ארוחת ערב חגיגית לכבוד חברים שבאו לבקר אותו. כשרצה לאפות עוגה לקינוח, הוא גילה
+      שנגמר כל הסוכר בבית. השכן הנחמד הביא לו כוס סוכר בדיוק בזמן. העוגה יצאה מתוקה מאוד והחברים
+      אכלו את כולה בשמחה.
+    main_ideas:
+      - Yuval prepared dinner for visiting friends
+      - He wanted to bake a dessert cake
+      - He discovered there was no sugar left at home
+      - A nice neighbor brought him sugar in time
+      - The cake turned out sweet and the friends ate it all happily
+  - id: broken_washing_machine
+    title: the broken washing machine
+    story: >-
+      ענבל שמה ערימה גדולה של בגדים בתוך מכונת הכביסה. באמצע הפעולה המכונה הפסיקה לעבוד ומים
+      התחילו לצאת ממנה. אח שלה פתח את החלק התחתון ומצא כפתור קטן שתקע אותה. המכונה חזרה לעבוד
+      וכל הבגדים יצאו נקיים לגמרי.
+    main_ideas:
+      - Inbal put a large pile of clothes in the washing machine
+      - The machine stopped working and leaked water
+      - Her brother opened the bottom part
+      - He found a small button stuck inside
+      - The machine worked again and the clothes came out clean
+  - id: lost_wallet
+    title: the lost wallet
+    story: >-
+      אלון הלך לסופרמרקט כדי לקנות אוכל ומוצרים לבית. כשהגיע לקופה לשלם, הוא ראה שהארנק שלו לא
+      נמצא בכיס. אישה נחמדה ניגשה אליו והחזירה לו את הארנק שנפל ליד הכניסה. אלון הודה לה
+      בהתרגשות ושילם על הקניות בחיוך גדול.
+    main_ideas:
+      - Alon went to the supermarket to buy food
+      - At the checkout he saw his wallet was missing from his pocket
+      - A nice woman approached him with his wallet
+      - The wallet had dropped near the entrance
+      - Alon thanked her warmly and paid for his groceries with a smile
+  - id: visit_to_the_doctor
+    title: a visit to the doctor
+    story: >-
+      אורנה הלכה למרפאה כדי לקבל אישור בריאות לחדר הכושר. היא חששה שתחכה זמן רב בגלל שהתור היה
+      עמוס. הרופא קיבל אותה בחיוך, בדק אותה ואמר שהכל מצוין. אורנה קיבלה את האישור החתום ויצאה
+      מהמרפאה עם מצב רוח מעולה.
+    main_ideas:
+      - Orna went to the clinic to get a health permit for the gym
+      - She worried she would wait a long time because it was crowded
+      - The doctor greeted her with a smile and examined her
+      - The doctor said that everything was excellent
+      - Orna received the signed permit and left in a great mood
+  - id: moving_apartment
+    title: moving to a new apartment
+    story: >-
+      רחל עברה לגור בדירה חדשה והתחילה לפרוק את כל הארגזים. כשרצתה לבשל משהו, היא גילתה שהארגז
+      של המטבח חסר. היא ירדה למטה ומצאה אותו ליד המעלית של הבניין. רחל הכינה לעצמה ארוחה טעימה
+      והרגישה סוף סוף בבית.
+    main_ideas:
+      - Rachel moved to a new apartment and unpacked boxes
+      - She realized the kitchen box was missing
+      - She went downstairs and found it near the elevator
+      - Rachel cooked herself a tasty meal
+      - She finally felt at home
+  - id: birthday_surprise
+    title: a birthday surprise
+    story: >-
+      יונתן חזר הביתה בערב יום ההולדת וחשב שכולם שכחו אותו. הבית היה חשוך ושקט לגמרי כשהוא פתח
+      את הדלת. פתאום החברים שלו הדליקו את האור וצעקו מזל טוב. הם הביאו עוגה גדולה עם נרות ורקדו
+      יחד בסלון.
+    main_ideas:
+      - Yonatan came home on his birthday thinking everyone forgot
+      - The house was completely dark and quiet
+      - His friends turned on the light and shouted happy birthday
+      - They brought a big cake with candles
+      - They danced together in the living room
+  - id: power_cut
+    title: a power cut
+    story: >-
+      רונית צפתה בסרט מעניין בערב כשפתאום כל החשמל בבית כבה. היא הדליקה את הפנס בטלפון הנייד
+      וחיפשה נרות בארונות. השכן הנחמד מהדלת ממול דפק והביא לה כמה נרות. הם ישבו יחד במרפסת, שתו
+      תה חם ודיברו עד שהאור חזר.
+    main_ideas:
+      - Ronit was watching a movie when the power went out
+      - She used her phone flashlight to search for candles
+      - A neighbor knocked and brought her some candles
+      - They sat together on the balcony and drank hot tea
+      - They talked until the power returned
+  - id: neighbors_help
+    title: a neighbor's help
+    story: >-
+      אסתר חזרה מקניות עם שקיות כבדות והתחילה לעלות במדרגות. פתאום אחת השקיות נקרעה, וכל התפוחים
+      התגלגלו על הרצפה. השכן הנחמד שמע את הרעש ויצא מהר לעזור לה לאסוף אותם. אסתר הודתה לו בשמחה
+      והזמינה אותו לכוס תה בביתה.
+    main_ideas:
+      - Esther returned from shopping with heavy bags
+      - One of the bags tore and apples rolled on the floor
+      - A neighbor heard the noise
+      - The neighbor came out quickly to help her collect them
+      - Esther thanked him and invited him for tea
+  - id: morning_market
+    title: morning at the market
+    story: >-
+      יוסי הלך מוקדם בבוקר לשוק כדי לקנות ירקות טריים. השוק היה עמוס באנשים, ויוסי לא מצא
+      עגבניות יפות. מוכר נחמד ראה אותו והביא לו ארגז מלא מאחורי הדוכן. יוסי קנה את הירקות בשמחה
+      וחזר הביתה להכין ארוחת צהריים.
+    main_ideas:
+      - Yossi went to the market early in the morning to buy fresh vegetables
+      - The market was crowded with people
+      - Yossi could not find good tomatoes
+      - A nice seller brought him a full box from behind the stall
+      - Yossi bought the vegetables happily and went home to cook lunch
+  - id: missed_flight
+    title: the missed flight
+    story: >-
+      דנה הגיעה לשדה התעופה שמחה לקראת הטיסה לחופשה. היה תור ארוך מאוד בבדיקה, ודנה פספסה את
+      העלייה למטוס. הפקידה הנחמדה בדקה במחשב ומצאה לה מקום בטיסה הבאה. דנה שתתה קפה בנחת ועלתה
+      למטוס החדש עם חיוך גדול.
+    main_ideas:
+      - Dana arrived at the airport excited for her vacation flight
+      - There was a very long line at security
+      - Dana missed the boarding for her flight
+      - A helpful clerk found her a seat on the next flight
+      - Dana drank coffee calmly and boarded the new plane with a big smile
+  - id: phone_in_water
+    title: phone in the water
+    story: >-
+      עמית שטף כלים במטבח והקשיב למוזיקה דרך הטלפון שלו. פתאום הטלפון החליק מהיד שלו ונפל לתוך
+      המים. עמית הוציא אותו מהר, ייבש אותו ושם אותו בקערת אורז. בערב הטלפון נדלק שוב בלי בעיה,
+      ועמית נשם לרווחה.
+    main_ideas:
+      - Amit washed dishes in the kitchen while listening to music on his phone
+      - The phone slipped from his hand and fell into the water
+      - Amit took it out quickly and dried it
+      - He placed the phone inside a bowl of rice
+      - In the evening the phone turned on again and Amit was relieved
+  - id: first_day_at_work
+    title: first day at work
+    story: >-
+      מאיה התחילה עבודה חדשה במשרד והרגישה קצת לחוצה בבוקר. כשהיא התיישבה ליד השולחן, המחשב שלה
+      לא נדלק בכלל. חבר לעבודה הראה לה את המתג הנכון והכין לה קפה חם. מאיה הרגישה בבית וסיימה את
+      היום בהרגשה מצוינת.
+    main_ideas:
+      - Maya started a new job at an office and felt nervous in the morning
+      - When she sat at her desk her computer did not turn on
+      - A coworker showed her the correct switch
+      - The coworker made her hot coffee
+      - Maya felt at home and finished the day feeling great
+  - id: cat_on_tree
+    title: a cat stuck on a tree
+    story: >-
+      שמעון יצא בערב לטייל בגינה וראה חתול על ענף גבוה. החתול פחד לרדת למטה וילל בקול רם. שמעון
+      הביא סולם מהמחסן וקרא לו בעדינות עם קצת אוכל. החתול ירד בזהירות לידיים שלו, ושניהם חזרו
+      הביתה מרוצים.
+    main_ideas:
+      - Shimon went for an evening walk in the garden and saw a cat high on a tree branch
+      - The cat was afraid to climb down and meowed loudly
+      - Shimon brought a ladder from the storage room
+      - Shimon called the cat gently with some food
+      - The cat climbed down into his arms and they returned home pleased
+  - id: baking_bread
+    title: baking bread
+    story: >-
+      אורית החליטה לאפות לחם טרי בבית לקראת ארוחת הערב. היא שמה את הבצק בתנור אבל שכחה לכוון את
+      השעון. אחרי זמן מה עלה ריח חזק, ואורית רצה מהר למטבח. הלחם היה שחום במיוחד אך טעים מאוד,
+      והמשפחה אכלה הכל בהנאה.
+    main_ideas:
+      - Orit decided to bake fresh bread at home for dinner
+      - She put the dough in the oven but forgot to set the timer
+      - She smelled a strong smell and ran quickly to the kitchen
+      - The bread turned out very dark but very tasty
+      - The family ate all of it with enjoyment
+  - id: football_match
+    title: a football match
+    story: >-
+      רון הלך עם חברים לצפות במשחק כדורגל חשוב באצטדיון. הקבוצה שלהם שיחקה חלש וספגה שער מוקדם.
+      רון והחברים המשיכו לעודד ולצעוק בקול כדי לחזק אותם. ממש בסיום הקבוצה הבקיעה שער ניצחון
+      יפה, וכל האוהדים חגגו בהתרגשות רבה.
+    main_ideas:
+      - Ron went with friends to watch an important football match at the stadium
+      - Their team played poorly and conceded an early goal
+      - Ron and his friends kept cheering loudly to encourage them
+      - Right near the end the team scored a great winning goal
+      - All the fans celebrated with great excitement
+  - id: planting_lemon_tree
+    title: planting a lemon tree
+    story: >-
+      שלומית קנתה עץ לימון קטן כדי לשתול אותו בחצר הבית שלה. כשהיא חפרה באדמה, המעדר פגע באבן
+      ענקית ולא זז. השכן שלה ראה אותה מתאמצת ובא לעזור עם כלי כבד יותר. יחד הם הוציאו את האבן,
+      שתלו את העץ והשקו אותו בהרבה מים.
+    main_ideas:
+      - Shlomit bought a small lemon tree to plant in her yard
+      - While digging in the soil her tool struck a huge rock
+      - Her neighbor saw her struggling and came to help with a heavier tool
+      - Together they removed the rock and planted the tree
+      - They watered the tree with plenty of water
+  - id: wrong_number
+    title: a wrong number
+    story: >-
+      גיא ישב בסלון וקיבל שיחת טלפון מאישה מבוגרת שלא הכיר. היא חשבה שזה הנכד שלה והתחילה לספר
+      סיפורים ארוכים על המשפחה. גיא הבין שהיא חייגה בטעות, אבל הקשיב בסבלנות ולא רצה להפריע לה.
+      בסוף השיחה הוא הסביר לה בעדינות, והיא צחקה והודתה לו על ההקשבה.
+    main_ideas:
+      - Guy received a phone call in his living room from an unfamiliar elderly woman
+      - She thought he was her grandson and began telling long stories about the family
+      - Guy realized she had dialed by mistake but listened patiently
+      - At the end of the call he gently explained the mistake to her
+      - She laughed and thanked him for listening to her
+  - id: late_library_book
+    title: late library book
+    story: >-
+      הדס מצאה בארון ספר מהספרייה ונזכרה שהיה צריך להחזיר אותו מזמן. היא פחדה לקבל קנס גדול על
+      האיחור הארוך. כשהיא הגיעה לספרייה, הספרנית חייכה ואמרה שאין קנסות היום. הדס החזירה את הספר
+      בהקלה גדולה ושאלה ספר חדש.
+    main_ideas:
+      - Hadas found an overdue library book in her closet
+      - She was afraid of getting a big fine
+      - She went to the library
+      - The librarian said there were no fines that day
+      - Hadas returned the book with relief and borrowed a new one
+  - id: wedding_gift
+    title: wedding gift
+    story: >-
+      לאה קנתה סט יפה של כוסות כמתנה לחתונה של חברה טובה. בדרך לאירוע הקופסה נפלה לה מהידיים
+      והכוסות נשברו. היא עצרה בחנות פרחים קרובה וקנתה עציץ גדול ומרשים. הכלה התרגשה מאוד מהעציץ
+      ואמרה שזה בדיוק מה שהיא רצתה למרפסת.
+    main_ideas:
+      - Leah bought glasses as a wedding gift for a good friend
+      - On the way to the wedding the box dropped and the glasses broke
+      - She stopped at a nearby flower shop
+      - She bought a large plant instead
+      - The bride loved the plant for her balcony
+  - id: school_reunion
+    title: school reunion
+    story: >-
+      אסף הלך למפגש של בית הספר היסודי והתרגש לראות חברים ישנים. כשהוא נכנס לאולם, הוא לא זיהה
+      אף אחד מהאנשים שעמדו שם. פתאום חבר ילדות קרא בשמו וחיבק אותו בחום. הם ישבו יחד כל הערב
+      ודיברו על הזיכרונות היפים מהעבר.
+    main_ideas:
+      - Asaf went to his elementary school reunion
+      - At first he did not recognize anyone in the room
+      - A childhood friend called his name
+      - The friend hugged him warmly
+      - They sat together all evening talking about past memories
+  - id: hike_with_friends
+    title: hike with friends
+    story: >-
+      ליאור יצאה לטיול בשביל ירוק ביער יחד עם קבוצת חברים. אחרי זמן מה של הליכה הם הבינו שאיבדו
+      את הדרך. ליאור פתחה מפה בטלפון והובילה את כולם חזרה לשביל הראשי. בסוף המסלול הם ישבו לשתות
+      קפה חם ונהנו מהנוף היפה.
+    main_ideas:
+      - Lior went on a forest hike with friends
+      - After walking for a while they realized they were lost
+      - Lior checked a map on her phone
+      - She guided everyone back to the main trail
+      - At the end they drank hot coffee and enjoyed the view
+  - id: painting_a_room
+    title: painting a room
+    story: >-
+      בני החליט לצבוע את חדר העבודה שלו בצבע כחול. באמצע העבודה נגמר לו הצבע והקיר נשאר חצי לבן.
+      הוא נסע מהר לחנות חומרי הבניין וקנה עוד פחית צבע. בני סיים את הצביעה והחדר נראה חדש ויפה
+      מאוד.
+    main_ideas:
+      - Beni decided to paint his study room blue
+      - He ran out of paint leaving the wall half white
+      - He quickly drove to the store to buy another can of paint
+      - Beni finished painting the room
+      - The room looked very nice and fresh
+  - id: car_wouldnt_start
+    title: a car that wouldn't start
+    story: >-
+      גלית נכנסה בבוקר למכונית כדי לנסוע לפגישה חשובה בעיר. היא סובבה את המפתח אבל המנוע לא
+      השמיע שום קול. השכן הנחמד ראה אותה ועזר לה להניע בעזרת כבלים. הרכב התניע מיד וגלית הגיעה
+      לפגישה בדיוק בזמן שנקבע.
+    main_ideas:
+      - Galit got into her car to drive to an important meeting
+      - The car engine made no sound when she turned the key
+      - A kind neighbor saw her and helped using jumper cables
+      - The car started immediately
+      - Galit arrived at her meeting right on time

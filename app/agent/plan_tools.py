@@ -13,8 +13,8 @@ from dataclasses import dataclass, field
 
 from app.agent.runner import Tool
 from app.schemas import ClassPlan, GameHomework, GamesAppFeedback, GoalType, PrimaryGoal
-from app import sequencing
-from app.steps import (ActivityStep, GamesActivityStep, NamesGameStep, OpeningStep, PracticeStep, SequencingStep,
+from app import sequencing, summarizing
+from app.steps import (ActivityStep, GamesActivityStep, NamesGameStep, OpeningStep, PracticeStep, SequencingStep, SummaryStep,
                        ThreadStep, tool_parameters)
 
 BUDGET_MINUTES = 9.0  # the wrap-up note comes at ~9 minutes
@@ -78,11 +78,13 @@ HOMEWORK = re.compile(r"homework|שיעורי[ -]?(ה)?בית|המשימה (ש|�
 
 def build_plan_tools(draft: PlanDraft, *, check_practice: Callable[[PracticeStep], str | None],
                      his_games: set[str], set_names: set[str], seq_events: int = sequencing.DEFAULT_EVENTS,
-                     seq_task: str | None = None) -> list[Tool]:
+                     seq_task: str | None = None, summary_ideas: int = summarizing.DEFAULT_IDEAS,
+                     discourse: str | None = None, naming_share: str = "normal") -> list[Tool]:
     """`check_practice` returns why a practice step is rejected (None = fine): his data (8.5),
     untreated names-game names (12). `his_games`: the game ids he has (06). `seq_events`: the
-    recommended size of a sequencing task; `seq_task`: the task this plan must have (14: every
-    session, the kinds taking turns); None = optional."""
+    recommended size of a sequencing task; `seq_task`: its kind when it's due; `summary_ideas`: the
+    recommended size of a summary (17); `discourse`: which of the two this plan must have -- they take
+    turns session by session ("sequencing" | "summary"); None = neither required."""
 
     def all_names() -> set[str]:
         return {_norm(n) for s in draft.steps for n in s.names()}
@@ -144,11 +146,30 @@ def build_plan_tools(draft: PlanDraft, *, check_practice: Callable[[PracticeStep
             raise ValueError(f"HIS SEQUENCING recommends {seq_events} events (+-1): this one has {len(events)}")
         if any(isinstance(s, SequencingStep) for s in draft.steps):
             raise ValueError("one sequencing task per session")
+        if discourse == "summary":
+            raise ValueError("this session has a summary (add_summary), not a sequencing task -- they take turns")
         if seq_task and step.task != seq_task:
             raise ValueError(f"this time the task is {seq_task} (the two kinds take turns)")
         # code scrambles, never the model (14): never the original, never the reverse
         told = sequencing.scramble(len(events), seed=step.title + "|".join(events)) if step.task == "scrambled" else []
         draft.steps.append(step.model_copy(update={"events": events, "told_order": told}))
+        return draft.progress()
+
+    def add_summary(args: dict) -> dict:
+        if discourse == "sequencing":
+            raise ValueError("this session has a sequencing task (add_sequencing), not a summary -- they take turns")
+        step = SummaryStep(**{k: v for k, v in args.items() if k in ("title", "paragraph", "main_ideas")})
+        ideas = [" ".join(str(i).split()) for i in step.main_ideas if str(i).strip()]
+        if not summarizing.MIN_IDEAS <= len(ideas) <= summarizing.MAX_IDEAS:
+            raise ValueError(f"a summary has {summarizing.MIN_IDEAS}-{summarizing.MAX_IDEAS} main ideas")
+        if abs(len(ideas) - summary_ideas) > 1:
+            raise ValueError(f"HIS SUMMARIZING recommends {summary_ideas} main ideas (+-1): this one has {len(ideas)}")
+        sentences = [x for x in step.paragraph.replace("?", ".").replace("!", ".").split(".") if x.strip()]
+        if not 2 <= len(sentences) <= 7:
+            raise ValueError("the paragraph is 3-5 short sentences")
+        if any(isinstance(s, SummaryStep) for s in draft.steps):
+            raise ValueError("one summary per session")
+        draft.steps.append(step.model_copy(update={"main_ideas": ideas, "paragraph": " ".join(step.paragraph.split())}))
         return draft.progress()
 
     def set_closing(args: dict) -> dict:
@@ -179,9 +200,17 @@ def build_plan_tools(draft: PlanDraft, *, check_practice: Callable[[PracticeStep
         problem = draft.usable()
         if problem:
             raise ValueError(problem)
-        if seq_task and not any(isinstance(s, SequencingStep) for s in draft.steps):
+        if discourse == "summary" and not any(isinstance(s, SummaryStep) for s in draft.steps):
+            raise ValueError("this plan's discourse task is a summary: add one (add_summary) before finishing")
+        if (discourse == "sequencing" or (discourse is None and seq_task)) and not any(
+                isinstance(s, SequencingStep) for s in draft.steps):
             raise ValueError(f"every plan has a sequencing task: add one (add_sequencing, task={seq_task}) "
                              "before finishing")
+        practice = sum(isinstance(s, PracticeStep) for s in draft.steps)
+        if naming_share == "more" and practice < 2:  # HIS PROGRESS (17): the dose is the code's
+            raise ValueError("HIS PROGRESS gives naming MORE time: at least 2 practice steps")
+        if naming_share == "less" and practice > 1:
+            raise ValueError("HIS PROGRESS gives naming LESS time (mastered): at most 1 practice step")
         if draft.minutes() < BUDGET_MINUTES:
             raise ValueError(f"the plan is ~{draft.minutes()} of {BUDGET_MINUTES} minutes at his pace: add more "
                              f"steps (practice in a topic, a thread, an activity) before finishing")
@@ -205,6 +234,7 @@ def build_plan_tools(draft: PlanDraft, *, check_practice: Callable[[PracticeStep
         step_tool(ActivityStep, add_activity),
         step_tool(ThreadStep, add_thread),
         step_tool(SequencingStep, add_sequencing),
+        step_tool(SummaryStep, add_summary),
         Tool("set_closing", "The session-level parts: homework for next time (she gives it in the closing), an easy "
              "fatigue fallback, what to avoid, and one fact about his recent games she may mention. ENGLISH.",
              {"type": "object", "properties": {
