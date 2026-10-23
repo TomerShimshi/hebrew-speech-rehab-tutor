@@ -1,27 +1,57 @@
-# Sub-plan 18: One question at a time -- in the greeting too
+# Sub-plan 18: She listens and asks well -- a reaction to every answer, one question at a time, never a question he answered
 
-Part of the [master design](00-master-design.md). After [17.5](17.5-practicing-the-missing-areas.md), before [19](19-names-goodbyes-and-excluded-sessions.md). Requested by Tomer (2026-10-22). **To plan in detail and build later.**
+Part of the [master design](00-master-design.md). After [17.5](17.5-practicing-the-missing-areas.md), before [19](19-names-goodbyes-and-excluded-sessions.md). Requested by Tomer (2026-10-22); extended 2026-10-23 after the patient's session of 22.10. **To build.**
 
 ## Why
-- **Found by the evals' judge (22.10):** scoring the step-change test runs by meaning (`evals/score_step_change.py`, `prompts/eval_judge.yaml`) showed double questions the old "?" count missed entirely (0 by punctuation vs 3-8 by meaning, per variant). Most are in **the greeting**: "איך עברו עליך היומיים האחרונים? הצלחת קצת לנוח ולהתרענן?" -- in almost every run.
-- **The likely cause:** the opening step gives her both a recall line (from last time) and an opener question, and the start note adds when they last spoke; she turns the recall into a question of its own and adds the opener. "X, או אולי Y?" questions also still appear elsewhere (16.10's rule reduced but didn't end them).
-- One question at a time is a clinical point for him (word-finding: one thing to hold in mind), not only style.
+- **She sometimes ignores his answer (22.10, the patient):** after the story step he said "או, כל הזמן... הרבה פעמים", and her next turn went straight to the next topic -- not a word about it. This is the step change fixed by wording in 21.10 (tutor prompt 3.5): better (1 miss in 6 step changes in that session, ~1 in 3 before) but not solved. The text-mode evals can't reproduce it (21.10): it shows with voice, when the next step arrives and pushes the reaction out. He must never feel ignored.
+- **She asked a question he had answered (22.10):** "איזה מקום נוסף בחרת להמליץ עליו?" at 0:32 -- he answered with a story (a hard climb in the army) whose name got cut off ("...אז קוראים לו"); she stayed with the story, then at 2:04 asked the same question again, word for word, as if he hadn't answered.
+- **Double questions, in the greeting most of all (found by the evals' judge, 22.10):** scoring by meaning showed double questions the old "?" count missed (0 by punctuation vs 3-8 by meaning, per variant); most are the greeting: "איך עברו עליך היומיים האחרונים? הצלחת קצת לנוח ולהתרענן?" -- in almost every run. The likely cause: the opening gives her a recall line and an opener, and she makes both questions. "X, או אולי Y?" also still appears.
+- One question at a time, and being heard, are clinical points for him (one thing to hold in mind; motivation), not only style.
 
 ## Goal
-1. **The greeting asks one question:** a warm hello, ONE sentence recalling last time (a statement, not a question), and ONE question.
-2. **No glued "X, או אולי Y?" questions** anywhere -- measured, not assumed.
-3. **Every change is checked with the evals first** (text mode), then on his real sessions.
+1. **A reaction to his answer at every step change**, enforced, not only asked for.
+2. **Never a question he has answered** -- an answer cut short is helped, not re-asked.
+3. **The greeting asks one question**; no glued "X, או אולי Y?".
+4. **Measured:** the evals for what text mode can show, the audit of his real sessions for the rest.
 
-## Design (to detail)
-- **The opening step (`OpeningStep`):** its rules say the shape explicitly -- hello, the recall as a statement ("בפעם הקודמת סיפרת לי על..."), then ONE question; the plan builder's `recall` field is written as a statement, its `opener` as the one question.
-- **The start note** (`app/session_prompt.py`): checked that it doesn't invite a second question (the timing words, "CURRENT STEP").
-- **"X, או אולי Y?":** if the judge still finds it after the greeting fix, a targeted line in the one-question rule with a second example.
-- **Measuring:** `evals/live_step_change.py` replays the opening too (it does: the first turn), and the scorer reports double questions per step kind, so the greeting is visible on its own; `evals/audit_step_changes.py` counts double questions in real sessions by meaning.
+## Design
+
+### A. The reaction is part of next_step (code)
+- `next_step` gets a **required** parameter `reaction`: the one sentence (Hebrew) she says to what he just said. She writes it before she sees the next step -- the point: today the next step arrives and pushes the reaction out; here it's composed first.
+- **The page's reply puts it first:** her own sentence, then the step ("first say your reaction ... then CURRENT STEP: ..."), worded so nothing meant for her is read aloud (checked in the evals: `reads_instructions`).
+- **Checked by the page:** an empty or token reaction (one word, a generic "בוא נמשיך") is held -- "react to what he said, then call again".
+- **Logged:** the reaction is saved with the step's report (`steps_done`), so the audit can check she actually said it (her first words after the step change vs the reaction she wrote).
+- **Not** "react first, then call": tested 21.10, it brought back double questions.
+
+### B. Never a question he answered (prompt)
+- In "HOW YOU TALK": if he answered with a story or an example but the name or the point didn't come, that IS his answer -- help him find it ("איך קראו למקום שעליתם אליו?"), or go on; never repeat the original question as if he hadn't answered. Also when she comes back to a topic after following him elsewhere.
+
+### C. One question in the greeting (prompt + the opening step)
+- `OpeningStep`: hello, the recall as a STATEMENT ("בפעם הקודמת סיפרת לי על..."), then ONE question. The builder's `recall` is written as a statement, its `opener` as the one question.
+- The start note (`app/session_prompt.py`): checked that it doesn't invite a second question.
+- "X, או אולי Y?": if the judge still finds it after C, a second example in the one-question rule.
+
+### D. Measuring
+- **Evals (text mode):** the opening replayed (the first turn), double questions per step kind, `reads_instructions` with the new reply, the reaction said vs written.
+- **Audit of real sessions** (`evals/audit_step_changes.py`): reacted first, by meaning; and with A, the written reaction vs her first words. Run on his sessions after deploying, and on the test account first.
+
+## Files
+| File | Purpose |
+|---|---|
+| `app/live_token.py` | `next_step`'s required `reaction`. |
+| `static/app.js` | The reply puts her reaction first; a token reaction is held; the reaction saved in `steps_done`. |
+| `app/transcripts.py` | `reaction` on a step report. |
+| `prompts/tutor.yaml` | The step-change rule with the reaction field; never a question he answered; the greeting shape. |
+| `app/steps.py`, `app/agent/plan_tools.py` | The opening's shape; `recall` as a statement. |
+| `evals/` | Reaction said vs written; double questions per step kind. |
+| `tests/` | The tool's schema; the page's reply; the saved reaction; the opening's rules. |
 
 ## Done when
-- [ ] In the evals, the greeting has one question in (nearly) every run, with no rise elsewhere.
-- [ ] In his real sessions (the audit), double questions in the greeting are gone or rare.
+- [ ] Every step change carries a written reaction, and the audit shows she says it (her first words) in (nearly) every one.
+- [ ] No instructions read aloud with the new reply (evals).
+- [ ] No question repeated after he answered it (the audit / the memory agent's tutor issues).
+- [ ] The greeting has one question in (nearly) every run (evals), and in his sessions.
 - [ ] `pytest` passes.
 
 ## Commit
-`Sub-plan 18: one question at a time, in the greeting too`
+`Sub-plan 18: she listens and asks well -- a reaction to every answer, one question at a time`

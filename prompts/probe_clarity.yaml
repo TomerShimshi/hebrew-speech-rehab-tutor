@@ -1,0 +1,32 @@
+# Measurement bank for clarity (sub-plan 17.5): fixed items asked the same way every time, so the
+# scores compare like with like. Never used for practice (the builder writes practice fresh).
+# Clarity: short everyday phrases (4-6 words) with varied sounds -- he says each after her, clearly.
+# Generated 2026-10-22 under strict rules by scripts/make_probe_banks.py, checked by code and a second
+# model call, and read before going in. Append new items at the end: the order is the rotation.
+items:
+  - {level: 1, text: "אני רוצה להזמין קפה קר"}
+  - {level: 1, text: "הספר הזה מעניין וקל לקריאה"}
+  - {level: 1, text: "הילדים משחקים בכדור בחצר הגדולה"}
+  - {level: 1, text: "צריך לקנות לחם טרי במכולת"}
+  - {level: 1, text: "אפשר לקבל כוס מים קרים"}
+  - {level: 1, text: "אנחנו יוצאים לטיול קצר בגינה"}
+  - {level: 1, text: "פתחתי את החלון הגדול בחדר"}
+  - {level: 1, text: "היום יש רוח קרה ברחוב"}
+  - {level: 1, text: "התיק הכבד מונח על השולחן"}
+  - {level: 1, text: "אני שותה תה חם בבוקר"}
+  - {level: 1, text: "הרכבת מגיעה בעוד חמש דקות"}
+  - {level: 1, text: "יש לי פגישה חשובה בצהריים"}
+  - {level: 1, text: "קניתי חולצה לבנה ונעליים שחורות"}
+  - {level: 1, text: "המפתח נמצא בכיס של המעיל"}
+  - {level: 1, text: "האוטובוס עוצר ליד התחנה המרכזית"}
+  - {level: 1, text: "הוא כותב מכתב קצר במחברת"}
+  - {level: 1, text: "סגרתי את הדלת של הבית"}
+  - {level: 1, text: "אנחנו שומעים מוזיקה טובה ברדיו"}
+  - {level: 1, text: "אני לומד שפה חדשה באינטרנט"}
+  - {level: 1, text: "הכלב רץ מהר סביב העץ"}
+  - {level: 1, text: "שמתי את הספרים על המדף"}
+  - {level: 1, text: "האוכל במטבח מריח ממש טוב"}
+  - {level: 1, text: "יש תור ארוך מחוץ לחנות"}
+  - {level: 1, text: "אני צריך לשלם על הקניות"}
+  - {level: 1, text: "השמיים בהירים ואין אף ענן"}
+  - {level: 1, text: "נפגש מחר ליד שער הכניסה"}

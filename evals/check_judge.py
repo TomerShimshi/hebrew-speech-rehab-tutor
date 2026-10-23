@@ -8,7 +8,7 @@ from pathlib import Path
 
 import yaml
 
-from evals.judge import judge, prompt
+from evals.judge import judge_many, prompt
 
 CASES = Path(__file__).with_name("judge_cases.yaml")
 
@@ -18,8 +18,9 @@ def main() -> None:
     right: dict[str, int] = {}
     total: dict[str, int] = {}
     wrong = []
-    for c in cases:
-        v = judge(c["his"], c["her"]).model_dump()
+    verdicts = judge_many([(c["his"], c["her"]) for c in cases])  # one call (cached after)
+    for c, verdict in zip(cases, verdicts):
+        v = verdict.model_dump()
         for field, expected in c["expect"].items():
             total[field] = total.get(field, 0) + 1
             if v[field] == expected:

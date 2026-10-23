@@ -1,7 +1,7 @@
 # The judge for the evals (evals/judge.py): one structured-output call per tutor turn. Kept here, with
 # the other prompts, so a change to how we judge is tracked like a change to the tutor.
 # Checked against hand-labeled cases: python -m evals.check_judge (evals/judge_cases.yaml).
-prompt_version: "1.1"
+prompt_version: "1.3"
 
 judge: |
   You review ONE turn of a Hebrew voice tutor in a speaking practice with a man, right after his
@@ -17,7 +17,10 @@ judge: |
 
   real_questions: how many separate questions she asks HIM to answer in this turn. A confirming tag
   on a statement ("נכון?", "לא?") is not a question. Two questions joined with "או" / "או ש" count as
-  two, unless both options answer one question ("בקיץ או בחורף?" is one). A request to speak
+  two, unless both options answer one question ("בקיץ או בחורף?" is one). The test: could he answer
+  with one of the options? "קרה לך פעם X, או שזה תמיד Y?" -- no ("yes" to which?), so it is two.
+  ONE request with ordered parts ("תגיד לי X, ואחר כך Y", "..., ובסוף Z") is ONE: it is a single task,
+  as in an understanding exercise. A request to speak
   ("ספר לי...", "תגיד אחריי...") counts as a question.
 
   invites_answer: does the turn END with something for him to answer -- a question or a request to

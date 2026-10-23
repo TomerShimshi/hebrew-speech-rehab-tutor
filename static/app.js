@@ -810,9 +810,9 @@ function endSession(errorMessage, reason = errorMessage ? "error" : "end_button"
   s.ws?.close();
   // The recording must be finished before the audio shuts down; then it's uploaded (09).
   const audio = s.audio;
-  stopRecording(sess).then((blob) => {
+  stopRecording(sess).then(() => {
     stopAudio(audio);
-    uploadRecording(sess.sessionId, blob);
+    finishRecording(sess);
   });
   s.wakeLock?.release?.();
   s = null;
@@ -904,9 +904,19 @@ function startRecording() {
     playNode.connect(dest);
     const type = ["audio/webm;codecs=opus", "audio/ogg;codecs=opus", "audio/mp4"].find((t) => MediaRecorder.isTypeSupported(t));
     s.recorder = new MediaRecorder(dest.stream, { ...(type ? { mimeType: type } : {}), audioBitsPerSecond: 24000 });
-    s.recChunks = [];
-    s.recorder.ondataavailable = (e) => { if (e.data.size) s?.recChunks.push(e.data); };
-    s.recorder.start(10000); // a chunk every 10 s
+    // Sent in parts while the session runs (23.10): one big upload after the end was lost when the
+    // app closed right away. Each ~10 s piece (~30 KB) goes up as it's recorded; failed ones retry.
+    const sess = s;
+    sess.recParts = [];
+    sess.recNext = 0;
+    sess.recType = (s.recorder.mimeType || "audio/webm").split(";")[0];
+    sess.recChain = Promise.resolve();
+    s.recorder.ondataavailable = (e) => {
+      if (!e.data.size) return;
+      sess.recParts.push({ n: sess.recNext++, blob: e.data });
+      sendParts(sess);
+    };
+    s.recorder.start(10000); // a piece every 10 s
     log("audio", `recording (${s.recorder.mimeType})`);
   } catch (err) {
     log("audio", `recording unavailable: ${err.message}`); // the session goes on without it
@@ -915,28 +925,52 @@ function startRecording() {
 }
 
 // Stops the recorder; resolves with the finished file (or null).
+// Stops the recorder; resolves once its last piece is queued (or after 3 s).
 function stopRecording(sess) {
   const rec = sess.recorder;
-  if (!rec || rec.state === "inactive") return Promise.resolve(null);
+  if (!rec || rec.state === "inactive") return Promise.resolve(false);
   return new Promise((resolve) => {
-    const chunks = sess.recChunks;
-    rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
-    rec.onstop = () => resolve(chunks.length ? new Blob(chunks, { type: rec.mimeType.split(";")[0] }) : null);
-    setTimeout(() => resolve(chunks.length ? new Blob(chunks, { type: rec.mimeType.split(";")[0] }) : null), 3000);
+    rec.onstop = () => resolve(true);
+    setTimeout(() => resolve(true), 3000);
     rec.stop();
   });
 }
 
-async function uploadRecording(sessionId, blob) {
-  if (!sessionId || !blob) return;
+// Sends the queued pieces, in order, one at a time (a chain, so they never overlap). keepalive: the
+// request outlives the app closing -- fine for ~30 KB pieces (browsers cap keepalive bodies at 64 KB).
+function sendParts(sess, { keepalive = false } = {}) {
+  if (!sess.recParts) return Promise.resolve();
+  sess.recChain = sess.recChain.then(async () => {
+    while (sess.recParts.length && sess.sessionId) {
+      const part = sess.recParts[0];
+      try {
+        const res = await fetch(`api/session/${encodeURIComponent(sess.sessionId)}/audio/part?n=${part.n}`, {
+          method: "POST", body: part.blob, keepalive,
+          headers: { "Content-Type": sess.recType, Authorization: `Bearer ${await idToken()}` },
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        sess.recParts.shift();
+      } catch (err) {
+        log("audio", `recording part ${part.n} not sent (${err.message}); will retry`);
+        break; // the next piece (or the end) tries again
+      }
+    }
+  });
+  return sess.recChain;
+}
+
+// The session ended: the last pieces go out (keepalive), then the server joins them. If the app
+// closes before this, the hourly sweep joins whatever arrived.
+async function finishRecording(sess) {
+  if (!sess.recParts || !sess.sessionId) return;
+  await sendParts(sess, { keepalive: true });
   try {
-    const res = await fetch(`api/session/${encodeURIComponent(sessionId)}/audio`, {
-      method: "POST", body: blob,
-      headers: { "Content-Type": blob.type || "audio/webm", Authorization: `Bearer ${await idToken()}` },
+    const res = await fetch(`api/session/${encodeURIComponent(sess.sessionId)}/audio/finish?parts=${sess.recNext}`, {
+      method: "POST", keepalive: true, headers: { Authorization: `Bearer ${await idToken()}` },
     });
-    log("audio", `recording uploaded: ${res.status} (${Math.round(blob.size / 1024)} KB)`);
+    log("audio", `recording joined: ${res.status} (${sess.recNext} parts)`);
   } catch (err) {
-    log("audio", `recording upload failed: ${err.message}`);
+    log("audio", `recording finish failed: ${err.message} (the sweep joins it)`);
   }
 }
 
@@ -1089,7 +1123,11 @@ $("thinking").addEventListener("click", () => {
 });
 // Tab closing mid-session: save what we have. The session stays "active" and is marked
 // "abandoned" on the next start (its transcript is kept).
-window.addEventListener("pagehide", () => { if (s) flushTurns(s, { keepalive: true }); });
+window.addEventListener("pagehide", () => {
+  if (!s) return;
+  flushTurns(s, { keepalive: true });
+  sendParts(s, { keepalive: true }); // the recording's pending pieces (23.10)
+});
 
 // ---- sign-in -----------------------------------------------------------------
 function signinMessage(text, offerSwitch = false) {

@@ -14,7 +14,7 @@ import json
 import re
 import sys
 
-from evals.judge import judge
+from evals.judge import judge_many
 
 
 def score(folder: str) -> dict:
@@ -25,11 +25,11 @@ def score(folder: str) -> dict:
                                              "double_q": 0, "dangling": 0, "read_aloud": 0,
                                              "punct_double_q": 0, "punct_dangling": 0, "misses": [], "flags": []})
         a["runs"] += 1
-        verdicts = {}
-        for turn in log["turns"]:
-            if "[timeout]" in turn["her"]:
-                continue
-            v = verdicts[(turn["his"], turn["her"])] = judge(turn["his"], turn["her"])
+        turns = [t for t in log["turns"] if "[timeout]" not in t["her"]]
+        pairs = list(dict.fromkeys([(t["his"], t["her"]) for t in turns] + [(t["his"], t["her"]) for t in log["transitions"]]))
+        verdicts = dict(zip(pairs, judge_many(pairs)))  # a few calls per run, cached
+        for turn in turns:
+            v = verdicts[(turn["his"], turn["her"])]
             speech = re.sub(r"<[^>]*>", "", turn["her"])
             moved_on = "advanced" in turn["her"]
             a["turns"] += 1
@@ -43,7 +43,7 @@ def score(folder: str) -> dict:
                                          ("dangling", turn["his"] and not moved_on and not v.invites_answer)) if on]
                 a["flags"].append(f"{'/'.join(kinds)}: SHE: {speech.strip()[:130]}")
         for t in log["transitions"]:
-            v = verdicts.get((t["his"], t["her"])) or judge(t["his"], t["her"])
+            v = verdicts[(t["his"], t["her"])]
             a["changes"] += 1
             a["reacted"] += v.reacted
             a["spoke_before_call"] += bool(re.sub(r"\s+", "", t["said_before"]))

@@ -9,12 +9,11 @@ Prints counts and the misses (his answer, her first words) -- to the terminal on
 import argparse
 
 from app.store import FirestoreSessionStore
-from evals.judge import judge
+from evals.judge import judge_many
 
 
 def audit(store, pid: str, n: int, since: str) -> tuple[int, int, list[str]]:
-    total = reacted = 0
-    misses = []
+    rows = []  # (his, her, label) at each step change
     for s in store.list_sessions(pid, n):
         f = store.get_session(pid, s["id"]) or {}
         if (f.get("prompt_version") or "") < since:
@@ -25,15 +24,12 @@ def audit(store, pid: str, n: int, since: str) -> tuple[int, int, list[str]]:
             at = d.get("at_s", 0)
             his = [t for t in turns if t["speaker"] == "patient" and t.get("t_start_s", 0) <= at + 1][-1:]
             her = next((t for t in turns if t["speaker"] == "tutor" and t.get("t_start_s", 0) >= at - 1), None)
-            if not his or not her:
-                continue
-            v = judge(his[0]["text"], her["text"])
-            total += 1
-            reacted += v.reacted
-            if not v.reacted:
+            if his and her:
                 to = agenda[i + 1]["kind"] if i + 1 < len(agenda) else "after"
-                misses.append(f"{str(f.get('started_at'))[:16]} [{to}] HE: {his[0]['text'][:60]} | SHE: {her['text'][:110]}")
-    return total, reacted, misses
+                rows.append((his[0]["text"], her["text"], f"{str(f.get('started_at'))[:16]} [{to}]"))
+    verdicts = judge_many([(h, s) for h, s, _ in rows])  # batched, cached
+    misses = [f"{label} HE: {h[:60]} | SHE: {s[:110]}" for (h, s, label), v in zip(rows, verdicts) if not v.reacted]
+    return len(rows), sum(v.reacted for v in verdicts), misses
 
 
 def main() -> None:

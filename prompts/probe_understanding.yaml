@@ -1,0 +1,39 @@
+# Measurement bank for understanding (sub-plan 17.5): fixed items asked the same way every time, so the
+# scores compare like with like. Never used for practice (the builder writes practice fresh).
+# Understanding: yes/no facts (1), comparisons (2), reversible (3) with the right answer; spoken requests in two (4) and three (5) parts, answered about his own preferences (the parts listed).
+# Generated 2026-10-22 under strict rules by scripts/make_probe_banks.py, checked by code and a second
+# model call, and read before going in. Append new items at the end: the order is the rotation.
+items:
+  - {level: 1, text: "האם השמש זורחת ביום?", answer: "כן"}
+  - {level: 1, text: "האם דגים חיים במים?", answer: "כן"}
+  - {level: 1, text: "האם אש היא דבר קר?", answer: "לא"}
+  - {level: 1, text: "האם בלילה השמיים חשוכים?", answer: "כן"}
+  - {level: 1, text: "האם ציפורים יכולות לעוף?", answer: "כן"}
+  - {level: 1, text: "האם אבן רכה כמו כרית?", answer: "לא"}
+  - {level: 1, text: "האם נועלים נעליים על הרגליים?", answer: "כן"}
+  - {level: 2, text: "האם פיל קטן יותר מנמלה?", answer: "לא"}
+  - {level: 2, text: "האם פיל גדול יותר מחתול?", answer: "כן"}
+  - {level: 2, text: "האם שעה ארוכה יותר מדקה?", answer: "כן"}
+  - {level: 2, text: "האם מטוס מהיר יותר מאופניים?", answer: "כן"}
+  - {level: 2, text: "האם בניין גבוה יותר מכיסא?", answer: "כן"}
+  - {level: 2, text: "האם צב מהיר יותר מסוס?", answer: "לא"}
+  - {level: 2, text: "האם אבטיח כבד יותר מתפוח?", answer: "כן"}
+  - {level: 2, text: "האם שמיכה דקה יותר מדף נייר?", answer: "לא"}
+  - {level: 2, text: "האם ים עמוק יותר משלולית?", answer: "כן"}
+  - {level: 2, text: "האם כפית גדולה יותר מסיר בישול?", answer: "לא"}
+  - {level: 3, text: "אם העץ גבוה מהשיח, האם השיח נמוך מהעץ?", answer: "כן"}
+  - {level: 3, text: "אם החתול מהיר מהצב, האם הצב מהיר מהחתול?", answer: "לא"}
+  - {level: 3, text: "אם המזלג קטן מהצלחת, האם הצלחת גדולה מהמזלג?", answer: "כן"}
+  - {level: 3, text: "אם החורף קר מהקיץ, האם הקיץ קר מהחורף?", answer: "לא"}
+  - {level: 3, text: "אם השולחן כבד מהכיסא, האם הכיסא קל מהשולחן?", answer: "כן"}
+  - {level: 3, text: "אם הבוקר בא לפני הצהריים, האם הצהריים באים לפני הבוקר?", answer: "לא"}
+  - {level: 3, text: "אם הבקבוק מלא יותר מהכוס, האם הכוס ריקה יותר מהבקבוק?", answer: "כן"}
+  - {level: 3, text: "אם החבל ארוך מהחוט, האם החוט ארוך מהחבל?", answer: "לא"}
+  - {level: 3, text: "אם האוטובוס רחב מהאופנוע, האם האופנוע רחב מהאוטובוס?", answer: "לא"}
+  - {level: 4, text: "תגיד לי איזה פרי טעים לך, ואחר כך איזה ירק אתה אוהב.", answer: "פרי טעים | ירק אהוב"}
+  - {level: 4, text: "תגיד לי מה המאכל שאתה הכי אוהב לאכול, ואחר כך מה אתה אוהב לשתות בבוקר.", answer: "מאכל אהוב | משקה לבוקר"}
+  - {level: 4, text: "תגיד לי מה בעל החיים האהוב עליך, ואחר כך איזה צליל נעים לך לשמוע.", answer: "בעל חיים אהוב | צליל נעים"}
+  - {level: 4, text: "תגיד לי איזה קינוח אתה הכי אוהב, ואחר כך איזה סוג לחם אתה מעדיף.", answer: "קינוח אהוב | סוג לחם מועדף"}
+  - {level: 5, text: "תגיד לי מה הצבע האהוב עליך, אחר כך איזה פרי אתה הכי אוהב, ובסוף איזה משקה אתה מעדיף.", answer: "צבע אהוב | פרי אהוב | משקה מועדף"}
+  - {level: 5, text: "תגיד לי איזה משחק אתה אוהב, אחר כך איזה סוג מזג אוויר נעים לך, ובסוף מה הקינוח המועדף עליך.", answer: "משחק אהוב | מזג אוויר נעים | קינוח מועדף"}
+  - {level: 5, text: "תגיד לי מה הדבר הראשון שאתה עושה בבוקר, אחר כך איזה ירק אתה אוהב, ובסוף איזה צבע בגדים אתה מעדיף.", answer: "פעולת בוקר | ירק אהוב | צבע בגדים מועדף"}

@@ -167,17 +167,20 @@ def progress_series(sessions: list[dict], word_bank: dict) -> dict:
         story = s.get("story_probe") or {}  # 17: the story he retells, scored by code
         story_pct = story.get("ideas_pct") if story.get("status") == "done" and not story.get("low_confidence") else None
         view = (s.get("his_view") or {}).get("score") if (s.get("his_view") or {}).get("status") == "done" else None
+        ap = s.get("area_probe") or {}  # 17.5: a missing area's measurement
+        ap_area = ap.get("area") if ap.get("status") == "done" and not ap.get("low_confidence") else None
         talk = (s.get("talk") or {}).get("avg_words") or None
         mood = MOOD_SCORE.get(s.get("mood") or "")
         if (not results and not own and mood is None and seq_pct is None and summ_pct is None and story_pct is None
-                and view is None and talk is None):
+                and view is None and talk is None and ap_area is None):
             continue
         points.append({"date": s.get("started_at"), "treated": _own_share(results, "treated"),
                        "untreated": _own_share(results, "untreated"), "items": len(results), "mood": mood,
                        "self_found": sum(o.get("result") == "self_found" for o in own),
                        "not_found": sum(o.get("result") == "not_found" for o in own),
                        "sequencing": seq_pct, "sequencing_task": seq.get("task") if seq_pct is not None else None,
-                       "summarizing": summ_pct, "story": story_pct, "his_view": view, "avg_words": talk})
+                       "summarizing": summ_pct, "story": story_pct, "his_view": view, "avg_words": talk,
+                       **{a: (ap.get("pct") if ap_area == a else None) for a in ("repetition", "understanding", "clarity")}})
     with_checkins = [p for p in points if p["items"]]
     recent, before = with_checkins[-5:], with_checkins[-10:-5]
     words = list((word_bank or {}).values())
@@ -345,6 +348,21 @@ def save_profile(text: str = Body(..., embed=True, max_length=PROFILE_MAX_CHARS)
     print(f"[caregiver] {caregiver.email} saved the profile of {pid} ({len(text.strip())} chars); backup={backup}",
           flush=True)
     return {"ok": True, "backup": backup}
+
+
+@router.put("/{email}/needs/{area}/status")
+def need_status(area: str, status: str = Body("", embed=True), pid: str = Depends(account),
+                caregiver: User = Depends(require_caregiver), store: SessionStore = Depends(get_store)) -> dict:
+    """The family confirms or cancels a missing area's difficulty (17.5); "" = back to the app's."""
+    if area not in ("repetition", "understanding", "clarity"):
+        raise HTTPException(status_code=404, detail="Unknown area")
+    if status not in ("confirmed", "not_confirmed", ""):
+        raise HTTPException(status_code=422, detail="status is confirmed | not_confirmed | ''")
+    needs = store.get_needs(pid) or {}
+    areas = dict(needs.get("areas") or {})
+    areas[area] = {**(areas.get(area) or {}), "family_status": status or None, "status_by": caregiver.email}
+    store.save_needs(pid, {**needs, "areas": areas})
+    return {"ok": True}
 
 
 @router.put("/{email}/needs/{area}")

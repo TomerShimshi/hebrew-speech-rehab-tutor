@@ -122,6 +122,9 @@ CONDITIONS = {
     "add_games_activity": "only when he has a games profile (the prompt: when he played lately)",
     "add_game_homework": "only when he has a games profile",
     "suggest_games_app_change": "only when he has a games profile",
+    "add_repetition": "only when HIS PROGRESS gives repetition this session (17.5)",
+    "add_understanding": "only when HIS PROGRESS gives understanding this session (17.5)",
+    "add_clarity": "only when HIS PROGRESS gives clarity this session (17.5)",
 }
 
 
@@ -182,9 +185,15 @@ def _memory_tools():
 
 
 def _plan_tools():
-    # with a games profile, so the games tools are listed too
-    return build_plan_tools(PlanDraft(), check_practice=lambda step: None, his_games={"<his game ids>"}, set_names=set(),
-                            seq_task="scrambled")
+    # with a games profile, so the games tools are listed too; and each missing area's practice tool (17.5)
+    tools = build_plan_tools(PlanDraft(), check_practice=lambda step: None, his_games={"<his game ids>"}, set_names=set(),
+                             seq_task="scrambled")
+    names = {t.name for t in tools}
+    for area in ("repetition", "understanding", "clarity"):
+        tools += [t for t in build_plan_tools(PlanDraft(), check_practice=lambda step: None, his_games=set(),
+                                              set_names=set(), missing_area=area) if t.name not in names]
+        names = {t.name for t in tools}
+    return tools
 
 
 def render() -> str:

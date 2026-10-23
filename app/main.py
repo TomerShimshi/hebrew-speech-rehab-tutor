@@ -33,7 +33,7 @@ from app.deps import (  # noqa: F401 -- shared with the caregiver router (tests 
     get_push_sender, get_store, get_text_client,
 )
 from app.reminders import ReminderSettings, run_reminders, subscription_id
-from app.audio_store import AUDIO_TYPES, MAX_AUDIO_BYTES
+from app.audio_store import AUDIO_TYPES, MAX_AUDIO_BYTES, MAX_PART_BYTES, MAX_PARTS
 from app.caregiver_api import router as caregiver_router
 from app.transcripts import EndRequest, TurnsBatch
 
@@ -292,6 +292,98 @@ async def upload_audio(
     return {"ok": True, "bytes": len(data)}
 
 
+def _own_recording_session(store, settings, audio, user, session_id: str) -> dict:
+    session = store.get_session(patient_id_for(user), session_id)
+    if session is None or session.get("user_email") != user.email:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not (audio.enabled and voice_settings(store, settings, patient_id_for(user)).record_audio):
+        raise HTTPException(status_code=409, detail="Recording is off for this account")
+    return session
+
+
+@app.post("/api/session/{session_id}/audio/part")
+async def upload_audio_part(
+    session_id: str,
+    n: int,
+    request: Request,
+    user: User = Depends(verify_user),
+    settings: Settings = Depends(get_settings),
+    store: SessionStore = Depends(get_store),
+    audio=Depends(get_audio_store),
+) -> dict:
+    """One ~10-second piece of the recording, while the session runs (23.10). Safe to send twice."""
+    session = _own_recording_session(store, settings, audio, user, session_id)
+    if session.get("audio_uri"):
+        return {"ok": True, "done": True}  # already joined: a late piece changes nothing
+    content_type = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
+    if content_type not in AUDIO_TYPES:
+        raise HTTPException(status_code=415, detail="Unsupported audio type")
+    if not 0 <= n < MAX_PARTS:
+        raise HTTPException(status_code=422, detail="Bad part number")
+    data = await request.body()
+    if not data or len(data) > MAX_PART_BYTES:
+        raise HTTPException(status_code=413, detail="Part is empty or too large")
+    audio.save_part(patient_id_for(user), session_id, n, data, content_type)
+    if n == 0:
+        store.update_session(patient_id_for(user), session_id, {"audio_type": content_type})
+    return {"ok": True}
+
+
+def finish_recording(store, audio, pid: str, session_id: str, session: dict) -> dict | None:
+    """Joins the session's parts into its recording (the end of a session, or the sweep)."""
+    if session.get("audio_uri"):
+        return None
+    joined = audio.join_parts(pid, session_id, session.get("audio_type") or "audio/webm",
+                              started_at=session.get("started_at"))
+    if not joined:
+        return None
+    uri, size, parts = joined
+    fields = {"audio_uri": uri, "audio_bytes": size, "audio_parts": parts}
+    store.update_session(pid, session_id, fields)
+    print(f"[audio] joined {pid}/{session_id}: {parts} parts, {size // 1024} KB", flush=True)
+    return fields
+
+
+@app.post("/api/session/{session_id}/audio/finish")
+def upload_audio_finish(
+    session_id: str,
+    parts: int = 0,
+    user: User = Depends(verify_user),
+    settings: Settings = Depends(get_settings),
+    store: SessionStore = Depends(get_store),
+    audio=Depends(get_audio_store),
+) -> dict:
+    """The session ended: join its parts (23.10). `parts`: how many the page sent -- a gap is logged."""
+    session = _own_recording_session(store, settings, audio, user, session_id)
+    pid = patient_id_for(user)
+    got = audio.part_count(pid, session_id)
+    if parts and got < parts:
+        print(f"[audio] {pid}/{session_id}: {got} of {parts} parts arrived", flush=True)
+    fields = finish_recording(store, audio, pid, session_id, session)
+    return {"ok": True, "parts": got, "sent": parts, **({"bytes": fields["audio_bytes"]} if fields else {})}
+
+
+def join_left_recordings(store, audio, min_age: dt.timedelta = dt.timedelta(minutes=10)) -> list[str]:
+    """Recordings whose session ended (or was abandoned) but whose parts were never joined -- the app
+    closed before its "finish" (23.10). Joined here, a while after the end, so a page still
+    finishing isn't raced."""
+    if not audio.enabled:
+        return []
+    out = []
+    now = now_utc()
+    for pid in store.list_patient_ids():
+        for s in store.list_sessions(pid, 10):
+            ended = s.get("ended_at")
+            if (s.get("status") == "ended" and not s.get("audio_uri") and s.get("audio_type") and ended
+                    and now - ended >= min_age):
+                try:
+                    if finish_recording(store, audio, pid, s["id"], store.get_session(pid, s["id"]) or {}):
+                        out.append(s["id"])
+                except Exception as exc:  # noqa: BLE001 -- one bad recording must not stop the sweep
+                    print(f"[audio] joining {pid}/{s['id']} failed: {exc!r:.150}", flush=True)
+    return out
+
+
 @app.post("/api/session/{session_id}/end")
 def end_session(
     session_id: str,
@@ -395,12 +487,14 @@ def memory_sweep(
     store: SessionStore = Depends(get_store),
     llm_client=Depends(get_text_client),
     games_reader=Depends(get_games_reader),
+    audio=Depends(get_audio_store),
 ) -> dict:
     """Hourly (Cloud Scheduler): update memory for sessions still waiting -- tabs closed
     mid-session, or updates that failed because the models were overloaded -- and rebuild
     next plans that are stale because he played the games after they were built (06)."""
     # The daily reminder (11) first: it runs even when paused (and then records "skipped").
     reminders = run_reminders(store, sorted(settings.allowed_email_set), push_sender) if push_sender else {}
+    joined = join_left_recordings(store, audio)  # no model involved: runs even when paused
     if billing_guard.is_paused(store):
         return {"processed": {}, "paused": True, "reminders": reminders}  # soft stop (10): nothing calls a model
     results: dict[str, str] = {}
@@ -437,7 +531,7 @@ def memory_sweep(
             )
         if len(results) >= budget:
             break
-    return {"processed": results, "reminders": reminders}
+    return {"processed": results, "reminders": reminders, "recordings_joined": joined}
 
 
 @lru_cache

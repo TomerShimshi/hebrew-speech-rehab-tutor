@@ -14,9 +14,10 @@ from dataclasses import dataclass, field
 from app.agent.runner import Tool
 from app.schemas import ClassPlan, GameHomework, GamesAppFeedback, GoalType, PrimaryGoal
 from app import sequencing, summarizing
-from app.steps import (ActivityStep, GamesActivityStep, NamesGameStep, OpeningStep, PracticeStep, SequencingStep, SummaryStep,
+from app.steps import (MISSING_AREA_STEPS, ActivityStep, GamesActivityStep, NamesGameStep, OpeningStep, PracticeStep, SequencingStep, SummaryStep,
                        ThreadStep, tool_parameters)
 
+MISSING_AREA_STEP_TYPES = tuple(MISSING_AREA_STEPS.values())
 BUDGET_MINUTES = 9.0  # the wrap-up note comes at ~9 minutes
 MIN_ACCEPT = 0.7  # an unfinished draft (round limit) is still used if it reaches this share of the budget
 
@@ -79,7 +80,8 @@ HOMEWORK = re.compile(r"homework|שיעורי[ -]?(ה)?בית|המשימה (ש|�
 def build_plan_tools(draft: PlanDraft, *, check_practice: Callable[[PracticeStep], str | None],
                      his_games: set[str], set_names: set[str], seq_events: int = sequencing.DEFAULT_EVENTS,
                      seq_task: str | None = None, summary_ideas: int = summarizing.DEFAULT_IDEAS,
-                     discourse: str | None = None, naming_share: str = "normal") -> list[Tool]:
+                     discourse: str | None = None, naming_share: str = "normal",
+                     missing_area: str | None = None) -> list[Tool]:
     """`check_practice` returns why a practice step is rejected (None = fine): his data (8.5),
     untreated names-game names (12). `his_games`: the game ids he has (06). `seq_events`: the
     recommended size of a sequencing task; `seq_task`: its kind when it's due; `summary_ideas`: the
@@ -172,6 +174,17 @@ def build_plan_tools(draft: PlanDraft, *, check_practice: Callable[[PracticeStep
         draft.steps.append(step.model_copy(update={"main_ideas": ideas, "paragraph": " ".join(step.paragraph.split())}))
         return draft.progress()
 
+    def add_missing_area(cls):
+        def handler(args: dict) -> dict:
+            step = cls(items=[" ".join(str(i).split()) for i in (args.get("items") or []) if str(i).strip()])
+            if not 3 <= len(step.items) <= 6:
+                raise ValueError("3-6 items")
+            if any(isinstance(s, MISSING_AREA_STEP_TYPES) for s in draft.steps):
+                raise ValueError("one practice step from these areas per session")
+            draft.steps.append(step)
+            return draft.progress()
+        return handler
+
     def set_closing(args: dict) -> dict:
         draft.homework = str(args.get("homework", ""))[:400]
         draft.fatigue_fallback = str(args.get("fatigue_fallback", ""))[:400]
@@ -200,6 +213,9 @@ def build_plan_tools(draft: PlanDraft, *, check_practice: Callable[[PracticeStep
         problem = draft.usable()
         if problem:
             raise ValueError(problem)
+        if missing_area and not any(s.kind == missing_area for s in draft.steps):  # 17.5: the dose is the code's
+            raise ValueError(f"HIS PROGRESS gives {missing_area} a step this session: add it "
+                             f"({MISSING_AREA_STEPS[missing_area].TOOL})")
         if discourse == "summary" and not any(isinstance(s, SummaryStep) for s in draft.steps):
             raise ValueError("this plan's discourse task is a summary: add one (add_summary) before finishing")
         if (discourse == "sequencing" or (discourse is None and seq_task)) and not any(
@@ -244,6 +260,8 @@ def build_plan_tools(draft: PlanDraft, *, check_practice: Callable[[PracticeStep
              "the plan applies the NOTES FROM THE FAMILY / THERAPIST (empty if none).",
              {"type": "object", "properties": {"notes_applied": {"type": "string"}}}, finish),
     ]
+    if missing_area:  # only the area whose turn it is (17.5)
+        tools.append(step_tool(MISSING_AREA_STEPS[missing_area], add_missing_area(MISSING_AREA_STEPS[missing_area])))
     if his_games:
         tools += [
             step_tool(GamesActivityStep, add_games_activity),

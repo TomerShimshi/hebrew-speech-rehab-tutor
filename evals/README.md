@@ -28,6 +28,13 @@ The scorer turns these into: reacted first (at step changes), **double questions
 **dangling turns** (after his answer, no step change and `invites_answer` false), and instructions read
 aloud -- with the old punctuation counts ("?" in the transcript) beside them, to see the gap.
 
+## Credit (mind it)
+
+These call paid models. The judge is cheap and is **batched** (one call per ~25 turns) and **cached on
+disk** by turn and judge-prompt version (`EVALS_CACHE`, default: the system temp folder), so rescoring is
+free; `check_judge` is one call. The expensive part is `live_step_change`: each run is a full simulated
+Gemini Live session (audio) -- run as few as answer the question (2-3 per variant), not dozens.
+
 ## Privacy (the repo is public)
 
 - Nothing personal goes into this folder: run logs go to `--out` (a folder outside the repo, e.g. the
@@ -49,3 +56,7 @@ before reaching him); the real check is `audit_step_changes` on his sessions aft
   rule reacted 100% in text mode (the real sessions: ~2/3 -- the failure is audio-only); a stronger
   wording also 100%, no regressions; "react first, then call" 94% with 5 double questions. The
   stronger wording was deployed (tutor prompt 3.5).
+- 22.10 (17.5): a neutral plan with the new steps (`evals/plans/missing_areas.json`), 3 runs: reacted
+  first 24/24, nothing read aloud; the flagged double questions were the understanding items' intended
+  multi-part requests (the judge now counts one ordered request as one -- prompt 1.3) and the greeting
+  (plan 18); 5 dangling turns in a closing music topic, as before. The judge was batched and cached.

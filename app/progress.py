@@ -25,12 +25,24 @@ AREAS = {
     "connected_speech": "Connected speech (the story to retell)",
     "summarizing": "Summarizing a short text",
     "sequencing": "Telling things in order",
+    # 17.5: practiced only once a difficulty is confirmed (app/missing_areas.py) -- "active" in the doc
+    "repetition": "Repetition (saying after her)",
+    "understanding": "Understanding (questions and spoken requests)",
+    "clarity": "Speech clarity",
 }
+NEW_AREAS = ("repetition", "understanding", "clarity")
 # What a level means to the plan builder, per area.
 LEVEL_GUIDE = {
     "naming": {1: "familiar names from his own life, with a hint early", 2: "names from his life and well-known places",
                3: "less frequent names; hints only after a real try", 4: "rarer names (people, places, brands); "
                "a hint only if he asks", 5: "rare names, in longer conversation, no hints"},
+    "repetition": {1: "single everyday words", 2: "short phrases (3-4 words)", 3: "sentences of 6-8 words",
+                   4: "sentences of 8-12 words", 5: "two sentences in a row"},
+    "understanding": {1: "simple yes/no facts", 2: "yes/no comparisons", 3: "reversible yes/no ('if A is bigger "
+                      "than B, is B smaller?')", 4: "two-part spoken requests", 5: "three-part requests, or a short "
+                      "story with questions"},
+    "clarity": {1: "short phrases with one cue (slower or louder)", 2: "short phrases, the cue only if needed",
+                3: "longer phrases", 4: "sentences from his own life", 5: "a few sentences in a row"},
 }
 
 
@@ -57,6 +69,9 @@ def series(sessions: list[dict]) -> dict[str, list[dict]]:
             r = s.get(field) or {}
             if r.get("status") == "done" and not r.get("low_confidence") and r.get(key) is not None:
                 out[area].append({**base, "value": r[key]})
+        r = s.get("area_probe") or {}  # 17.5: the measurement on the area's fixed bank
+        if r.get("area") in NEW_AREAS and r.get("status") == "done" and not r.get("low_confidence"):
+            out[r["area"]].append({**base, "value": r["pct"]})
     return out
 
 
@@ -99,7 +114,8 @@ THERAPIST_POINT = {
     "mastered": "נראה ש{area} השתפר מאוד -- כדאי לשאול את הקלינאית אם להעביר את המיקוד",
 }
 AREA_HE = {"naming": "שליפת שמות", "connected_speech": "דיבור רציף", "summarizing": "סיכום במילים שלו",
-           "sequencing": "סיפור לפי סדר"}
+           "sequencing": "סיפור לפי סדר", "repetition": "חזרה אחריה", "understanding": "הבנה",
+           "clarity": "בהירות הדיבור"}
 
 
 def update(doc: dict | None, sessions: list[dict], today: dt.date) -> tuple[dict, list[dict]]:
@@ -108,6 +124,8 @@ def update(doc: dict | None, sessions: list[dict], today: dt.date) -> tuple[dict
     doc = {"areas": dict((doc or {}).get("areas") or {}), "log": list((doc or {}).get("log") or [])}
     new = []
     for area, points in series(sessions).items():
+        if area in NEW_AREAS and not (doc["areas"].get(area) or {}).get("active"):
+            continue  # not confirmed (17.5): not practiced, nothing to decide
         setting = {"level": START_LEVEL, "share": "normal", "seen": 0, **(doc["areas"].get(area) or {})}
         d = decide(area, points, setting)
         if d:
@@ -151,7 +169,7 @@ def render(doc: dict | None, points: dict[str, list[dict]]) -> str:
     areas = (doc or {}).get("areas") or {}
     for area, name in AREAS.items():
         pts = points.get(area) or []
-        if not pts and area not in areas:
+        if (not pts and area not in areas) or (area in NEW_AREAS and not (areas.get(area) or {}).get("active")):
             continue
         st = {"level": START_LEVEL, "share": "normal", **(areas.get(area) or {})}
         recent = ", ".join(f"{p['value']}%" + (f" (untreated {p['untreated']}%)" if p.get("untreated") is not None else "")

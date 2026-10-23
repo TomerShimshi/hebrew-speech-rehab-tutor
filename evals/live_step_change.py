@@ -168,17 +168,23 @@ class Run:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--account", required=True, help="the account (email) whose session to replay")
-    ap.add_argument("--session", required=True, help="the session id whose plan steps to replay")
+    ap.add_argument("--session", help="the session id whose plan steps to replay")
+    ap.add_argument("--plan", help="instead of a session: a plan file (JSON: plan_type, primary_goal, steps), e.g. "
+                                   "evals/plans/missing_areas.json")
     ap.add_argument("--variant", default="current", choices=sorted(VARIANTS))
     ap.add_argument("--runs", type=int, default=1)
     ap.add_argument("--out", required=True, help="a folder for the run logs (outside the repo)")
     ap.add_argument("--answers", help="his answers per step kind (JSON; keep it out of git: *.local.json)")
+    ap.add_argument("--max-answers", type=int, default=14, help="his answers per run at most")
     ap.add_argument("--skip", default="names_game", help="step kinds to leave out, comma-separated")
     args = ap.parse_args()
 
     settings = get_settings()
     store = FirestoreSessionStore()
-    plan = ClassPlan(**store.get_session(args.account, args.session)["class_plan"])
+    if not (args.session or args.plan):
+        ap.error("give --session or --plan")
+    plan = ClassPlan(**(json.loads(Path(args.plan).read_text(encoding="utf-8")) if args.plan
+                        else store.get_session(args.account, args.session)["class_plan"]))
     steps = [s for s in session_steps(plan) if s["kind"] not in args.skip.split(",")]
     built = build_session_prompt(store, settings, args.account, account_profile(store, args.account).text,
                                  get_games_reader())
@@ -196,8 +202,8 @@ def main() -> None:
     out.mkdir(parents=True, exist_ok=True)
     for i in range(1, args.runs + 1):
         answers = json.loads(Path(args.answers).read_text(encoding="utf-8")) if args.answers else {}
-        log = asyncio.run(Run(client, settings.live_model, cfg, steps, built.after_steps, answers).go())
-        log.update(variant=args.variant, run=i, session=args.session)
+        log = asyncio.run(Run(client, settings.live_model, cfg, steps, built.after_steps, answers).go(args.max_answers))
+        log.update(variant=args.variant, run=i, session=args.session or args.plan)
         path = out / f"step_change_{args.variant}_{i}.json"
         path.write_text(json.dumps(log, ensure_ascii=False, indent=1), encoding="utf-8")
         print(f"run {i}: {len(log['transitions'])} step changes, reached step {log['reached_step']} -> {path}")

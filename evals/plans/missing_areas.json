@@ -1,0 +1,14 @@
+{
+  "plan_type": "regular",
+  "primary_goal": {"type": "conversation", "description": "Talk; the missing-area steps of plan 17.5 (a neutral test plan)."},
+  "steps": [
+    {"kind": "opening", "opener": "שמחה לדבר איתך שוב! מה שלומך היום?"},
+    {"kind": "thread", "topic": "his week", "question": "מה עשית השבוע?", "follow_ups": "A detail he mentions."},
+    {"kind": "repetition", "items": ["כוס קפה חם", "פתח את הדלת", "הכלב רץ בחצר הגדולה"]},
+    {"kind": "thread", "topic": "a trip he remembers", "question": "יש טיול שאתה זוכר במיוחד?", "follow_ups": "Who was there."},
+    {"kind": "area_probe", "area": "understanding", "items": ["האם פיל גדול יותר מחתול?", "אם העץ גבוה מהשיח, האם השיח נמוך מהעץ?", "תגיד לי איזה פרי טעים לך, ואחר כך איזה ירק אתה אוהב.", "תגיד לי מה הצבע האהוב עליך, אחר כך איזה פרי אתה הכי אוהב, ובסוף איזה משקה אתה מעדיף."]},
+    {"kind": "understanding", "items": ["האם ברכבת נוסעים על פסים?", "האם קיץ חם יותר מחורף?", "ספר לי מה אכלת היום, ואחר כך עם מי."]},
+    {"kind": "clarity", "items": ["אני שותה תה חם בבוקר", "סגרתי את הדלת של הבית", "נפגש מחר ליד שער הכניסה"]},
+    {"kind": "thread", "topic": "music", "question": "איזו מוזיקה אתה אוהב לשמוע?", "follow_ups": "A song he loves."}
+  ]
+}

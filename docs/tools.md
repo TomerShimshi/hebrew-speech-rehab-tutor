@@ -219,6 +219,16 @@ Record HIS OWN VIEW (only if TODAY'S PLAN has the step 'His own view'): how talk
 | `quote` | string | yes |  | HEBREW: his words, exactly. |
 | `note` | string |  |  | ENGLISH, one short sentence. |
 
+### `record_area_probe`
+
+Record the SHORT MEASURING GAME of TODAY'S PLAN (only if the plan has one, 'A short ... game'): for each item she asked, what he said and whether he got it right. Call once.
+
+| Parameter | Type | Required | Allowed values | Description |
+|---|---|---|---|---|
+| `results` | list of object | yes |  |  |
+| `low_confidence` | boolean |  |  | true if the two transcript versions disagree in a way that changes the result. |
+| `skipped` | boolean |  |  | true if she didn't run it. |
+
 ### `record_names_game`
 
 Record what happened to the NAMES GAME of TODAY'S PLAN (only if the plan has one). Call once.
@@ -404,6 +414,30 @@ Only when he played recently (GAMES): a short TALKING activity built on the cate
 | `title` | string | yes |  |  |
 | `rationale` | string | yes |  |  |
 | `evidence` | string | yes |  |  |
+
+### `add_repetition`
+
+*only when HIS PROGRESS gives repetition this session (17.5)*
+
+Repetition practice (only when HIS PROGRESS gives repetition this session): 3-6 items he says after her, built from HIS topics, at the length his level says (words -> phrases -> sentences). HEBREW, everyday words, no names he might not know.
+
+_No parameters._
+
+### `add_understanding`
+
+*only when HIS PROGRESS gives understanding this session (17.5)*
+
+Understanding practice (only when HIS PROGRESS gives understanding this session): 3-6 items at his level -- yes/no questions about his world, then spoken requests in two or three parts ('ספר לי X, ואחר כך Y'). HEBREW. Voice only: nothing to point at or do.
+
+_No parameters._
+
+### `add_clarity`
+
+*only when HIS PROGRESS gives clarity this session (17.5)*
+
+Clarity practice (only when HIS PROGRESS gives clarity this session): 3-6 short phrases from his life, said with ONE cue the plan names (slower / louder / every sound) -- the cue that helped him before. HEBREW.
+
+_No parameters._
 
 ## 4. Research (optional, inside the plan build)
 

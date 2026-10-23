@@ -19,10 +19,10 @@ from functools import lru_cache
 import yaml
 from google.genai import types
 
-from app import check_in_set, probes, progress, sequencing, summarizing, word_bank
+from app import check_in_set, missing_areas, probes, progress, sequencing, summarizing, word_bank
 from app.agent.memory_update import format_memory
 from app.agent.research import personal_terms, research_technique, search_available
-from app.steps import StoryProbeStep, ViewStep
+from app.steps import MISSING_AREA_STEPS, AreaProbeStep, StoryProbeStep, ViewStep
 from app.agent.plan_tools import BUDGET_MINUTES, MIN_ACCEPT, PlanDraft, build_plan_tools
 from app.agent.runner import Tool, run_tool_loop
 from app.class_plan import add_one_check, fixed_plan, missed_checks, with_checks
@@ -215,6 +215,38 @@ def sequencing_history(store: SessionStore, pid: str) -> tuple[list[dict], str]:
         if seq.get("status") == "done":
             results.append(seq)
     return results[:5], "retell" if last_task == "scrambled" else "scrambled"
+
+
+def apply_missing_areas(store: SessionStore, pid: str, today: dt.date) -> None:
+    """Confirming first (17.5): each missing area's status from the needs' history; a re-check item
+    queued while it's open (not for an uploaded profile: no new checks in his sessions, 17); a confirmed
+    area handed to the progress rules at level 1, less time, with a notice to the family."""
+    needs = store.get_needs(pid) or {}
+    areas = dict(needs.get("areas") or {})
+    pending = list(needs.get("pending_checks") or [])
+    uploaded = account_profile(store, pid).source == "uploaded"
+    prog = store.get_progress(pid) or {}
+    points = list(needs.get("therapist_points") or [])
+    changed = False
+    for area in missing_areas.AREAS:
+        st = missing_areas.status(areas.get(area))
+        if areas.get(area) and areas[area].get("status") != st:
+            areas[area] = {**areas[area], "status": st}
+            changed = True
+        if st in ("seen_once", "rechecking") and not uploaded and all(p.get("area") != area for p in pending):
+            pending.append(missing_areas.recheck_step(area, len(areas.get(area, {}).get("history") or [])))
+            changed = True
+        if st == "confirmed" and not ((prog.get("areas") or {}).get(area) or {}).get("active"):
+            prog = missing_areas.hand_over(prog, area, today.isoformat())
+            store.save_progress(pid, prog)
+            text = f"האפליקציה מצאה קושי ב{progress.AREA_HE[area]} ב־2 מתוך 3 שיחות, ומתחילה לתרגל אותו בהדרגה"
+            if all(p.get("text") != text for p in points):
+                points.append({"id": f"confirmed-{today.isoformat()}-{area}", "text": text, "why": "confirmed (17.5)",
+                               "evidence": [], "status": "new", "date": today.isoformat(), "session": None})
+            _log(f"missing areas: {area} confirmed -> practice starts small")
+            changed = True
+    if changed:
+        store.save_needs(pid, {**needs, "areas": areas, "pending_checks": pending, "therapist_points": points[-60:]})
 
 
 def apply_progress(store: SessionStore, pid: str, today: dt.date) -> tuple[str, str]:
@@ -490,7 +522,12 @@ def build_next_plan(
         seq_results, seq_task = sequencing_history(store, pid)
         seq_events = sequencing.recommended_events(seq_results)
         # Adjusting to his progress, like a therapist (17): the rules, then HIS PROGRESS for the builder.
+        apply_missing_areas(store, pid, today)
         progress_text, naming_share = apply_progress(store, pid, today)
+        missing_area = missing_areas.practice_turn(store.get_progress(pid), store.list_sessions(pid, 30))
+        if missing_area:
+            progress_text += (f"\nTHIS SESSION: a {missing_area} practice step "
+                              f"({MISSING_AREA_STEPS[missing_area].TOOL}), at its level above.")
         sum_results = summarizing_history(store, pid)
         sum_ideas = summarizing.recommended_ideas(sum_results)
         discourse = discourse_turn(store, pid)
@@ -530,7 +567,7 @@ def build_next_plan(
             his_games={gid for gid, g in his_games.items() if g.route},
             set_names={i["target"] for i in (current_set or {}).get("items") or []},
             seq_events=seq_events, seq_task=seq_task, summary_ideas=sum_ideas, discourse=discourse,
-            naming_share=naming_share)
+            naming_share=naming_share, missing_area=missing_area)
         run = run_tool_loop(client, _models(settings), load_prompt()["system"], context, tools,
                             max_rounds=PLAN_MAX_ROUNDS, generate_fn=generate_fn)
         if not draft.finished:
@@ -553,6 +590,10 @@ def build_next_plan(
             probe = StoryProbeStep(story_id=story["id"], title=story["title"], story=" ".join(story["story"].split()),
                                    main_ideas=story["main_ideas"]).model_dump(mode="json")
             plan_dict["steps"] = [*plan_dict["steps"][:2], probe, *plan_dict["steps"][2:]]
+        area_probe = None if story else missing_areas.probe_due(store.get_progress(pid), recent_sessions)
+        if area_probe:  # 17.5: never in the same session as the story probe
+            probe_step = AreaProbeStep(area=area_probe[0], items=[i["text"] for i in area_probe[1]]).model_dump(mode="json")
+            plan_dict["steps"] = [*plan_dict["steps"][:2], probe_step, *plan_dict["steps"][2:]]
         if probes.view_due(recent_sessions, today):  # before the last two steps: the wrap-up note may come first
             cut = max(2, len(plan_dict["steps"]) - 2)
             plan_dict["steps"] = [*plan_dict["steps"][:cut], ViewStep().model_dump(mode="json"), *plan_dict["steps"][cut:]]

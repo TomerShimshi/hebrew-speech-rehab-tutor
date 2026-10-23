@@ -35,6 +35,10 @@ cases:
     his: "עם חברים זה יותר קל."
     her: "זה מובן לגמרי, שיחות עם חברים הן לרוב הרבה יותר טבעיות וזורמות."
     expect: {reacted: true, real_questions: 0, invites_answer: false}
+  - name: one request with ordered parts is one (an understanding item)
+    his: "נכון."
+    her: "יפה. עכשיו תגיד לי איזה פרי טעים לך, ואחר כך איזה ירק אתה אוהב."
+    expect: {real_questions: 1, invites_answer: true}
   - name: two separate questions
     his: "היה יום עמוס."
     her: "אני מבינה. מה עשית היום? ואיך אתה מרגיש עכשיו?"

@@ -283,8 +283,8 @@ CHECK_RULES = {
                       "naturally, as one two-part request. Don't repeat or simplify unless he asks."),
     "connected_speech": ("Ask him to explain the first item step by step, as if to someone who has never done it. "
                          "Let him tell it all the way; if he stops early, one \"ומה אחר כך?\". No corrections."),
-    "clarity": ("A playful moment (\"בוא ננסה משהו מצחיק\"): ask him to say the first item as fast as he can, a few "
-                "times -- do it with him and laugh lightly. Once is enough."),
+    "clarity": ("Ask him to say each item after you, clearly. If the item is \"פה-טה-קה\", make it a playful moment "
+                "instead (\"בוא ננסה משהו מצחיק\"): as fast as he can, a few times, with him, laughing lightly."),
     "goals": ("Ask what is hardest for him when he talks with people; listen and react. Only after his answer, "
               "ask what he would like to be able to do better. Never say goals or assessment."),
 }
@@ -372,6 +372,78 @@ class StoryProbeStep(Step):
         return self.title
 
 
+class _MissingAreaStep(Step):
+    """Practice in an area the app practices only once a difficulty is confirmed (17.5). Offered to the
+    builder only for the area whose turn it is, at its level (HIS PROGRESS)."""
+    MINUTES: ClassVar[float] = 1.5
+    MIN_MINUTES: ClassVar[float] = 1.0
+    MIN_ANSWERS: ClassVar[int] = 3
+    items: list[str] = Field(description="HEBREW: the items she says, in order (3-6), at his level.")
+
+    def content(self) -> str:
+        items = " ".join(f'{i}) "{x}"' for i, x in enumerate(self.items, 1))
+        return f"{self.NAME} practice. ITEMS: {items}."
+
+
+class RepetitionStep(_MissingAreaStep):
+    kind: Literal["repetition"] = "repetition"
+    NAME: ClassVar[str] = "Repetition"
+    TOOL: ClassVar[str] = "add_repetition"
+    GUIDE: ClassVar[str] = (
+        "Repetition practice (only when HIS PROGRESS gives repetition this session): 3-6 items he says after her, "
+        "built from HIS topics, at the length his level says (words -> phrases -> sentences). HEBREW, everyday "
+        "words, no names he might not know.")
+    RULES: ClassVar[str] = (
+        "Lightly, as a game (\"בוא ננסה משהו: אני אגיד, ואתה תגיד אחריי\"): say each item once, clearly, and let him "
+        "repeat it. If it didn't come out, one more try together; then a warm reaction and the next -- never "
+        "\"wrong\". After the last, a short word on how it went, without counting.")
+
+
+class UnderstandingStep(_MissingAreaStep):
+    kind: Literal["understanding"] = "understanding"
+    NAME: ClassVar[str] = "Understanding"
+    TOOL: ClassVar[str] = "add_understanding"
+    GUIDE: ClassVar[str] = (
+        "Understanding practice (only when HIS PROGRESS gives understanding this session): 3-6 items at his level -- "
+        "yes/no questions about his world, then spoken requests in two or three parts ('ספר לי X, ואחר כך Y'). "
+        "HEBREW. Voice only: nothing to point at or do.")
+    RULES: ClassVar[str] = (
+        "Ask the items one at a time, each as part of the talk, and wait for his answer. If he got it wrong or "
+        "only part of a request, say it again once, slowly, without saying he was wrong; then go on warmly.")
+
+
+class ClarityStep(_MissingAreaStep):
+    kind: Literal["clarity"] = "clarity"
+    NAME: ClassVar[str] = "Speech clarity"
+    TOOL: ClassVar[str] = "add_clarity"
+    GUIDE: ClassVar[str] = (
+        "Clarity practice (only when HIS PROGRESS gives clarity this session): 3-6 short phrases from his life, said "
+        "with ONE cue the plan names (slower / louder / every sound) -- the cue that helped him before. HEBREW.")
+    RULES: ClassVar[str] = (
+        "Explain the one cue simply (e.g. \"בוא נגיד את זה לאט ובבירור\"), say each phrase, and let him say it "
+        "with the cue. Praise the effort; one more try only if he wants. Never imitate or correct his sounds.")
+
+
+class AreaProbeStep(Step):
+    """The measurement of a practiced area on its fixed bank (17.5), placed by code, asked the same way."""
+    kind: Literal["area_probe"] = "area_probe"
+    MINUTES: ClassVar[float] = 1.5
+    MIN_ANSWERS: ClassVar[int] = 4
+    area: Literal["repetition", "understanding", "clarity"]
+    items: list[str]  # HEBREW, asked exactly
+    RULES: ClassVar[str] = (
+        "A short game, asked exactly as written, one item at a time, waiting for each answer: for repetition and "
+        "clarity he says each item after you; for understanding he answers each question or request. No hints, "
+        "no second try, no saying if it was right -- a warm word after each, and go on.")
+
+    def content(self) -> str:
+        items = " ".join(f'{i}) "{x}"' for i, x in enumerate(self.items, 1))
+        return f"A short {self.area} game (the same every time). ITEMS: {items}."
+
+    def label(self) -> str:
+        return self.area
+
+
 class ViewStep(Step):
     """His own view (17): every ~2 weeks, one short question near the end. Placed by code."""
     kind: Literal["his_view"] = "his_view"
@@ -390,11 +462,14 @@ class ViewStep(Step):
 
 
 PlanStep = Annotated[Union[OpeningStep, NamesGameStep, PracticeStep, ActivityStep, GamesActivityStep, ThreadStep,
-                           SequencingStep, SummaryStep, CheckStep, StoryProbeStep, ViewStep], Field(discriminator="kind")]
+                           SequencingStep, SummaryStep, CheckStep, StoryProbeStep, ViewStep, RepetitionStep,
+                           UnderstandingStep, ClarityStep, AreaProbeStep], Field(discriminator="kind")]
 BUILDABLE = (OpeningStep, NamesGameStep, PracticeStep, ActivityStep, GamesActivityStep, ThreadStep, SequencingStep,
              SummaryStep)
 
-STEP_CLASSES = {cls.model_fields["kind"].default: cls for cls in (*BUILDABLE, CheckStep, StoryProbeStep, ViewStep)}
+MISSING_AREA_STEPS = {"repetition": RepetitionStep, "understanding": UnderstandingStep, "clarity": ClarityStep}
+STEP_CLASSES = {cls.model_fields["kind"].default: cls for cls in (*BUILDABLE, CheckStep, StoryProbeStep, ViewStep,
+                                                                    *MISSING_AREA_STEPS.values(), AreaProbeStep)}
 
 
 def min_answers(kind: str) -> int:
@@ -413,7 +488,8 @@ FOLLOW_UP = ("Follow-up: go back to something he told you earlier today (a detai
 FREE_CONVERSATION = ("Conversation: ask whether there is something special he'd like to talk about today; follow his "
                      "choice, one thread at a time, with follow-ups on his own words.")
 
-NAMES = {"story_probe": "a story to retell", "his_view": "his own view", "summary": "summarizing", "check": "getting-to-know check", "sequencing": "telling things in order", "opening": "opening", "names_game": "names game", "practice": "practice", "activity": "activity",
+NAMES = {"repetition": "repetition", "understanding": "understanding", "clarity": "clarity",
+         "area_probe": "a short measuring game", "story_probe": "a story to retell", "his_view": "his own view", "summary": "summarizing", "check": "getting-to-know check", "sequencing": "telling things in order", "opening": "opening", "names_game": "names game", "practice": "practice", "activity": "activity",
          "games_activity": "game-linked activity", "thread": "conversation thread", "conversation": "conversation"}
 
 

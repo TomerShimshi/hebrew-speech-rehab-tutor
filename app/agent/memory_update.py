@@ -13,8 +13,8 @@ from functools import lru_cache
 
 import yaml
 
-from app import check_in_set, probes, sequencing, summarizing
-from app.steps import SequencingStep, StoryProbeStep, SummaryStep, ViewStep
+from app import check_in_set, missing_areas, probes, sequencing, summarizing
+from app.steps import AreaProbeStep, SequencingStep, StoryProbeStep, SummaryStep, ViewStep
 from app.agent.memory_tools import Inferring, MemoryDraft, add_vocabulary, build_memory_tools
 from app.patient_profile import (AREA_NAMES, MAX_HISTORY, MAX_POINTS, account_profile, needs_lines,
                                  render_inferred)
@@ -129,6 +129,13 @@ def sequencing_result(plan, reported: dict | None) -> dict | None:
             "low_confidence": reported["low_confidence"], "note": reported.get("note", "")}
 
 
+def _area_probe_result(plan, reported: dict | None) -> dict | None:
+    step = next((s for s in (plan.steps if plan else []) if isinstance(s, AreaProbeStep)), None)
+    if step is None:
+        return None
+    return missing_areas.score(step.area, [{"text": t} for t in step.items], reported)
+
+
 def summarizing_result(plan, reported: dict | None) -> dict | None:
     """The session's summary result (17): the title and size, and the score computed by code from the
     main ideas the agent heard -- or skipped / not reported."""
@@ -225,7 +232,8 @@ def run_memory_update(
         # short extra round with only that tool when the plan had one and it's missing.
         for cls, field_, tool_name, what in ((SequencingStep, "sequencing", "record_sequencing", "a sequencing task"),
                                              (SummaryStep, "summarizing", "record_summary", "a summary task"),
-                                             (StoryProbeStep, "story_probe", "record_story_probe", "a story to retell")):
+                                             (StoryProbeStep, "story_probe", "record_story_probe", "a story to retell"),
+                                             (AreaProbeStep, "area_probe", "record_area_probe", "a short measuring game")):
             if plan and any(isinstance(s, cls) for s in plan.steps) and getattr(draft, field_) is None:
                 missed = [t for t in build_memory_tools(draft) if t.name == tool_name]
                 run_tool_loop(client, models, prompts["tool_phase"] + f"\n\nYOU MISSED ONE: TODAY'S PLAN had {what} "
@@ -268,6 +276,7 @@ def run_memory_update(
                          ({"status": "not_reported"} if plan and any(isinstance(s, ViewStep) for s in plan.steps)
                           else None)),
             "talk": probes.talk_measures(turns),
+            "area_probe": _area_probe_result(plan, draft.area_probe),  # 17.5: a missing area's measurement
             "memory_error": None,
             "memory_model": run.models[-1] if run.models else None,
             "memory_attempts": run.attempts,

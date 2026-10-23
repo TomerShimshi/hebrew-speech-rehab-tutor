@@ -180,7 +180,8 @@ function namesGameLine(s) {
 }
 
 // Steps mode (13): how far through the agenda the session got, and what she reported.
-const STEP_KIND = { story_probe: "סיפור לשחזר (מדידה)", his_view: "איך הוא מרגיש", summary: "סיכום במילים שלו", check: "היכרות: רגע של בדיקה", sequencing: "סיפור לפי סדר", opening: "פתיחה", conversation: "שיחה", names_game: "משחק השמות", practice: "תרגול",
+const STEP_KIND = { repetition: "תרגול חזרה", understanding: "תרגול הבנה", clarity: "תרגול בהירות",
+                    area_probe: "משחק מדידה", story_probe: "סיפור לשחזר (מדידה)", his_view: "איך הוא מרגיש", summary: "סיכום במילים שלו", check: "היכרות: רגע של בדיקה", sequencing: "סיפור לפי סדר", opening: "פתיחה", conversation: "שיחה", names_game: "משחק השמות", practice: "תרגול",
                     activity: "פעילות", games_activity: "פעילות מהמשחקים", reserve: "רזרבה",
                     thread: "נושא לשיחה" };
 const stepName = (a) => `${STEP_KIND[a.kind] || a.kind}${a.label ? ` ${a.label}` : ""}`;
@@ -830,6 +831,20 @@ function renderNeeds(needs) {
     save.addEventListener("click", () => saveNeed(area, level?.value || "", note.value, save));
     const who = a.set_by === "family" ? "המשפחה" : a.set_by === "app" ? `האפליקציה${a.date ? `, ${a.date}` : ""}` : "";
     const evidence = (a.evidence || a.app_evidence || []);
+    // 17.5: a missing area is practiced only once a difficulty is confirmed; the family's word wins
+    const CONF = { seen_once: "נראה פעם אחת -- בודקים שוב", rechecking: "בבדיקה חוזרת", confirmed: "קושי אושר -- מתרגלים",
+                   not_confirmed: "לא אושר (חד־פעמי)", fine: "" };
+    const st = a.family_status || a.status;
+    const confRow = NOT_PRACTICED.has(area) && (st && st !== "fine" || a.family_status) ? el("div", { class: "cg-actions" },
+      el("span", { class: "muted", text: `${CONF[st] || st}${a.family_status ? " (נקבע ע\"י המשפחה)" : ""}` }),
+      ...[["confirmed", "אישור"], ["not_confirmed", "ביטול"], ["", "החזרה להחלטת האפליקציה"]].map(([v, t]) => {
+        const b = el("button", { class: "small", type: "button", text: t });
+        b.addEventListener("click", async () => {
+          b.disabled = true;
+          try { await api(acct(`/needs/${area}/status`), { status: v }, "PUT"); await loadAccount(); } catch { b.disabled = false; }
+        });
+        return b;
+      })) : null;
     const history = (a.history || []).slice(-12);
     const trend = history.length ? el("div", { class: "need-trend", "aria-label": "לאורך השיחות" },
       el("span", { class: "muted", text: "לאורך השיחות: " }),
@@ -842,6 +857,7 @@ function renderNeeds(needs) {
       el("div", { class: "cg-actions" }, level, note, save),
       a.app_note ? p(`האפליקציה שמעה: ${a.app_note}`, "muted kv") : null,
       a.set_by === "app" && a.note ? p(a.note, "muted kv") : null,
+      confRow,
       trend,
       evidence.length ? el("details", {}, el("summary", { class: "muted", text: "מה הוא אמר" }),
         el("ul", {}, evidence.map((q) => el("li", { dir: "auto", text: q })))) : null);
@@ -875,8 +891,8 @@ function renderTherapistPoints(points) {
 
 // The app's adjustments (17): per area its level and time, the last decision, lock / undo; the log.
 const ADJ_AREA = { naming: "שליפת שמות", connected_speech: "דיבור רציף (סיפור לשחזר)", summarizing: "סיכום במילים שלו",
-                   sequencing: "סיפור לפי סדר" };
-const ADJ_RULE = { mastered: "שולט -- רמה עולה", worse: "ירידה -- רמה יורדת, יותר זמן", stalled: "תקוע -- משנים גישה",
+                   sequencing: "סיפור לפי סדר", repetition: "חזרה אחריה", understanding: "הבנה", clarity: "בהירות הדיבור" };
+const ADJ_RULE = { confirmed: "קושי אושר -- מתחילים לתרגל בהדרגה", mastered: "שולט -- רמה עולה", worse: "ירידה -- רמה יורדת, יותר זמן", stalled: "תקוע -- משנים גישה",
                    undo: "בוטל ע\"י המשפחה", lock: "ננעל", unlock: "שוחרר" };
 const SHARE = { less: "פחות זמן", normal: "זמן רגיל", more: "יותר זמן" };
 function renderAdjust(doc) {
@@ -1031,6 +1047,12 @@ function renderProgress(data) {
     out.push(el("h3", { text: "דיבור רציף: סיפור קצר שהוא מספר מחדש (מדידה קבועה)" }),
       lineChart(withStory, [{ key: "story", color: COLORS.treated }]),
       p("אותם סיפורים, באותה דרך, כל כמה שיחות -- כמו מדידה אצל קלינאית. כמה מהרעיונות העיקריים הוא העביר.", "muted kv"));
+  }
+  for (const [area, name] of [["repetition", "חזרה אחריה"], ["understanding", "הבנה"], ["clarity", "בהירות הדיבור"]]) {
+    const pts = has(area);
+    if (pts.length) {
+      out.push(el("h3", { text: `${name}: משחק מדידה קבוע (%)` }), lineChart(pts, [{ key: area, color: COLORS.untreated }]));
+    }
   }
   const withTalk = has("avg_words");
   if (withTalk.length) {

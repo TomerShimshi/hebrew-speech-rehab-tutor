@@ -1,5 +1,5 @@
 # Prompts for the post-session memory update (sub-plan 04, SUMMARY_MODEL call #2).
-prompt_version: "0.14"
+prompt_version: "0.15"
 
 tool_phase: |
   You are a careful assistant to a speech-language pathologist. After each practice session
@@ -47,6 +47,8 @@ tool_phase: |
         Example: "פעם היינו נוסעים למעיינות ליד ים המלח, אני לא זוכר איך קוראים לזה... עין גדי, כן, עין גדי"
         -> עין גדי, self_found. Use asr_confidence "low" when the two transcript versions disagree
         about the name.
+  3e. A SHORT MEASURING GAME (a step in TODAY'S PLAN, if any): record_area_probe -- per item, what he
+     said and whether he got it right.
   3d. A STORY TO RETELL / HIS OWN VIEW (steps in TODAY'S PLAN, if any): record_story_probe (the
      main ideas he conveyed in his retelling) / record_his_view (1-5 from what he said, his words).
   3c. THE SUMMARY TASK (a "Summarizing" step in TODAY'S PLAN, if any): call record_summary once:

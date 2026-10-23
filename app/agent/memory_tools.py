@@ -61,6 +61,7 @@ class MemoryDraft:
     summarizing: dict | None = None  # {conveyed, needed_help, low_confidence, skipped, note} (17)
     story_probe: dict | None = None  # {conveyed, low_confidence, skipped} (17)
     his_view: dict | None = None  # {score 1-5, quote, note} (17)
+    area_probe: dict | None = None  # {results: [{item, said, correct}], low_confidence, skipped} (17.5)
     inferring: Inferring | None = None  # no uploaded profile (15.5); None = the tools aren't offered
     focus: list[str] | None = None  # 2-4 focus points for the next session (16); None = keep the old ones
 
@@ -174,6 +175,17 @@ def build_memory_tools(draft: MemoryDraft) -> list[Tool]:
         if not quote:
             raise ValueError("quote his words (HEBREW, exact)")
         draft.his_view = {"score": int(score), "quote": quote, "note": _norm(str(args.get("note", "")))[:300]}
+        return {"ok": True}
+
+    def record_area_probe(args: dict) -> dict:
+        results = []
+        for r in args.get("results") or []:
+            if not isinstance(r, dict) or not isinstance(r.get("item"), (int, float)):
+                raise ValueError("results: [{item: number, said: his words (HEBREW), correct: true/false}]")
+            results.append({"item": int(r["item"]), "said": _norm(str(r.get("said", "")))[:200],
+                            "correct": bool(r.get("correct"))})
+        draft.area_probe = {"results": results, "low_confidence": bool(args.get("low_confidence")),
+                            "skipped": bool(args.get("skipped"))}
         return {"ok": True}
 
     def record_names_game(args: dict) -> dict:
@@ -449,6 +461,28 @@ def build_memory_tools(draft: MemoryDraft) -> list[Tool]:
                 "required": ["score", "quote"],
             },
             record_his_view,
+        ),
+        Tool(
+            "record_area_probe",
+            "Record the SHORT MEASURING GAME of TODAY'S PLAN (only if the plan has one, 'A short ... game'): for each "
+            "item she asked, what he said and whether he got it right. Call once.",
+            {
+                "type": "object",
+                "properties": {
+                    "results": {"type": "array", "items": {"type": "object", "properties": {
+                        "item": {"type": "integer", "description": "The item's number in TODAY'S PLAN."},
+                        "said": {"type": "string", "description": "HEBREW: what he said, exactly."},
+                        "correct": {"type": "boolean", "description": (
+                            "Understanding: he answered right (all parts of a request). Repetition / clarity: he "
+                            "said it fully and clearly.")}},
+                        "required": ["item", "said"]}},
+                    "low_confidence": {"type": "boolean", "description": (
+                        "true if the two transcript versions disagree in a way that changes the result.")},
+                    "skipped": {"type": "boolean", "description": "true if she didn't run it."},
+                },
+                "required": ["results"],
+            },
+            record_area_probe,
         ),
         Tool(
             "record_names_game",

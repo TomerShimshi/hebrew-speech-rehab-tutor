@@ -1,0 +1,37 @@
+# Measurement bank for repetition (sub-plan 17.5): fixed items asked the same way every time, so the
+# scores compare like with like. Never used for practice (the builder writes practice fresh).
+# Repetition: words (level 1), short phrases (2), sentences of 7-10 words (3) -- he says each after her.
+# Generated 2026-10-22 under strict rules by scripts/make_probe_banks.py, checked by code and a second
+# model call, and read before going in. Append new items at the end: the order is the rotation.
+items:
+  - {level: 1, text: "חלון"}
+  - {level: 1, text: "שולחן"}
+  - {level: 1, text: "תפוח"}
+  - {level: 1, text: "חולצה"}
+  - {level: 1, text: "צלחת"}
+  - {level: 1, text: "מפתח"}
+  - {level: 1, text: "כובע"}
+  - {level: 1, text: "בקבוק"}
+  - {level: 1, text: "מנורה"}
+  - {level: 1, text: "שעון"}
+  - {level: 1, text: "כריך"}
+  - {level: 1, text: "עיתון"}
+  - {level: 2, text: "כוס קפה חם"}
+  - {level: 2, text: "פתח את הדלת"}
+  - {level: 2, text: "ספר חדש ומעניין"}
+  - {level: 2, text: "יום יפה ושמשי"}
+  - {level: 2, text: "מים קרים בכוס"}
+  - {level: 2, text: "הכלב רץ בחצר"}
+  - {level: 2, text: "תפוח אדום וטעים"}
+  - {level: 2, text: "לשבת על הספה"}
+  - {level: 2, text: "שקית גדולה של קניות"}
+  - {level: 3, text: "הוא פתח את החלון הגדול כדי להכניס קצת אוויר"}
+  - {level: 3, text: "החתול הלבן ישן כל היום על השטיח בסלון"}
+  - {level: 3, text: "שמתי את המפתחות של הבית על השולחן במטבח"}
+  - {level: 3, text: "היא קראה ספר מעניין מאוד עד שעות הערב"}
+  - {level: 3, text: "מזג האוויר בחוץ נעים מאוד ואפשר לצאת לטיול"}
+  - {level: 3, text: "קניתי לחם טרי וגבינה טובה לארוחת הבוקר"}
+  - {level: 3, text: "הילדים משחקים בכדור בחצר הגדולה מאחורי הבית שלנו"}
+  - {level: 3, text: "כדאי לקחת מעיל כי מתחיל להיות ממש קר בחוץ"}
+  - {level: 3, text: "היא הכינה עוגה טעימה מאוד לכבוד סוף השבוע"}
+  - {level: 3, text: "שמתי כוס מים קרים ליד המיטה לפני השינה"}
