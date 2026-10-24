@@ -69,16 +69,20 @@ class OpeningStep(Step):
     kind: Literal["opening"] = "opening"
     TOOL: ClassVar[str] = "set_opening"
     GUIDE: ClassVar[str] = ("The opening (always the first step). recall: ONE sentence she can use in her greeting, "
-                            "recalling something from last time (from the memory). opener: an easy, pleasant question "
-                            "at his level. Both in HEBREW, in her voice (a woman; masculine for him).")
-    RULES: ClassVar[str] = ("Greet him warmly, ask how he feels and react to what he says (recall ONE thing from last "
-                            "time, ask about his games or homework, as the rules say). If he shares something -- news, "
+                            "recalling something from last time (from the memory) -- a STATEMENT, not a question. "
+                            "opener: ONE easy, pleasant question at his level (one thing only). Both in HEBREW, in "
+                            "her voice (a woman; masculine for him).")
+    RULES: ClassVar[str] = ("Greet him warmly: hello, the recall as a statement, then ONE question -- one thing only "
+                            "(18: two questions in the greeting are the most common double question). React to what "
+                            "he says, then go on one question at a time (how he feels, his games or homework, as the "
+                            "rules say). If he shares something -- news, "
                             "a feeling, something that happened today -- stay with it for a few exchanges before "
                             "anything else: that is the conversation.")
     MINUTES: ClassVar[float] = 0.6
     MIN_ANSWERS: ClassVar[int] = 2
-    recall: str = Field(default="", description="HEBREW: one sentence recalling last time, for her greeting.")
-    opener: str = Field(default="", description="HEBREW: an easy, pleasant opening question.")
+    recall: str = Field(default="", description="HEBREW: one sentence recalling last time, for her greeting -- a "
+                                                 "statement, not a question.")
+    opener: str = Field(default="", description="HEBREW: ONE easy, pleasant opening question (one thing only).")
 
     def content(self) -> str:
         parts = ["Opening."]

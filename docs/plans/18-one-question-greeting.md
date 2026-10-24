@@ -1,6 +1,6 @@
 # Sub-plan 18: She listens and asks well -- a reaction to every answer, one question at a time, never a question he answered
 
-Part of the [master design](00-master-design.md). After [17.5](17.5-practicing-the-missing-areas.md), before [19](19-names-goodbyes-and-excluded-sessions.md). Requested by Tomer (2026-10-22); extended 2026-10-23 after the patient's session of 22.10. **To build.**
+Part of the [master design](00-master-design.md). After [17.5](17.5-practicing-the-missing-areas.md), before [19](19-names-goodbyes-and-excluded-sessions.md). Requested by Tomer (2026-10-22); extended 2026-10-23 after the patient's session of 22.10. **Built 23.10 as prompts (tutor 3.6): B, C and a stronger reaction rule; A (the `reaction` parameter) tested and shelved -- see Results.**
 
 ## Why
 - **She sometimes ignores his answer (22.10, the patient):** after the story step he said "או, כל הזמן... הרבה פעמים", and her next turn went straight to the next topic -- not a word about it. This is the step change fixed by wording in 21.10 (tutor prompt 3.5): better (1 miss in 6 step changes in that session, ~1 in 3 before) but not solved. The text-mode evals can't reproduce it (21.10): it shows with voice, when the next step arrives and pushes the reaction out. He must never feel ignored.
@@ -16,7 +16,7 @@ Part of the [master design](00-master-design.md). After [17.5](17.5-practicing-t
 
 ## Design
 
-### A. The reaction is part of next_step (code)
+### A. The reaction is part of next_step (code) -- tested, shelved (23.10)
 - `next_step` gets a **required** parameter `reaction`: the one sentence (Hebrew) she says to what he just said. She writes it before she sees the next step -- the point: today the next step arrives and pushes the reaction out; here it's composed first.
 - **The page's reply puts it first:** her own sentence, then the step ("first say your reaction ... then CURRENT STEP: ..."), worded so nothing meant for her is read aloud (checked in the evals: `reads_instructions`).
 - **Checked by the page:** an empty or token reaction (one word, a generic "בוא נמשיך") is held -- "react to what he said, then call again".
@@ -33,7 +33,16 @@ Part of the [master design](00-master-design.md). After [17.5](17.5-practicing-t
 
 ### D. Measuring
 - **Evals (text mode):** the opening replayed (the first turn), double questions per step kind, `reads_instructions` with the new reply, the reaction said vs written.
+- **Before / after on his real sessions** (`evals/session_metrics.py`, N+1): the baseline measured before building (below), then the same measures on every session after the fix -- `--split-version` with the new tutor prompt version.
 - **Audit of real sessions** (`evals/audit_step_changes.py`): reacted first, by meaning; and with A, the written reaction vs her first words. Run on his sessions after deploying, and on the test account first.
+
+### What was built instead of A (23.10)
+- The tutor prompt's step rules: EVERY answer of his gets a reply to what he said, above all at a step change; a story gets a sentence about ITS content, not a generic "יופי"; the reaction comes first even when the reply says what to say next.
+
+## Results (23.10)
+- **Baseline** (`session_metrics`, the patient's 6 sessions 15-22.10): no reaction at 9/29 step changes (31%), double questions 8/128 turns, greeting 0/6, repeated questions 2 (the names game's repeats excluded).
+- **Replay** (`evals/replay_turns.py`: each flagged turn replayed on Gemini Live from the real conversation, 2 runs): **B fixed** -- asked again 2/4 with 3.5 ("איזה מקום נוסף עלה בדעתך?"), 0/4 with B (she helped him find the name instead). **A not reproducible in text** -- at the 9 moments she skipped it for real, 3.5 reacted in 7/9 replayed step changes; A's parameter brought a reaction said twice, a turn with only the reaction, and an English "understood." -- shelved. The double questions didn't reproduce either (0/8 both).
+- **Next:** the real check is his sessions on 3.6 -- `python -m evals.session_metrics --account <email> --split-version 3.6`. If the reaction misses stay, revisit A with his recorded audio as the replayed answer (closest to the voice-only failure).
 
 ## Files
 | File | Purpose |

@@ -19,11 +19,12 @@ from google.genai import types
 from pydantic import BaseModel
 
 from app.config import REPO_ROOT, Settings
-from app.llm import text_client
+from app.llm import generate, text_client
 
 JUDGE_MODEL = "gemini-3.8-flash"
+FALLBACK_MODELS = [m.strip() for m in Settings().summary_fallback_models.split(",") if m.strip() and m.strip() != JUDGE_MODEL]
 PROMPT_PATH = REPO_ROOT / "prompts" / "eval_judge.yaml"
-BATCH = 25  # turns per call
+BATCH = 15  # turns per call (25 hit server deadlines on long sessions, 23.10)
 CACHE = Path(os.environ.get("EVALS_CACHE") or Path(tempfile.gettempdir()) / "hebrew_tutor_evals_judge_cache.json")
 
 
@@ -72,10 +73,11 @@ def judge_many(turns: list[tuple[str, str]]) -> list[Verdict]:
         chunk = todo[start:start + BATCH]
         listing = "\n\n".join(f"TURN {n}\nHE SAID: {turns[i][0] or '(nothing: the session starts)'}\nSHE SAID: {turns[i][1]}"
                               for n, i in enumerate(chunk, 1))
-        r = _client().models.generate_content(
-            model=JUDGE_MODEL, contents=f"Judge each turn below separately; return one verdict per TURN number.\n\n{listing}",
-            config=types.GenerateContentConfig(system_instruction=prompt()["judge"], response_mime_type="application/json",
-                                               response_schema=Batch, temperature=0))
+        r = generate(  # retries and falls back to other models (a 504 on a long batch, 23.10)
+            _client(), [JUDGE_MODEL, *FALLBACK_MODELS],
+            f"Judge each turn below separately; return one verdict per TURN number.\n\n{listing}",
+            types.GenerateContentConfig(system_instruction=prompt()["judge"], response_mime_type="application/json",
+                                        response_schema=Batch, temperature=0)).response
         got = r.parsed if isinstance(r.parsed, Batch) else Batch.model_validate_json(r.text)
         for v in got.verdicts:
             if 1 <= v.n <= len(chunk):

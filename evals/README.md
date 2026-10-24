@@ -11,6 +11,8 @@ Run from the repo root (they need `.env` and `gcloud auth application-default lo
 | `python -m evals.live_step_change --account <email> --session <id> --variant current --runs 3 --out <dir>` | Replays a real session's plan steps on **Gemini Live**, his answers as text, the page's rules simulated (the question guard, min answers). A variant changes one prompt rule; each run is saved as JSON. |
 | `python -m evals.score_step_change <dir>` | Scores those runs per variant with the judge (below). |
 | `python -m evals.audit_step_changes --account <email> --since 3.5` | The same check on **real sessions** (her first words after each step change) -- run after a prompt change, on the sessions since. |
+| `python -m evals.session_metrics --account <email> --sessions 12 --split-version 3.6` | **Before / after on real sessions** (N+1): the same measures on the sessions before a fix (the baseline) and after it -- no reaction at a step change, double questions, a greeting with 2+ questions, dangling turns, instructions read aloud, and repeated questions (code). `--split-date` instead of a version; `--examples` prints the flagged turns. |
+| `python -m evals.replay_turns --account <email> --runs 2 --out <dir>` | **Replays the flagged turns** of real sessions on Gemini Live: the session's own prompt (its fixed sections brought up to today's), the exact conversation up to his answer before the flagged turn (step changes as real `next_step` calls), then her turn again per variant -- judged: reacted at the step change, double questions, asked again. `--issues no_reaction,double_q,repeated`, `--only <session>:<turn>`, `--limit`. Runs `--parallel` replays at a time (default 5) and saves each as it finishes (`<dir>/replays.jsonl`): run the same command again to continue a stopped run; a changed prompt replays its points again. |
 | `python -m evals.check_judge` | Checks the judge against hand-labeled turns (`evals/judge_cases.yaml`): agreement per field, and the cases it gets wrong. Run after changing the judge's prompt or model; add a case whenever it gets one wrong. |
 
 ## The judge
@@ -60,3 +62,8 @@ before reaching him); the real check is `audit_step_changes` on his sessions aft
   first 24/24, nothing read aloud; the flagged double questions were the understanding items' intended
   multi-part requests (the judge now counts one ordered request as one -- prompt 1.3) and the greeting
   (plan 18); 5 dangling turns in a closing music topic, as before. The judge was batched and cached.
+- 23.10 (plan 18): `session_metrics` baseline on the patient's 6 sessions, then `replay_turns` on the 19
+  flagged turns: "never ask again" (B) fixed the re-asked question (2/4 -> 0/4); the reaction misses and
+  double questions didn't reproduce in text (3.5 reacted 7/9 at the real misses); the `reaction`
+  parameter (A) was shelved for its side effects. Deployed as tutor prompt 3.6 (B, the one-question
+  greeting, a stronger reaction rule); measured next on his real sessions.

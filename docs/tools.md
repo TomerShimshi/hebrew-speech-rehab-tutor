@@ -294,12 +294,12 @@ Set the session's ONE primary goal type (see the rotation rule) and why, in Engl
 
 ### `set_opening`
 
-The opening (always the first step). recall: ONE sentence she can use in her greeting, recalling something from last time (from the memory). opener: an easy, pleasant question at his level. Both in HEBREW, in her voice (a woman; masculine for him).
+The opening (always the first step). recall: ONE sentence she can use in her greeting, recalling something from last time (from the memory) -- a STATEMENT, not a question. opener: ONE easy, pleasant question at his level (one thing only). Both in HEBREW, in her voice (a woman; masculine for him).
 
 | Parameter | Type | Required | Allowed values | Description |
 |---|---|---|---|---|
-| `recall` | string |  |  | HEBREW: one sentence recalling last time, for her greeting. |
-| `opener` | string |  |  | HEBREW: an easy, pleasant opening question. |
+| `recall` | string |  |  | HEBREW: one sentence recalling last time, for her greeting -- a statement, not a question. |
+| `opener` | string |  |  | HEBREW: ONE easy, pleasant opening question (one thing only). |
 
 ### `place_names_game`
 
