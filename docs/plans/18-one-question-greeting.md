@@ -1,6 +1,6 @@
 # Sub-plan 18: She listens and asks well -- a reaction to every answer, one question at a time, never a question he answered
 
-Part of the [master design](00-master-design.md). After [17.5](17.5-practicing-the-missing-areas.md), before [19](19-names-goodbyes-and-excluded-sessions.md). Requested by Tomer (2026-10-22); extended 2026-10-23 after the patient's session of 22.10. **Built 23.10 as prompts (tutor 3.6): B, C and a stronger reaction rule; A (the `reaction` parameter) tested and shelved -- see Results.**
+Part of the [master design](00-master-design.md). After [17.5](17.5-practicing-the-missing-areas.md), before [19](19-observability.md). Requested by Tomer (2026-10-22); extended 2026-10-23 after the patient's session of 22.10. **Built 23.10 as prompts (tutor 3.6): B, C and a stronger reaction rule; A (the `reaction` parameter) tested and shelved -- see Results.**
 
 ## Why
 - **She sometimes ignores his answer (22.10, the patient):** after the story step he said "או, כל הזמן... הרבה פעמים", and her next turn went straight to the next topic -- not a word about it. This is the step change fixed by wording in 21.10 (tutor prompt 3.5): better (1 miss in 6 step changes in that session, ~1 in 3 before) but not solved. The text-mode evals can't reproduce it (21.10): it shows with voice, when the next step arrives and pushes the reaction out. He must never feel ignored.

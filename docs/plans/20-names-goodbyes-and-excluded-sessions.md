@@ -1,6 +1,6 @@
-# Sub-plan 19: Hearing the names right, a clean goodbye, and leaving a conversation out
+# Sub-plan 20: Hearing the names right, a clean goodbye, and leaving a conversation out
 
-Part of the [master design](00-master-design.md). After [18](18-one-question-greeting.md). (Was 13.5, then 14, then 15, then 16, then 17, then 18, until 2026-10-22.) Requested by Tomer (2026-10-11).
+Part of the [master design](00-master-design.md). After [19](19-observability.md). (Was 13.5, then 14, then 15, then 16, then 17, then 18, then 19, until 2026-10-24.) Requested by Tomer (2026-10-11).
 
 > **Revisit after 13, 13.5 and 14 are done.** 13 changes how a session runs (steps, a record of what was done, and maybe an optional gate on `end_session`). Parts of this plan depend on it: the noise filter off during the names game needs 13's "current step"; the goodbye rules must fit 13's `end_session` (gated or not). Re-read and adjust this plan before building it.
 
@@ -86,4 +86,4 @@ Part of the [master design](00-master-design.md). After [18](18-one-question-gre
 - [ ] `pytest` passes.
 
 ## Commit
-`Sub-plan 19: hearing the names right, a clean goodbye, and leaving a conversation out`
+`Sub-plan 20: hearing the names right, a clean goodbye, and leaving a conversation out`
