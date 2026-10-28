@@ -24,7 +24,7 @@ from pydantic import BaseModel
 
 from app.agent.memory_edit import MemoryEditError, remove_item, remove_word, restore_version
 from app.agent.memory_update import run_memory_update
-from app import billing_guard
+from app import billing_guard, telemetry
 from app.agent.next_class import _models, build_next_plan
 from app.agent.research import personal_terms
 from app.auth import User, require_caregiver
@@ -591,6 +591,7 @@ def memory_restore(
 
 
 @router.post("/{email}/export/translate", dependencies=[Depends(not_paused)])
+@telemetry.job("translate_export")
 def translate_export(
     texts: list[str] = Body(..., embed=True),
     pid: str = Depends(account),

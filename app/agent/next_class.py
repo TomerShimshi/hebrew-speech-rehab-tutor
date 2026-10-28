@@ -19,6 +19,7 @@ from functools import lru_cache
 import yaml
 from google.genai import types
 
+from app import telemetry
 from app import check_in_set, missing_areas, probes, progress, sequencing, summarizing, word_bank
 from app.agent.memory_update import format_memory
 from app.agent.research import personal_terms, research_technique, search_available
@@ -62,6 +63,7 @@ TOO_FAMOUS = {"ירושלים", "תל אביב", "תל אביב יפו", "תל-�
 
 def _log(message: str) -> None:
     print(f"[next_class] {message}", file=sys.stderr, flush=True)
+    telemetry.note(f"[next_class] {message}")  # also in the running agent's log (19)
 
 
 @lru_cache
@@ -472,6 +474,7 @@ def propose_check_in_set(store, client, settings, pid, sid, context, memory_raw,
     return None
 
 
+@telemetry.job("next_plan")
 def build_next_plan(
     store: SessionStore,
     client,

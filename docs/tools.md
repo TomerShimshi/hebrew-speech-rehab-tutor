@@ -75,6 +75,24 @@ The loop is ours, not the SDK's automatic function calling (`app/agent/runner.py
 - **The results** the tools produced are on the session and the caregiver page: the summary, word
   results, names game, sequencing score, needs, flags and tutor issues, the steps of the next plan.
 - The archive keeps the exact prompt each live session got (the private bucket, 30 days).
+- **Traces (sub-plan 19)**, in the Google Cloud console (not the caregiver page), `app/telemetry.py`:
+  - **Cloud Trace** (Trace Explorer): **a trace per agent**, every span named after it --
+    `memory-agent` > `memory-agent: round N` > `memory-agent: generate_content` (model, attempts and
+    fallbacks, latency, tokens, estimated cost; the conversation on the **Inputs/Outputs** tab) and
+    `memory-agent: tool <name>` (the full arguments and result); `plan-builder` the same, with its
+    research inside (`plan-builder: research ...`); `tutor` (each live session) > `tutor: step N:
+    <kind>` > `tutor: him` / `tutor: her` (each turn), the held calls as events, the usage Gemini
+    Live reported, her response times, reconnects, and her prompt and the conversation on the
+    Inputs/Outputs tab. Every span shows the totals under it (`app.total.cost_usd`, tokens, model
+    calls). Filter by agent (`app.agent:plan-builder`), user (`app.account:<login email>`) or session
+    (`app.session_id`).
+  - **Cloud Logging**, a log per agent (`memory-agent`, `plan-builder`, `tutor`, `translate`):
+    everything it did -- its own lines (tool calls, fallbacks, notes), a short `llm_call` line per
+    model call and the full prompt (`llm_content`), each linked to its span and labelled `agent` and `account`
+    (one user's logs: `labels.account="<login email>"`).
+  - **Cloud Monitoring**: the dashboard "Hebrew tutor: models, cost and latency" (cost per day by
+    job and model, calls, latency, her response time, tokens, failures), from log-based metrics
+    (`deploy/setup_monitoring.sh`). Costs are estimates from token counts; the bill is the truth.
 
 ## The live tutor's tools (different: in the browser)
 

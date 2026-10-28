@@ -1,0 +1,222 @@
+{
+ "displayName": "Hebrew tutor: models, cost and latency",
+ "mosaicLayout": {
+  "columns": 12,
+  "tiles": [
+   {
+    "xPos": 0,
+    "yPos": 0,
+    "width": 6,
+    "height": 4,
+    "widget": {
+     "title": "Estimated cost per day, by job (USD)",
+     "xyChart": {
+      "dataSets": [
+       {
+        "timeSeriesQuery": {
+         "prometheusQuery": "sum by (job) (increase(logging_googleapis_com:user_llm_cost_usd_sum[1d]))",
+         "unitOverride": "USD"
+        },
+        "plotType": "STACKED_BAR",
+        "legendTemplate": "${labels.job}",
+        "targetAxis": "Y1"
+       },
+       {
+        "timeSeriesQuery": {
+         "prometheusQuery": "sum(increase(logging_googleapis_com:user_live_cost_usd_sum[1d]))",
+         "unitOverride": "USD"
+        },
+        "plotType": "STACKED_BAR",
+        "legendTemplate": "live sessions",
+        "targetAxis": "Y1"
+       }
+      ],
+      "timeshiftDuration": "0s",
+      "yAxis": {
+       "scale": "LINEAR"
+      }
+     }
+    }
+   },
+   {
+    "xPos": 6,
+    "yPos": 0,
+    "width": 6,
+    "height": 4,
+    "widget": {
+     "title": "Estimated cost per day, by model (USD)",
+     "xyChart": {
+      "dataSets": [
+       {
+        "timeSeriesQuery": {
+         "prometheusQuery": "sum by (model) (increase(logging_googleapis_com:user_llm_cost_usd_sum[1d]))",
+         "unitOverride": "USD"
+        },
+        "plotType": "STACKED_BAR",
+        "legendTemplate": "${labels.model}",
+        "targetAxis": "Y1"
+       }
+      ],
+      "timeshiftDuration": "0s",
+      "yAxis": {
+       "scale": "LINEAR"
+      }
+     }
+    }
+   },
+   {
+    "xPos": 0,
+    "yPos": 4,
+    "width": 6,
+    "height": 4,
+    "widget": {
+     "title": "Model calls per hour, by job",
+     "xyChart": {
+      "dataSets": [
+       {
+        "timeSeriesQuery": {
+         "prometheusQuery": "sum by (job) (increase(logging_googleapis_com:user_llm_latency_ms_count[1h]))"
+        },
+        "plotType": "STACKED_BAR",
+        "legendTemplate": "${labels.job}",
+        "targetAxis": "Y1"
+       }
+      ],
+      "timeshiftDuration": "0s",
+      "yAxis": {
+       "scale": "LINEAR"
+      }
+     }
+    }
+   },
+   {
+    "xPos": 6,
+    "yPos": 4,
+    "width": 6,
+    "height": 4,
+    "widget": {
+     "title": "Model call latency (ms), p50 and p95, by job",
+     "xyChart": {
+      "dataSets": [
+       {
+        "timeSeriesQuery": {
+         "prometheusQuery": "histogram_quantile(0.5, sum by (le, job) (rate(logging_googleapis_com:user_llm_latency_ms_bucket[1h])))",
+         "unitOverride": "ms"
+        },
+        "plotType": "LINE",
+        "legendTemplate": "p50 ${labels.job}",
+        "targetAxis": "Y1"
+       },
+       {
+        "timeSeriesQuery": {
+         "prometheusQuery": "histogram_quantile(0.95, sum by (le, job) (rate(logging_googleapis_com:user_llm_latency_ms_bucket[1h])))",
+         "unitOverride": "ms"
+        },
+        "plotType": "LINE",
+        "legendTemplate": "p95 ${labels.job}",
+        "targetAxis": "Y1"
+       }
+      ],
+      "timeshiftDuration": "0s",
+      "yAxis": {
+       "scale": "LINEAR"
+      }
+     }
+    }
+   },
+   {
+    "xPos": 0,
+    "yPos": 8,
+    "width": 6,
+    "height": 4,
+    "widget": {
+     "title": "Her response time (ms): his last words to her first output",
+     "xyChart": {
+      "dataSets": [
+       {
+        "timeSeriesQuery": {
+         "prometheusQuery": "histogram_quantile(0.5, sum by (le) (rate(logging_googleapis_com:user_live_response_ms_bucket[1h])))",
+         "unitOverride": "ms"
+        },
+        "plotType": "LINE",
+        "legendTemplate": "p50",
+        "targetAxis": "Y1"
+       },
+       {
+        "timeSeriesQuery": {
+         "prometheusQuery": "histogram_quantile(0.9, sum by (le) (rate(logging_googleapis_com:user_live_response_ms_bucket[1h])))",
+         "unitOverride": "ms"
+        },
+        "plotType": "LINE",
+        "legendTemplate": "p90",
+        "targetAxis": "Y1"
+       }
+      ],
+      "timeshiftDuration": "0s",
+      "yAxis": {
+       "scale": "LINEAR"
+      }
+     }
+    }
+   },
+   {
+    "xPos": 6,
+    "yPos": 8,
+    "width": 6,
+    "height": 4,
+    "widget": {
+     "title": "Tokens per day, by job",
+     "xyChart": {
+      "dataSets": [
+       {
+        "timeSeriesQuery": {
+         "prometheusQuery": "sum by (job) (increase(logging_googleapis_com:user_llm_input_tokens_sum[1d]))"
+        },
+        "plotType": "STACKED_BAR",
+        "legendTemplate": "in ${labels.job}",
+        "targetAxis": "Y1"
+       },
+       {
+        "timeSeriesQuery": {
+         "prometheusQuery": "sum by (job) (increase(logging_googleapis_com:user_llm_output_tokens_sum[1d]))"
+        },
+        "plotType": "STACKED_BAR",
+        "legendTemplate": "out ${labels.job}",
+        "targetAxis": "Y1"
+       }
+      ],
+      "timeshiftDuration": "0s",
+      "yAxis": {
+       "scale": "LINEAR"
+      }
+     }
+    }
+   },
+   {
+    "xPos": 0,
+    "yPos": 12,
+    "width": 6,
+    "height": 4,
+    "widget": {
+     "title": "Model attempts that failed or were skipped, per hour",
+     "xyChart": {
+      "dataSets": [
+       {
+        "timeSeriesQuery": {
+         "prometheusQuery": "sum(increase(logging_googleapis_com:user_llm_failures[1h]))"
+        },
+        "plotType": "STACKED_BAR",
+        "legendTemplate": "failed / skipped",
+        "targetAxis": "Y1"
+       }
+      ],
+      "timeshiftDuration": "0s",
+      "yAxis": {
+       "scale": "LINEAR"
+      }
+     }
+    }
+   }
+  ]
+ }
+}

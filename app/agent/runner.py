@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 
 from google.genai import types
 
+from app import telemetry
 from app.llm import generate
 
 
@@ -47,6 +48,7 @@ class AgentRun:
 
 def _log(message: str) -> None:
     print(f"[agent] {message}", file=sys.stderr, flush=True)
+    telemetry.note(f"[agent] {message}")  # also in the running agent's log (19)
 
 
 def run_tool_loop(
@@ -65,38 +67,47 @@ def run_tool_loop(
         tools=[types.Tool(function_declarations=[t.declaration() for t in tools])],
         automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
         temperature=0.2,  # careful bookkeeping, not creativity
+        # thought summaries in the traces (19), when switched on
+        thinking_config=types.ThinkingConfig(include_thoughts=True) if telemetry.thoughts_on() else None,
     )
     contents: list[types.Content] = [types.Content(role="user", parts=[types.Part(text=user_content)])]
     run = AgentRun()
 
-    for _ in range(max_rounds):
-        result = generate_fn(client, models, contents, config)
-        run.rounds += 1
-        run.attempts += result.attempts
-        run.models.append(result.model)
-        response = result.response
-        calls = response.function_calls or []
-        if not calls:
-            run.final_text = response.text or ""
-            return run
-        # Keep the model's turn (with its function calls) in the history, then answer each.
-        contents.append(response.candidates[0].content)
-        reply_parts = []
-        for call in calls:
-            args = dict(call.args or {})
-            tool = registry.get(call.name)
-            try:
-                if tool is None:
-                    raise ValueError(f"unknown tool {call.name!r}")
-                output, ok = tool.handler(args), True
-            except Exception as exc:  # noqa: BLE001 -- reported back to the model
-                output, ok = {"error": str(exc)[:300]}, False
-            run.calls.append(ToolCallRecord(name=call.name, args=args, ok=ok, result=output))
-            _log(f"{call.name}({str(args)[:120]}) -> {'ok' if ok else output['error'][:120]}")
-            reply_parts.append(types.Part(function_response=types.FunctionResponse(
-                id=call.id, name=call.name, response=output,
-            )))
-        contents.append(types.Content(role="user", parts=reply_parts))
+    for n in range(1, max_rounds + 1):
+        # A span per round (19): the model call, then each tool call it asked for.
+        with telemetry.span(telemetry.name(f"round {n}"), **{"app.round": n}) as round_span:
+            result = generate_fn(client, models, contents, config)
+            run.rounds += 1
+            run.attempts += result.attempts
+            run.models.append(result.model)
+            response = result.response
+            calls = response.function_calls or []
+            telemetry.set_attrs(round_span, **{"app.tools_called": ",".join(c.name for c in calls) or None})
+            if not calls:
+                run.final_text = response.text or ""
+                return run
+            # Keep the model's turn (with its function calls) in the history, then answer each.
+            contents.append(response.candidates[0].content)
+            reply_parts = []
+            for call in calls:
+                args = dict(call.args or {})
+                tool = registry.get(call.name)
+                with telemetry.span(telemetry.name(f"tool {call.name}"), **{"gen_ai.operation.name": "execute_tool",
+                                                            "gen_ai.tool.name": call.name,
+                                                            "app.tool.args": args}) as tool_span:
+                    try:
+                        if tool is None:
+                            raise ValueError(f"unknown tool {call.name!r}")
+                        output, ok = tool.handler(args), True
+                    except Exception as exc:  # noqa: BLE001 -- reported back to the model
+                        output, ok = {"error": str(exc)[:300]}, False
+                    telemetry.set_attrs(tool_span, **{"app.tool.ok": ok, "app.tool.result": output})
+                run.calls.append(ToolCallRecord(name=call.name, args=args, ok=ok, result=output))
+                _log(f"{call.name}({str(args)[:120]}) -> {'ok' if ok else output['error'][:120]}")
+                reply_parts.append(types.Part(function_response=types.FunctionResponse(
+                    id=call.id, name=call.name, response=output,
+                )))
+            contents.append(types.Content(role="user", parts=reply_parts))
 
     run.hit_round_limit = True
     _log(f"stopped after {max_rounds} rounds")

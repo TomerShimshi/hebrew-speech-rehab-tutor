@@ -135,6 +135,12 @@ function onTutorOutput() {
   if (!s.modelActive) {
     s.modelActive = true;
     s.recBase = s.recCount;
+    // Her response time (19): his last transcribed words -> her first output, once per answer of his
+    // (only speech after her previous turn ended: a late transcript chunk isn't a new answer).
+    if (s.heardAt > (s.measuredFrom || 0) && s.heardAt > (s.lastTutorEndAt || 0) && s.live.response_ms.length < 300) {
+      s.live.response_ms.push(Math.round(performance.now() - s.heardAt));
+      s.measuredFrom = s.heardAt;
+    }
     log("turn", "tutor turn started");
     // The question gate (13.5): she already asked him something since he last spoke, and this new
     // turn isn't an answer to one of our notes -- then it would be a second question in a row.
@@ -256,6 +262,7 @@ function setUserLive(text) {
 
 function addUserFinal(text) {
   s.lastUserAt = performance.now();
+  s.heardAt = s.lastUserAt; // the end of his speech, as near as the page can tell (19)
   heSpoke();
   log("in", `gemini heard: ${text}`);
   const u = ensureUserLine();
@@ -489,7 +496,7 @@ async function finishRemote(sess, reason) {
   await flushTurns(sess, { keepalive: true });
   try {
     log("save", `session ended (${reason}); updating memory…`);
-    const res = await api(`api/session/${sess.sessionId}/end`, { reason, steps_done: sess.stepsDone || [], steps_held: sess.stepsHeld || [] },
+    const res = await api(`api/session/${sess.sessionId}/end`, { reason, steps_done: sess.stepsDone || [], steps_held: sess.stepsHeld || [], live: sess.live },
                           { keepalive: true });
     const body = await res.json().catch(() => ({}));
     log("save", `memory update: ${body.memory_status ?? res.status}`);
@@ -524,6 +531,7 @@ async function openSocket(isResume) {
 async function reconnect() {
   if (s.reconnects >= 3) return endSession("החיבור נותק. אפשר להתחיל אימון חדש.");
   s.reconnects += 1;
+  s.live.reconnects += 1;
   setIndicator("connecting");
   try {
     await openSocket(true);
@@ -532,7 +540,20 @@ async function reconnect() {
   }
 }
 
+// Gemini Live's usage reports, added up for the session's trace (19). Whether each report is per
+// turn or a running total isn't documented: the largest single total is kept too, to tell.
+function addUsage(u) {
+  const L = s.live;
+  L.usage_reports += 1;
+  L.prompt_tokens += u.promptTokenCount || 0;
+  L.response_tokens += u.responseTokenCount || 0;
+  L.max_report_total = Math.max(L.max_report_total, u.totalTokenCount || 0);
+  for (const d of u.promptTokensDetails || []) if (d.modality === "AUDIO") L.audio_in_tokens += d.tokenCount || 0;
+  for (const d of u.responseTokensDetails || []) if (d.modality === "AUDIO") L.audio_out_tokens += d.tokenCount || 0;
+}
+
 function handleServerMessage(msg, isResume) {
+  if (msg.usageMetadata && s?.live) addUsage(msg.usageMetadata);
   if (msg.setupComplete) {
     log("ws", "setupComplete");
     s.reconnects = 0;
@@ -547,6 +568,7 @@ function handleServerMessage(msg, isResume) {
   }
   if (msg.goAway) {
     log("ws", "goAway");
+    s.live.go_aways += 1;
     // Server will close soon; switch to a fresh connection proactively.
     const old = s.ws;
     reconnect().then(() => old.close());
@@ -715,6 +737,10 @@ async function startSession() {
     lastUserText: "", sessionId: null, nextSeq: 0, dirty: new Set(), flushing: false, muted: false,
     tapToTalk: false, speaking: false, noiseLevel: 0, gateOpen: false, loudSince: 0, gateBuffer: [],
     recorder: null, recChunks: [], recMicGain: null,
+    // for the session's trace (19): Gemini Live's usage reports, her response times, the connection
+    live: { prompt_tokens: 0, response_tokens: 0, audio_in_tokens: 0, audio_out_tokens: 0, usage_reports: 0,
+            max_report_total: 0, response_ms: [], reconnects: 0, go_aways: 0 },
+    heardAt: 0, measuredFrom: 0,
   };
   try {
     s.audio = await startAudio(); // inside the click handler: required to unlock audio on tablets

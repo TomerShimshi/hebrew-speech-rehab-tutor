@@ -1,6 +1,6 @@
 # Sub-plan 19: Seeing inside every step -- traces, inputs and outputs, latency and cost in Google Cloud
 
-Part of the [master design](00-master-design.md). After [18](18-one-question-greeting.md), before [20](20-names-goodbyes-and-excluded-sessions.md). Requested by Tomer (2026-10-24). **To build -- as a trial of Cloud Trace: after seeing its pages we keep it, or switch the viewer (see E).**
+Part of the [master design](00-master-design.md). After [18](18-one-question-greeting.md), before [20](20-names-goodbyes-and-excluded-sessions.md). Requested by Tomer (2026-10-24). **Built 25.10 -- a trial of Cloud Trace: after seeing its pages we keep it, or switch the viewer (see E).** Built as designed; the dashboard and its log-based metrics are created by `deploy/setup_monitoring.sh` (run by `setup_gcp.sh`), and thought summaries are off until `TRACE_THOUGHTS=true` in `.env` (after the dry run). The 64 KiB test (B) was accepted by the Telemetry API but can only be read in the console: the Cloud Trace API can't read spans sent through the Telemetry API (a known gap). **Fixed 28.10:** the per-agent log entries are buffered and written when the job ends, so they all carried the write time; each entry now has its own `timestamp`, so a job's log keeps its order and gaps. **Added 28.10:** the user (`app.account`, the login email) on every span and as a log label (`labels.account`), to filter one user's traces and logs.
 
 ## Why
 - **Today we see what the agents did, not why or at what price.**

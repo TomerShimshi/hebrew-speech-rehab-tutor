@@ -52,10 +52,27 @@ class StepHeld(BaseModel):
     at_s: float = Field(default=0, ge=0)
 
 
+class LiveStats(BaseModel):
+    """What the page saw of the live session (19), for its trace: the usage Gemini Live reported,
+    her response times, the connection's troubles."""
+    prompt_tokens: int = Field(default=0, ge=0)  # summed over the usage reports
+    response_tokens: int = Field(default=0, ge=0)
+    audio_in_tokens: int = Field(default=0, ge=0)
+    audio_out_tokens: int = Field(default=0, ge=0)
+    usage_reports: int = Field(default=0, ge=0)
+    # the largest single report's total: if the reports are running totals (not per turn), this,
+    # not the sum, is the session's usage -- kept to tell which (19.F)
+    max_report_total: int = Field(default=0, ge=0)
+    response_ms: list[int] = Field(default=[], max_length=300)  # end of his speech -> her first output
+    reconnects: int = Field(default=0, ge=0)
+    go_aways: int = Field(default=0, ge=0)
+
+
 class EndRequest(BaseModel):
     reason: EndReason = EndReason.end_button
     steps_done: list[StepDone] = Field(default=[], max_length=40)  # steps mode (13)
     steps_held: list[StepHeld] = Field(default=[], max_length=60)
+    live: LiveStats | None = None  # the session's trace (19)
 
 
 def turn_doc_id(seq: int) -> str:

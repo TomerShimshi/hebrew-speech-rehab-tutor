@@ -1,0 +1,20 @@
+description: "A model call's estimated cost (sub-plan 19)"
+filter: 'resource.type="cloud_run_revision" AND resource.labels.service_name="hebrew-tutor" AND jsonPayload.event="llm_call"'
+metricDescriptor:
+  metricKind: DELTA
+  valueType: DISTRIBUTION
+  unit: "USD"
+  labels:
+  - key: model
+    valueType: STRING
+  - key: job
+    valueType: STRING
+valueExtractor: EXTRACT(jsonPayload.cost_usd)
+labelExtractors:
+  model: EXTRACT(jsonPayload.model)
+  job: EXTRACT(jsonPayload.job)
+bucketOptions:
+  exponentialBuckets:
+    numFiniteBuckets: 24
+    growthFactor: 2
+    scale: 0.00001

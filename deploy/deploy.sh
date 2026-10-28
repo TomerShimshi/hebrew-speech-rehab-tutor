@@ -61,6 +61,9 @@ ENV_VARS+="|PROMPT_ARCHIVE_URI=gs://${PROJECT_ID}-private/debug/prompts"
 # Session recordings (09), caregiver page only; deleted after 90 days (bucket lifecycle rule).
 ENV_VARS+="|AUDIO_URI_PREFIX=gs://${PROJECT_ID}-private/audio"
 ENV_VARS+="|VAPID_PUBLIC_KEY=$(dotenv VAPID_PUBLIC_KEY)"
+# Traces (19): Cloud Trace + Cloud Logging; thought summaries only when .env says so.
+TRACE_THOUGHTS="$(dotenv TRACE_THOUGHTS)"
+ENV_VARS+="|TELEMETRY_ENABLED=true|TRACE_THOUGHTS=${TRACE_THOUGHTS:-false}"
 
 gcloud run deploy "$SERVICE" \
   --source . \

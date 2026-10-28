@@ -13,6 +13,7 @@ from functools import lru_cache
 
 import yaml
 
+from app import telemetry
 from app import check_in_set, missing_areas, probes, sequencing, summarizing
 from app.steps import AreaProbeStep, SequencingStep, StoryProbeStep, SummaryStep, ViewStep
 from app.agent.memory_tools import Inferring, MemoryDraft, add_vocabulary, build_memory_tools
@@ -33,6 +34,7 @@ RECENT_SUMMARIES = 5
 
 def _log(message: str) -> None:
     print(f"[memory] {message}", file=sys.stderr, flush=True)
+    telemetry.note(f"[memory] {message}")  # also in the running agent's log (19)
 
 
 @lru_cache
@@ -152,6 +154,7 @@ def summarizing_result(plan, reported: dict | None) -> dict | None:
             "low_confidence": reported["low_confidence"], "note": reported.get("note", "")}
 
 
+@telemetry.job("memory_update")
 def run_memory_update(
     store: SessionStore,
     client,

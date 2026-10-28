@@ -67,7 +67,11 @@ gcloud services enable \
   firebaserules.googleapis.com \
   identitytoolkit.googleapis.com \
   firebase.googleapis.com \
-  cloudscheduler.googleapis.com
+  cloudscheduler.googleapis.com \
+  telemetry.googleapis.com \
+  observability.googleapis.com \
+  logging.googleapis.com \
+  monitoring.googleapis.com
 
 echo ">> Gemini API key secret..."
 if ! gcloud secrets describe "$SECRET_NAME" >/dev/null 2>&1; then
@@ -142,6 +146,11 @@ if ! gcloud firestore databases describe --database="(default)" >/dev/null 2>&1;
 fi
 gcloud projects add-iam-policy-binding "$PROJECT_ID" \
   --member="serviceAccount:${RUNTIME_SA}" --role="roles/datastore.user" --condition=None >/dev/null
+
+echo ">> Traces (sub-plan 19): the app writes spans to Cloud Trace (the Telemetry API)..."
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member="serviceAccount:${RUNTIME_SA}" --role="roles/telemetry.tracesWriter" --condition=None >/dev/null
+./deploy/setup_monitoring.sh  # the log-based metrics and the dashboard
 
 echo ">> Firestore security rules (deny all client access)..."
 TOKEN="$(gcv auth print-access-token)"

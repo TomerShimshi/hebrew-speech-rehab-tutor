@@ -72,6 +72,10 @@ class Settings(BaseSettings):
     )
     memory_max_tool_rounds: int = 8
 
+    # Traces (sub-plan 19): Cloud Trace + Cloud Logging. On in Cloud Run (deploy.sh), off locally.
+    telemetry_enabled: bool = False
+    trace_thoughts: bool = False  # the agents return thought summaries, shown in the traces
+
     # Research sub-agent (sub-plan 07): Tavily web search, free 1,000 searches/month.
     # Without a key, research is simply skipped.
     tavily_api_key: str = ""

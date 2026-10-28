@@ -8,6 +8,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from fastapi import Body, Depends, FastAPI, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from google import genai
@@ -23,7 +24,7 @@ from app.steps import min_answers
 from app.patient_profile import account_profile, extract_vocabulary
 from app.prompt_archive import PromptArchive
 from app.schemas import VoiceSettings
-from app import billing_guard
+from app import billing_guard, telemetry
 from app.voice_tuning import adjust_after_session, current_settings
 from app.session_prompt import build_session_prompt
 from app.rate_limit import SlidingWindowLimiter
@@ -40,6 +41,17 @@ from app.transcripts import EndRequest, TurnsBatch
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 app = FastAPI(title="Hebrew Speech Rehab Tutor")
+telemetry.setup(get_settings())  # traces (19): only with telemetry_enabled (Cloud Run)
+
+
+@app.middleware("http")
+async def flush_traces(request: Request, call_next):
+    """Sends this request's spans before the response goes out: Cloud Run throttles the CPU after
+    it, and a background export could stall (19)."""
+    response = await call_next(request)
+    if telemetry.enabled():
+        await run_in_threadpool(telemetry.flush)
+    return response
 
 
 @app.middleware("http")
@@ -400,6 +412,8 @@ def end_session(
     if body.steps_done or body.steps_held:  # what she reported finished, in order; and the held calls
         store.update_session(pid, session_id, {"steps_done": [s.model_dump() for s in body.steps_done],
                                                "steps_held": [h.model_dump() for h in body.steps_held]})
+    if body.live:  # the live session's own trace (19)
+        telemetry.record_live_session(store, pid, session_id, store.get_session(pid, session_id) or {}, body)
     # Update the tutor's memory now, inside this request (Cloud Run throttles CPU after the
     # response). The browser doesn't wait: it sent this with keepalive and moved on.
     # Failures are recorded and retried by the hourly sweep.

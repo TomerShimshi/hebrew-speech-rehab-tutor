@@ -28,6 +28,8 @@ from functools import lru_cache
 from google import genai
 from google.genai import errors, types
 
+from app import telemetry
+
 RETRYABLE_CODES = {500, 502}
 # Skip straight to the next model (retrying the same one can't help):
 #  404 = model not available (seen live: gemini-2.5-flash "no longer available to new users")
@@ -65,6 +67,7 @@ class LLMResult:
 
 def _log(message: str) -> None:
     print(f"[llm] {message}", file=sys.stderr, flush=True)
+    telemetry.note(f"[llm] {message}")  # also in the running agent's log (19)
 
 
 @lru_cache
@@ -104,33 +107,42 @@ def generate(
     sleep: Callable[[float], None] | None = None,  # default: time.sleep (looked up at call time)
     deadline: float | None = None,  # time.monotonic() value; stop trying after it
 ) -> LLMResult:
-    sleep = sleep or time.sleep
-    attempts = 0
-    last_error: Exception | None = None
-    for chain_pass in range(CHAIN_PASSES):
-        if chain_pass:
-            if deadline is not None and time.monotonic() + PASS_PAUSE_S > deadline:
-                break
-            _log(f"every model failed; one more pass in {PASS_PAUSE_S}s")
-            sleep(PASS_PAUSE_S)
-        for model in _order(models):
-            for attempt in range(attempts_per_model):
-                if deadline is not None and time.monotonic() > deadline:
-                    raise LLMUnavailable(f"time budget exhausted after {attempts} attempts: {last_error!s:.200}")
-                attempts += 1
-                try:
-                    response = client.models.generate_content(model=model, contents=contents, config=config)
-                    return LLMResult(response=response, model=model, attempts=attempts)
-                except Exception as exc:  # noqa: BLE001 -- classified just below
-                    last_error = exc
-                    if _skips_model(exc):
-                        _cooling_until[model] = time.monotonic() + COOLDOWN_S
-                        _log(f"{model} unavailable ({getattr(exc, 'code', type(exc).__name__)}): "
-                             f"skipped for {COOLDOWN_S // 60} min; trying the next model")
-                        break
-                    if not _is_retryable(exc):
-                        raise
-                    _log(f"{model} attempt {attempt + 1} failed: {exc!s:.120}")
-                    if attempt < attempts_per_model - 1:
-                        sleep(backoff_s[min(attempt, len(backoff_s) - 1)])
-    raise LLMUnavailable(f"all models failed after {attempts} attempts: {last_error!s:.200}")
+    # One span for the whole call, retries and fallbacks included (19): each failed try is an event.
+    with telemetry.llm_span(models[0] if models else "") as sp:
+        started = time.monotonic()
+        sleep = sleep or time.sleep
+        attempts = 0
+        tried: list[str] = []
+        last_error: Exception | None = None
+        for chain_pass in range(CHAIN_PASSES):
+            if chain_pass:
+                if deadline is not None and time.monotonic() + PASS_PAUSE_S > deadline:
+                    break
+                _log(f"every model failed; one more pass in {PASS_PAUSE_S}s")
+                sleep(PASS_PAUSE_S)
+            for model in _order(models):
+                for attempt in range(attempts_per_model):
+                    if deadline is not None and time.monotonic() > deadline:
+                        raise LLMUnavailable(f"time budget exhausted after {attempts} attempts: {last_error!s:.200}")
+                    attempts += 1
+                    tried.append(model)
+                    try:
+                        response = client.models.generate_content(model=model, contents=contents, config=config)
+                        telemetry.record_generation(sp, model=model, attempts=attempts, tried=tried, started=started,
+                                                    response=response, contents=contents, config=config)
+                        return LLMResult(response=response, model=model, attempts=attempts)
+                    except Exception as exc:  # noqa: BLE001 -- classified just below
+                        last_error = exc
+                        if sp.is_recording():
+                            sp.add_event("attempt failed", {"model": model, "error": f"{exc!s:.300}"})
+                        if _skips_model(exc):
+                            _cooling_until[model] = time.monotonic() + COOLDOWN_S
+                            _log(f"{model} unavailable ({getattr(exc, 'code', type(exc).__name__)}): "
+                                 f"skipped for {COOLDOWN_S // 60} min; trying the next model")
+                            break
+                        if not _is_retryable(exc):
+                            raise
+                        _log(f"{model} attempt {attempt + 1} failed: {exc!s:.120}")
+                        if attempt < attempts_per_model - 1:
+                            sleep(backoff_s[min(attempt, len(backoff_s) - 1)])
+        raise LLMUnavailable(f"all models failed after {attempts} attempts: {last_error!s:.200}")

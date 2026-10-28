@@ -21,6 +21,7 @@ from functools import lru_cache
 import yaml
 from google.genai import types
 
+from app import telemetry
 from app.agent.runner import Tool, run_tool_loop
 from app.config import REPO_ROOT, Settings
 from app.llm import generate
@@ -63,6 +64,7 @@ WEB_SEARCH_TOOL = dict(
 
 def _log(message: str) -> None:
     print(f"[research] {message}", file=sys.stderr, flush=True)
+    telemetry.note(f"[research] {message}")  # also in the running agent's log (19)
 
 
 @lru_cache
@@ -154,6 +156,7 @@ def verify_findings(findings: ResearchFindings, returned: dict[str, dict]) -> tu
     return kept, dropped
 
 
+@telemetry.job("research")
 def research_technique(
     store: SessionStore,
     client,

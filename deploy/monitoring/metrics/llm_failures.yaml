@@ -1,0 +1,6 @@
+description: "A model attempt that failed or was skipped (sub-plan 19)"
+filter: 'resource.type="cloud_run_revision" AND resource.labels.service_name="hebrew-tutor" AND textPayload:"[llm]" AND (textPayload:"unavailable" OR textPayload:"failed")'
+metricDescriptor:
+  metricKind: DELTA
+  valueType: INT64
+  unit: "1"
