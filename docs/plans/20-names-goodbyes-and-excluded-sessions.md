@@ -64,6 +64,11 @@ Part of the [master design](00-master-design.md). After [19](19-observability.md
 - **Then the next lesson is rebuilt** without it (the existing rebuild), if it was the session the current plan was built after.
 - **Putting it back** clears the flag. If it was never processed, it's processed then (as "process now" does today). If its memory was restored away, it is processed again.
 
+### D. The plan builder's techniques without our file notes (added 2026-10-28)
+- **Seen in a plan-builder trace (19, 28.10):** its prompt says "see docs/plans/00-master-design.md". `techniques_text()` (`app/agent/next_class.py`) pastes `prompts/therapy_techniques.yaml` into the prompt word for word (`# TECHNIQUES YOU MAY USE`), so the file's `#` comments for us, and its `prompt_version` line, go in too. It can't open the file (it has no file tool), so this does no harm, but it's noise and points to a source it can't see.
+- **Fix:** the prompt gets only the techniques: drop the `#` comment lines and the `prompt_version` line (or load the YAML and print the techniques). The file keeps its comments.
+- **The same in the names-game set call:** Gemini's SDK sends a Pydantic class's docstring as the schema's `description`, so `CheckInProposal` ("The plan builder's proposal for a new names-game set (12).") and `CheckInItem` ("One name in the names game (12): ...") in `app/schemas.py` reach the model with our plan numbers. **Fix:** drop the "(12)" from those docstrings (or make them `#` comments). Checked 28.10: every other prompt file is parsed as YAML (comments dropped), and the other structured outputs (`ResearchFindings`, `Translations`) and all tool descriptions are clean.
+
 ## Files
 | File | Purpose |
 |---|---|
@@ -76,13 +81,16 @@ Part of the [master design](00-master-design.md). After [19](19-observability.md
 | `app/agent/memory_update.py`, `app/agent/next_class.py`, `app/session_prompt.py`, `app/voice_tuning.py`, `app/caregiver_api.py` | Skip left-out sessions (the table above). |
 | `app/check_in_set.py`, `app/agent/memory_edit.py` | Remove a session's names-game results and summary; restore before it. |
 | `app/caregiver_api.py`, `static/caregiver.*` | Exclude / put back, the chip, the restore offer, the "show left-out" toggle. |
-| `tests/` | The recheck (agree / disagree / no recording); the goodbye rules (a misheard goodbye, one refusal, two lines); every place in the table; restore when latest vs not; putting back. |
+| `app/agent/next_class.py` | The techniques in the prompt without the file's comments and version (D). |
+| `app/schemas.py` | No plan numbers in the docstrings of `CheckInProposal` and `CheckInItem`, which are sent as schema descriptions (D). |
+| `tests/` | The techniques text has no `#` lines, and the schemas sent to Gemini have no plan numbers (D); the recheck (agree / disagree / no recording); the goodbye rules (a misheard goodbye, one refusal, two lines); every place in the table; restore when latest vs not; putting back. |
 
 ## Done when
 - [ ] A names-game answer the live model misheard is corrected from the recording, and shown as a tutor issue.
 - [ ] A goodbye misheard by one transcript still ends the session after her goodbye; never more than one refusal.
 - [ ] No `<...>` transcription markers in the captions, the saved transcript or the memory agent's input.
 - [ ] A conversation left out is visible and marked, but changes nothing in the memory, plan, names game, pace, timing or graphs; putting it back works.
+- [ ] The plan builder's prompt has the techniques only: no file comments, no `docs/` references; the names-game set's schema has no plan numbers.
 - [ ] `pytest` passes.
 
 ## Commit
