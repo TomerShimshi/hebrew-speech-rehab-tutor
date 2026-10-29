@@ -1,6 +1,6 @@
 # Sub-plan 13: A session that follows its agenda
 
-Part of the [master design](00-master-design.md). After [12](12-own-names-and-check-ins.md). Requested by Tomer (2026-10-11). Followed by [13.5](13.5-tool-based-planner.md), [14](14-sequencing-stories.md) and [20](20-names-goodbyes-and-excluded-sessions.md).
+Part of the [master design](00-master-design.md). After [12](12-own-names-and-check-ins.md). Requested by Tomer (2026-10-11). Followed by [13.5](13.5-tool-based-planner.md), [14](14-sequencing-stories.md) and [20](20-names-and-goodbyes.md).
 
 ## Why
 Sessions keep ending well before the ~9-minute wrap-up note, because the tutor starts the closing on her own:
