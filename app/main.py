@@ -36,7 +36,7 @@ from app.deps import (  # noqa: F401 -- shared with the caregiver router (tests 
 from app.reminders import ReminderSettings, run_reminders, subscription_id
 from app.audio_store import AUDIO_TYPES, MAX_AUDIO_BYTES, MAX_PART_BYTES, MAX_PARTS
 from app.caregiver_api import router as caregiver_router
-from app.transcripts import EndRequest, TurnsBatch
+from app.transcripts import ContextBatch, EndRequest, TurnsBatch
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
@@ -66,8 +66,10 @@ async def no_stale_assets(request: Request, call_next):
 # Not /healthz: Cloud Run reserves paths ending in "z" and 404s them before they reach the app.
 @app.get("/api/health")
 def health(settings: Settings = Depends(get_settings)) -> dict:
-    # Report only whether the key is present -- never its value.
-    return {"status": "ok", "gemini_key_configured": bool(settings.gemini_api_key)}
+    # Report only whether the key is present -- never its value. The front end's version: a page
+    # left open since before a deploy reloads itself (it would run the old script).
+    return {"status": "ok", "gemini_key_configured": bool(settings.gemini_api_key),
+            "asset_version": asset_version()}
 
 
 def get_genai_client(settings: Settings = Depends(get_settings)) -> genai.Client:
@@ -271,6 +273,22 @@ def save_turns(
     _own_active_session(store, settings, user, session_id)
     store.upsert_turns(patient_id_for(user), session_id, batch.turns)
     return {"saved": len(batch.turns)}
+
+
+@app.post("/api/session/{session_id}/context")
+def save_context(
+    session_id: str,
+    batch: ContextBatch,
+    user: User = Depends(verify_user),
+    settings: Settings = Depends(get_settings),
+    store: SessionStore = Depends(get_store),
+) -> dict:
+    """Everything the page put into her context besides the voices -- its notes, her tool calls and
+    its replies (19) -- sent once just before /end, for the tutor's trace (her whole context window)."""
+    _own_active_session(store, settings, user, session_id)
+    store.update_session(patient_id_for(user), session_id,
+                         {"live_context": [e.model_dump() for e in batch.events]})
+    return {"saved": len(batch.events)}
 
 
 @app.post("/api/session/{session_id}/audio")

@@ -11,7 +11,7 @@ cost and content -- for us, in the Google Cloud console, not the caregiver page.
   Every span has `app.agent` (filter: `app.agent:memory-agent`) and `app.account` (the login email:
   one user's traces), and shows the TOTALS under it
   (`app.total.*`: cost, tokens, model calls). Attributes hold what fits (~60 KB a value).
-- **Trace Explorer's Inputs/Outputs tab**: each model call (and the tutor's whole conversation)
+- **Trace Explorer's Inputs/Outputs tab**: each model call (and the tutor's context, per step and turn)
   carries the OpenTelemetry GenAI event (`gen_ai.client.inference.operation.details`, conventions
   1.37): the system instructions, the input messages (with tool calls and results), the reply.
 - **A log per agent** (Cloud Logging, through the Logging API): `memory-agent`, `plan-builder`,
@@ -99,8 +99,10 @@ def setup(settings) -> None:
             # attributes over 128 per span
             span_limits=SpanLimits(max_span_attributes=512, max_span_attribute_length=None),
         )
+        # small batches: each of her turns carries her whole context (each request stays small)
         provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=ENDPOINT,
-                                                                        session=AuthorizedSession(creds))))
+                                                                        session=AuthorizedSession(creds)),
+                                                       max_export_batch_size=8))
         use(provider, project, thoughts=bool(getattr(settings, "trace_thoughts", False)))
         _state.update(log_session=AuthorizedSession(creds), resource=_cloud_run_resource(project))
         _log(f"tracing to Cloud Trace (project {project})")
@@ -515,12 +517,64 @@ def _ns(t) -> int:
     return int(t.timestamp() * 1e9)
 
 
+def _reply(text_: str, calls: list[dict] = ()) -> dict:
+    """One of her lines as a model reply (an output message), with the tool calls she made in it."""
+    return {"role": "assistant", "parts": [{"type": "text", "content": text_}, *calls], "finish_reason": "stop"}
+
+
+def _step_given(k: int, step_text: str | None, steps_done) -> list[dict]:
+    """How she got step k (without the page's context log): step 1 in the start note, the others as
+    her next_step call and the page's reply -- a call and its reply, as Trace Explorer expects."""
+    if not step_text:
+        return []
+    if k == 0:
+        return [{"role": "user", "parts": [{"type": "text", "content": f"CURRENT STEP: {step_text}"}]}]
+    call_id = f"next_step-{k}"
+    done = steps_done[k - 1].done if k - 1 < len(steps_done) else ""
+    return [{"role": "assistant", "parts": [{"type": "tool_call", "id": call_id, "name": "next_step",
+                                             "arguments": {"done": done}}]},
+            {"role": "tool", "parts": [{"type": "tool_call_response", "id": call_id,
+                                        "response": {"result": f"CURRENT STEP: {step_text}"}}]}]
+
+
+_ORDER = {"note": 0, "silent_note": 0, "turn": 1, "call": 2, "reply": 3}  # at the same moment
+
+
+def context_timeline(turns: list[dict], events: list[dict]) -> list[tuple[float, dict, str]]:
+    """Her context window in order, as GenAI messages: the voices (the saved turns: him `user`, her
+    `assistant`) and what the page put in besides them (`events`: its notes as `user`, her tool calls,
+    its replies as `tool`). Each with its time (seconds from the start) and kind. Her line is placed
+    where it started, so a tool call she made in the middle of a line comes after the whole line."""
+    items = []
+    for n, t in enumerate(turns):
+        items.append((t.get("t_start_s", 0), _ORDER["turn"], n, "turn",
+                      {"role": "assistant" if t["speaker"] == "tutor" else "user",
+                       "parts": [{"type": "text", "content": t["text"]}]}))
+    for n, e in enumerate(events):
+        kind = e.get("kind")
+        if kind in ("note", "silent_note"):
+            msg = {"role": "user", "parts": [{"type": "text", "content": e.get("text", "")}]}
+        elif kind == "call":
+            msg = {"role": "assistant", "parts": [{"type": "tool_call", "id": e.get("id"), "name": e.get("name"),
+                                                   "arguments": e.get("args") or {}}]}
+        elif kind == "reply":
+            msg = {"role": "tool", "parts": [{"type": "tool_call_response", "id": e.get("id"),
+                                              "response": e.get("response") or {}}]}
+        else:
+            continue
+        items.append((e.get("at_s", 0), _ORDER[kind], len(turns) + n, kind, msg))
+    items.sort(key=lambda x: (x[0], x[1], x[2]))
+    return [(ts, msg, kind) for ts, _, _, kind, msg in items]
+
+
 def record_live_session(store, pid: str, sid: str, session: dict, body) -> None:
-    """The tutor's trace (the live session), from the page's summary at /end and the saved turns:
-    `tutor` > `tutor: step N: <kind>` (from the page's steps_done) > `tutor: him` / `tutor: her`
-    (each turn, its text and timing). The held next_step calls are events; the usage, cost and her
-    response times are on the root, and the tutor's prompt and the whole conversation on its
-    Inputs/Outputs tab. Lines in the `tutor` log. Never raises."""
+    """The tutor's trace (the live session), from the page's summary at /end, the saved turns and
+    the page's context log: `tutor` > `tutor: step N: <kind>` (from the page's steps_done) >
+    `tutor: him` / `tutor: her` (each turn, its text and timing). Her context window is rebuilt in
+    order (context_timeline): each of her turns is a model call -- her prompt and her whole context
+    before it in, her line and her tool calls out -- and each step shows what she had when it began
+    and what she said in it, with its cost. The usage, cost and her response times are on the root;
+    the held next_step calls are events. Lines in the `tutor` log. Never raises."""
     if not _state["enabled"]:
         return
     tokens = [(_agent, _agent.set("tutor")), (_job, _job.set("live_session")), (_account, _account.set(pid))]
@@ -545,9 +599,13 @@ def record_live_session(store, pid: str, sid: str, session: dict, body) -> None:
         turns = [t for t in store.list_turns(pid, sid) if t.get("text")]
         prompt = (store.get_session_prompt(pid, sid) or {}).get("text", "")
         agenda = session.get("agenda") or []
+        # Trace Explorer shows the Inputs/Outputs tab only for a span shaped like a model call: these on
+        # the span, `generate_content` (not `chat`), and her replies with a finish_reason (tested 28.10)
+        genai = {"gen_ai.operation.name": "generate_content", "gen_ai.request.model": session.get("model"),
+                 "gen_ai.provider.name": "gcp.gemini"}
         root = tracer().start_span("tutor", context=Context(), start_time=t0, attributes=_clean({
-            "app.agent": "tutor", "app.job": "live_session", "app.account": pid, "app.session_id": sid,
-            "gen_ai.request.model": session.get("model"), "app.prompt_version": session.get("prompt_version"),
+            **genai, "app.agent": "tutor", "app.job": "live_session", "app.account": pid, "app.session_id": sid,
+            "app.prompt_version": session.get("prompt_version"),
             "app.end_reason": getattr(body.reason, "value", str(body.reason)),
             "gen_ai.usage.input_tokens": live.prompt_tokens, "gen_ai.usage.output_tokens": live.response_tokens,
             "app.tokens.audio_in": live.audio_in_tokens, "app.tokens.audio_out": live.audio_out_tokens,
@@ -558,14 +616,6 @@ def record_live_session(store, pid: str, sid: str, session: dict, body) -> None:
             "app.go_aways": live.go_aways, "app.turns": len(turns),
             "app.steps_done": len(body.steps_done), "app.steps_held": len(body.steps_held),
         }))
-        # Inputs/Outputs: her prompt and the whole conversation
-        root.add_event(GENAI_EVENT, {
-            "gen_ai.operation.name": "chat", "gen_ai.request.model": session.get("model") or "",
-            "gen_ai.system_instructions": fit_json([{"type": "text", "content": prompt}]),
-            "gen_ai.input.messages": fit_json([{"role": "assistant" if t["speaker"] == "tutor" else "user",
-                                                "parts": [{"type": "text", "content": t["text"]}]} for t in turns]),
-            "gen_ai.output.messages": fit_json([]),
-        }, timestamp=t0)
         root_ctx = trace.set_span_in_context(root)
         # the steps: each one from the previous step change to its own (the last one to the end)
         bounds, prev = [], 0.0
@@ -579,21 +629,79 @@ def record_live_session(store, pid: str, sid: str, session: dict, body) -> None:
         kind = agenda[n]["kind"] if n < len(agenda) else "after the plan"
         bounds.append((f"step {n + 1}: {kind}", prev, max(prev, length_s),
                        {"app.step.kind": kind, "app.step.text": agenda[n]["text"] if n < len(agenda) else None}))
-        steps = [(tracer().start_span(f"tutor: {label}", context=root_ctx, start_time=at(a),
-                                      attributes=_clean({"app.agent": "tutor", "app.account": pid, **attrs})), a, b)
-                 for label, a, b, attrs in bounds]
-        # the turns, each under the step it happened in
-        for i, t in enumerate(turns[:400]):
+        turns = turns[:400]
+        where = [next((k for k, (_, a, b, _) in enumerate(bounds) if a <= t.get("t_start_s", 0) < b), len(bounds) - 1)
+                 for t in turns]  # each turn's step
+        # Her context window, rebuilt in order: the voices and everything the page put in besides them
+        # (its notes, her tool calls, its replies: `live_context`, sent by the page before /end)
+        events = session.get("live_context") or []
+        timeline = context_timeline(turns, events)
+        system = fit_json([{"type": "text", "content": prompt}])
+        model = session.get("model") or ""
+
+        def context(until: float, *, inclusive: bool = False) -> list[dict]:
+            return [m for ts, m, _ in timeline if (ts <= until if inclusive else ts < until)]
+
+        def calls_in(a: float, b: float) -> list[dict]:
+            return [m["parts"][0] for ts, m, kind in timeline if kind == "call" and a <= ts < b]
+
+        # Inputs/Outputs on the root: her prompt and the whole context window
+        last = [t for t in turns if t["speaker"] == "tutor"][-1:]
+        root.add_event(GENAI_EVENT, {
+            "gen_ai.operation.name": "generate_content", "gen_ai.request.model": model,
+            "gen_ai.system_instructions": system,
+            "gen_ai.input.messages": fit_json([m for _, m, _ in timeline]),
+            "gen_ai.output.messages": fit_json([_reply(t["text"]) for t in last]),
+        }, timestamp=t0)
+        first_note = next((ts for ts, _, kind in timeline if kind in ("note", "silent_note")), 0.0)
+        steps = []
+        for k, (label, a, b, attrs) in enumerate(bounds):
+            # the step's spending: the usage the page counted while she was in it
+            usage = live.by_step[k] if k < len(live.by_step) else None
+            step_cost = live_cost_usd(usage.model_dump()) if usage else None
+            sp = tracer().start_span(f"tutor: {label}", context=root_ctx, start_time=at(a), attributes=_clean({
+                **genai, "app.agent": "tutor", "app.account": pid, **attrs,
+                "gen_ai.usage.input_tokens": usage.prompt_tokens if usage else None,
+                "gen_ai.usage.output_tokens": usage.response_tokens if usage else None,
+                "app.tokens.audio_in": usage.audio_in_tokens if usage else None,
+                "app.tokens.audio_out": usage.audio_out_tokens if usage else None,
+                "app.usage_reports": usage.usage_reports if usage else None,
+                "app.cost_usd": step_cost, "app.total.cost_usd": step_cost}))
+            # Inputs: her context when the step began -- up to the start note (step 1) or the
+            # next_step reply that handed it to her (they share its moment). Outputs: what she said in it.
+            if events:
+                given = context(first_note if k == 0 else a + 0.05, inclusive=True)
+            else:  # a page from before the context log: the step as she got it, rebuilt from the plan
+                given = context(a) + _step_given(k, attrs.get("app.step.text"), body.steps_done)
+            sp.add_event(GENAI_EVENT, {
+                "gen_ai.operation.name": "generate_content", "gen_ai.request.model": model,
+                "gen_ai.system_instructions": system,
+                "gen_ai.input.messages": fit_json(given),
+                "gen_ai.output.messages": fit_json([_reply(t["text"]) for t, w in zip(turns, where)
+                                                    if w == k and t["speaker"] == "tutor"]),
+            }, timestamp=at(a))
+            steps.append((sp, a, b))
+        # the turns, each under the step it happened in; each of hers as a model call: her prompt and
+        # her whole context window before it in, her line and the tool calls she made in it out
+        for i, t in enumerate(turns):
             start = t.get("t_start_s", 0)
             end = turns[i + 1].get("t_start_s", start) if i + 1 < len(turns) else max(start, length_s)
-            step = next((sp for sp, a, b in steps if a <= start < b), steps[-1][0])
             her = t["speaker"] == "tutor"
-            sp = tracer().start_span("tutor: her" if her else "tutor: him", context=trace.set_span_in_context(step),
+            sp = tracer().start_span("tutor: her" if her else "tutor: him",
+                                     context=trace.set_span_in_context(steps[where[i]][0]),
                                      start_time=at(start), attributes=_clean({
-                                         "app.agent": "tutor", "app.account": pid, "app.turn.speaker": t["speaker"],
+                                         **(genai if her else {}), "app.agent": "tutor", "app.account": pid,
+                                         "app.turn.speaker": t["speaker"],
                                          "app.turn.text": t["text"],
                                          "app.turn.interrupted": bool(t.get("interrupted")) or None,
                                          "app.turn.not_played": bool(t.get("not_played")) or None}))
+            if her:
+                sp.add_event(GENAI_EVENT, {
+                    "gen_ai.operation.name": "generate_content", "gen_ai.request.model": model,
+                    "gen_ai.system_instructions": system,
+                    "gen_ai.input.messages": fit_json(context(start)),
+                    "gen_ai.output.messages": fit_json([_reply(t["text"], calls_in(start, max(start, end) + 0.05))]),
+                }, timestamp=at(start))
             sp.end(end_time=at(max(start, end)))
         for h in body.steps_held:
             root.add_event(f"next_step held ({h.reason})", {"step": h.step + 1}, timestamp=at(h.at_s))
@@ -602,8 +710,14 @@ def record_live_session(store, pid: str, sid: str, session: dict, body) -> None:
         root.end(end_time=max(_ns(ended), at(prev)))
         log_line("live_session", {"session_id": sid, "cost_usd": cost, "prompt_tokens": live.prompt_tokens,
                                   "response_tokens": live.response_tokens, "response_ms_p50": pct(0.5),
-                                  "response_ms_p90": pct(0.9), "reconnects": live.reconnects, "job": "live_session"},
+                                  "response_ms_p90": pct(0.9), "reconnects": live.reconnects, "job": "live_session",
+                                  "usage_reports": live.usage_reports, "max_report_total": live.max_report_total,
+                                  "steps_cost_usd": [live_cost_usd(u.model_dump()) if u else None
+                                                     for u in live.by_step]},
                  root, log="tutor")
+        # the full prompt and context window in the tutor's log (as the agents' llm_content)
+        log_line("live_content", {"session_id": sid, "model": model, "system_instruction": prompt,
+                                  "contents": [m for _, m, _ in timeline]}, root, log="tutor")
         for ms in live.response_ms:  # one line each: a distribution on the dashboard
             log_line("live_response", {"response_ms": ms, "session_id": sid}, root, log="tutor")
     except Exception as exc:  # noqa: BLE001

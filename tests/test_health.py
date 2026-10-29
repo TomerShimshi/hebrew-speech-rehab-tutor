@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
 
 from app.config import Settings, get_settings
-from app.main import app
+from app.main import app, asset_version
 
 SECRET = "test-secret-key-value"
 
@@ -18,13 +18,14 @@ def teardown_function() -> None:
 def test_health_with_key_reports_configured_without_leaking_it():
     response = _client(SECRET).get("/api/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "gemini_key_configured": True}
+    # the front end's version too: a page open since before a deploy reloads itself (19)
+    assert response.json() == {"status": "ok", "gemini_key_configured": True, "asset_version": asset_version()}
     assert SECRET not in response.text
 
 
 def test_health_without_key():
     response = _client(None).get("/api/health")
-    assert response.json() == {"status": "ok", "gemini_key_configured": False}
+    assert response.json() == {"status": "ok", "gemini_key_configured": False, "asset_version": asset_version()}
 
 
 def test_index_page_is_served_in_hebrew_rtl():

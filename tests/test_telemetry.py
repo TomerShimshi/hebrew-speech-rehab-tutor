@@ -1,5 +1,6 @@
 """Traces (sub-plan 19): what the spans hold, the cost estimate, and that tracing never breaks a job."""
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -184,7 +185,9 @@ def test_end_traces_each_agent_and_the_tutor(env, spans):
     env.store.save_profile(DAD, "Man, 70.", "uploaded", "tomer@example.com")
     sid = talk(env)
     live = {"prompt_tokens": 5000, "response_tokens": 3000, "audio_in_tokens": 4000, "audio_out_tokens": 2500,
-            "usage_reports": 12, "max_report_total": 900, "response_ms": [800, 1200, 2000], "reconnects": 1}
+            "usage_reports": 12, "max_report_total": 900, "response_ms": [800, 1200, 2000], "reconnects": 1,
+            "by_step": [{"prompt_tokens": 2000, "response_tokens": 1000, "audio_in_tokens": 1500,
+                         "audio_out_tokens": 800, "usage_reports": 5}]}  # step 2: no report
     r = env.client.post(f"/api/session/{sid}/end", headers=auth(), json={
         "reason": "tutor_goodbye", "live": live,
         "steps_done": [{"done": "opening", "how_it_went": "ok", "at_s": 6}],
@@ -202,6 +205,76 @@ def test_end_traces_each_agent_and_the_tutor(env, spans):
     assert [t.parent.span_id for t in turns] == [step1.context.span_id] * 2 + [step2.context.span_id] * 2
     assert turns[1].attributes["app.turn.text"] == "על הנכדים"
     assert {s.attributes.get("app.account") for s in [tutor, step1, step2, *turns]} == {DAD}
+    # each step's spending, from the usage the page counted in it
+    assert 0 < step1.attributes["app.total.cost_usd"] < tutor.attributes["app.total.cost_usd"]
+    assert step1.attributes["gen_ai.usage.input_tokens"] == 2000 and "app.total.cost_usd" not in step2.attributes
+    # each step's Inputs/Outputs: her prompt, the talk before it and its instructions; out: its talk
+    ev1, ev2 = step1.events[0].attributes, step2.events[0].attributes
+    assert ev1["gen_ai.system_instructions"] == ev2["gen_ai.system_instructions"] != "[]"
+    before2 = json.loads(ev2["gen_ai.input.messages"])
+    # step 1's talk, then step 2 as she got it: her next_step call and the page's reply (a pair)
+    assert len(before2) == 4 and [m["role"] for m in before2[-2:]] == ["assistant", "tool"]
+    call, reply = before2[-2]["parts"][0], before2[-1]["parts"][0]
+    assert call["type"] == "tool_call" and call["id"] == reply["id"]
+    assert reply["response"]["result"].startswith("CURRENT STEP: ")
+    said1 = json.loads(ev1["gen_ai.output.messages"])  # her lines in step 1, as model replies
+    assert said1 and all(m["role"] == "assistant" and m["finish_reason"] == "stop" for m in said1)
+    assert [m["parts"] for m in said1] == [m["parts"] for m in before2[:2] if m["role"] == "assistant"]
+    # shaped like a model call (on the span, generate_content): Trace Explorer's Inputs/Outputs tab
+    assert all(s.attributes["gen_ai.operation.name"] == "generate_content"
+               and s.attributes["gen_ai.provider.name"] == "gcp.gemini" for s in [tutor, step1, step2])
+    # each of her turns: the lines before it in, her line out
+    for t in turns:
+        if t.name == "tutor: her":
+            assert t.attributes["gen_ai.operation.name"] == "generate_content"
+            out = json.loads(t.events[0].attributes["gen_ai.output.messages"])
+            assert out[0]["parts"][0]["content"] == t.attributes["app.turn.text"]
+        else:
+            assert not t.events
+
+
+def test_the_tutor_trace_rebuilds_her_context_window(env, spans):
+    """The page's notes, her tool calls and its replies (sent before /end) are put in order with the
+    voices: each step and each of her turns shows exactly what she had."""
+    env.llm = FakeClient(consolidated("He talked."), text("nothing to add"), *plan_reply())
+    env.configure()
+    sid = talk(env)
+    events = [
+        {"kind": "note", "at_s": 0.5, "text": "[Start. CURRENT STEP: open the talk]"},
+        {"kind": "call", "at_s": 2, "id": "c1", "name": "next_step", "args": {"done": "opening"}},
+        {"kind": "reply", "at_s": 2, "id": "c1", "name": "next_step", "response": {"result": "CURRENT STEP: grandkids"}},
+        {"kind": "silent_note", "at_s": 10, "text": "(A note from the app, not from him)"},
+    ]
+    r = env.client.post(f"/api/session/{sid}/context", headers=auth(), json={"events": events})
+    assert r.json() == {"saved": 4}
+    assert len(env.store.get_session(DAD, sid)["live_context"]) == 4
+    env.client.post(f"/api/session/{sid}/end", headers=auth(), json={
+        "reason": "tutor_goodbye", "live": {"by_step": []},
+        "steps_done": [{"done": "opening", "how_it_went": "ok", "at_s": 2}]})
+
+    def inputs(span):
+        return json.loads(span.events[0].attributes["gen_ai.input.messages"])
+
+    def kinds(msgs):
+        return [m["parts"][0]["type"] + ":" + m["role"] for m in msgs]
+
+    tutor = by_name(spans, "tutor")[0]
+    assert len(inputs(tutor)) == 8  # 4 turns + 2 notes + the call and its reply
+    step1 = by_name(spans, "tutor: step 1: opening")[0]
+    step2 = [s for s in spans.get_finished_spans() if s.name.startswith("tutor: step 2")][0]
+    assert inputs(step1) == [{"role": "user", "parts": [{"type": "text", "content": events[0]["text"]}]}]
+    # step 2: everything before it, ending with her next_step call and the page's exact reply
+    assert kinds(inputs(step2)) == ["text:user", "text:assistant", "tool_call:assistant", "tool_call_response:tool"]
+    assert inputs(step2)[-1]["parts"][0]["response"] == {"result": "CURRENT STEP: grandkids"}
+    hers = [s for s in spans.get_finished_spans() if s.name == "tutor: her"]
+    # her first line: the start note before it; out: her line and the next_step call she made in it
+    assert kinds(inputs(hers[0])) == ["text:user"]
+    out = json.loads(hers[0].events[0].attributes["gen_ai.output.messages"])
+    assert [p["type"] for p in out[0]["parts"]] == ["text", "tool_call"]
+    # her second line: her whole context window before it (not the note that came after)
+    assert kinds(inputs(hers[1])) == ["text:user", "text:assistant", "tool_call:assistant",
+                                      "tool_call_response:tool", "text:user"]
+    assert hers[1].events[0].attributes["gen_ai.system_instructions"] != "[]"
 
 
 def test_end_without_live_stats_still_works(env, spans):

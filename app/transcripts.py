@@ -52,6 +52,15 @@ class StepHeld(BaseModel):
     at_s: float = Field(default=0, ge=0)
 
 
+class StepUsage(BaseModel):
+    """Gemini Live's usage while she was in one step (19): the step's cost in its trace."""
+    prompt_tokens: int = Field(default=0, ge=0)
+    response_tokens: int = Field(default=0, ge=0)
+    audio_in_tokens: int = Field(default=0, ge=0)
+    audio_out_tokens: int = Field(default=0, ge=0)
+    usage_reports: int = Field(default=0, ge=0)
+
+
 class LiveStats(BaseModel):
     """What the page saw of the live session (19), for its trace: the usage Gemini Live reported,
     her response times, the connection's troubles."""
@@ -66,6 +75,23 @@ class LiveStats(BaseModel):
     response_ms: list[int] = Field(default=[], max_length=300)  # end of his speech -> her first output
     reconnects: int = Field(default=0, ge=0)
     go_aways: int = Field(default=0, ge=0)
+    by_step: list[StepUsage | None] = Field(default=[], max_length=41)  # the same usage, per step
+
+
+class ContextEvent(BaseModel):
+    """Something the page put into her context besides the voices (19): a note, her tool call, or the
+    page's reply to it. Timed like the turns (seconds from the session's start)."""
+    kind: str = Field(pattern="^(note|silent_note|call|reply)$")
+    at_s: float = Field(default=0, ge=0)
+    text: str = Field(default="", max_length=4000)  # a note
+    id: str = Field(default="", max_length=200)  # a call and its reply
+    name: str = Field(default="", max_length=80)
+    args: dict = Field(default_factory=dict)
+    response: dict = Field(default_factory=dict)
+
+
+class ContextBatch(BaseModel):
+    events: list[ContextEvent] = Field(default=[], max_length=400)
 
 
 class EndRequest(BaseModel):

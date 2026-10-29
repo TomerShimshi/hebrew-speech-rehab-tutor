@@ -135,10 +135,12 @@ function onTutorOutput() {
   if (!s.modelActive) {
     s.modelActive = true;
     s.recBase = s.recCount;
-    // Her response time (19): his last transcribed words -> her first output, once per answer of his
-    // (only speech after her previous turn ended: a late transcript chunk isn't a new answer).
+    // Her response time (19): the last sound of his voice -> her first output, once per answer of his
+    // (only an answer after her previous turn ended: a late transcript chunk isn't a new answer). From
+    // his voice, not his transcript: the transcript often comes just before her reply (1-7 ms).
     if (s.heardAt > (s.measuredFrom || 0) && s.heardAt > (s.lastTutorEndAt || 0) && s.live.response_ms.length < 300) {
-      s.live.response_ms.push(Math.round(performance.now() - s.heardAt));
+      const from = s.voiceAt > (s.lastTutorEndAt || 0) ? s.voiceAt : s.heardAt;
+      s.live.response_ms.push(Math.round(performance.now() - from));
       s.measuredFrom = s.heardAt;
     }
     log("turn", "tutor turn started");
@@ -355,6 +357,8 @@ async function startAudio() {
     // answers him normally (stopping the stream instead could leave it waiting).
     const chunk = s?.muted ? new ArrayBuffer(e.data.byteLength) : e.data;
     if (!s?.muted) showMicLevel(e.data);
+    // his voice (19): the last moment his mic was loud while she wasn't speaking -- her response time
+    if (!s?.muted && s?.live && !s.tutorAudio && micRms(e.data) >= VOICE_RMS) s.voiceAt = performance.now();
     if (!s?.muted && noiseGate(e.data)) return; // held or replaced by silence (09)
     sendJson({ realtimeInput: { audio: { data: b64FromBuffer(chunk), mimeType: MIC_MIME } } });
   };
@@ -376,6 +380,7 @@ async function startAudio() {
 }
 
 // Mic meter: visible proof that the app hears him (and a quick diagnostic for us).
+const VOICE_RMS = 0.015; // above this, his mic is his voice (the noise filter's lowest level)
 let micLevel = 0;
 function micRms(buf) {
   const pcm = new Int16Array(buf);
@@ -405,12 +410,25 @@ function sendJson(msg) {
 
 function sendNote(text) {
   s.lastNoteAt = performance.now(); // a turn answering our note is never held by the question gate
+  addContext("note", { text });
   sendJson({ realtimeInput: { text } });
 }
 
 // Context she reads without replying to it (tested: no speech, but she knows it afterwards).
 function sendSilentNote(text) {
+  addContext("silent_note", { text });
   sendJson({ clientContent: { turns: [{ role: "user", parts: [{ text }] }], turnComplete: false } });
+}
+
+// Everything the page puts into her context besides the voices (19): its notes, her tool calls and
+// its replies, in order and timed like the turns. Sent once before /end (its own request: /end's
+// keepalive body must stay small); the tutor's trace rebuilds her whole context window from it.
+const CONTEXT_MAX = 400;
+function addContext(kind, data) {
+  if (!s?.liveContext || s.liveContext.length >= CONTEXT_MAX) return;
+  const clip = (v) => (typeof v === "string" ? v.slice(0, 4000) : v);
+  s.liveContext.push({ kind, at_s: Math.round((performance.now() - s.startedAt) / 100) / 10,
+                       ...Object.fromEntries(Object.entries(data).map(([k, v]) => [k, clip(v)])) });
 }
 
 // Every API call carries the Google sign-in token; the server checks it + the allowlist.
@@ -494,6 +512,10 @@ async function flushTurns(sess, { keepalive = false } = {}) {
 async function finishRemote(sess, reason) {
   if (!sess.sessionId) return;
   await flushTurns(sess, { keepalive: true });
+  if (sess.liveContext?.length) { // her context besides the voices, for the trace (19) -- never in /end's way
+    await api(`api/session/${sess.sessionId}/context`, { events: sess.liveContext })
+      .catch((err) => log("save", `context not saved: ${err.message}`));
+  }
   try {
     log("save", `session ended (${reason}); updating memory…`);
     const res = await api(`api/session/${sess.sessionId}/end`, { reason, steps_done: sess.stepsDone || [], steps_held: sess.stepsHeld || [], live: sess.live },
@@ -550,6 +572,14 @@ function addUsage(u) {
   L.max_report_total = Math.max(L.max_report_total, u.totalTokenCount || 0);
   for (const d of u.promptTokensDetails || []) if (d.modality === "AUDIO") L.audio_in_tokens += d.tokenCount || 0;
   for (const d of u.responseTokensDetails || []) if (d.modality === "AUDIO") L.audio_out_tokens += d.tokenCount || 0;
+  // the same, per step (the step she is in when the report comes): each step's cost in its trace
+  const i = Math.min(s.stepsDone?.length || 0, 40);
+  const st = (L.by_step[i] ||= { prompt_tokens: 0, response_tokens: 0, audio_in_tokens: 0, audio_out_tokens: 0, usage_reports: 0 });
+  st.usage_reports += 1;
+  st.prompt_tokens += u.promptTokenCount || 0;
+  st.response_tokens += u.responseTokenCount || 0;
+  for (const d of u.promptTokensDetails || []) if (d.modality === "AUDIO") st.audio_in_tokens += d.tokenCount || 0;
+  for (const d of u.responseTokensDetails || []) if (d.modality === "AUDIO") st.audio_out_tokens += d.tokenCount || 0;
 }
 
 function handleServerMessage(msg, isResume) {
@@ -623,6 +653,7 @@ const GOODBYE_RE = /להתראות|ביי|bye|ciao|צ'?או|נתראה|יום ט
 // enforces it: a premature call is refused, and she's told to wait and call again. After a
 // silence nudge (he went quiet after her goodbye) the call is accepted.
 function handleToolCall(toolCall) {
+  for (const fc of toolCall.functionCalls || []) addContext("call", { id: fc.id || "", name: fc.name, args: fc.args || {} });
   const herLine = s.tutorLine; // her turn so far (he may start a new line while we wait)
   const asksStep = (toolCall.functionCalls || []).some((fc) => fc.name === "next_step");
   if (asksStep && (s.turnAudioS || 0) > 0) {
@@ -697,6 +728,7 @@ function answerToolCall(toolCall, herLine) {
     }
     responses.push({ id: fc.id, name: fc.name, response, scheduling: "SILENT" });
   }
+  for (const r of responses) addContext("reply", { id: r.id || "", name: r.name, response: r.response });
   if (responses.length) sendJson({ toolResponse: { functionResponses: responses } });
 }
 
@@ -739,8 +771,8 @@ async function startSession() {
     recorder: null, recChunks: [], recMicGain: null,
     // for the session's trace (19): Gemini Live's usage reports, her response times, the connection
     live: { prompt_tokens: 0, response_tokens: 0, audio_in_tokens: 0, audio_out_tokens: 0, usage_reports: 0,
-            max_report_total: 0, response_ms: [], reconnects: 0, go_aways: 0 },
-    heardAt: 0, measuredFrom: 0,
+            max_report_total: 0, response_ms: [], reconnects: 0, go_aways: 0, by_step: [] },
+    heardAt: 0, measuredFrom: 0, voiceAt: 0, liveContext: [],
   };
   try {
     s.audio = await startAudio(); // inside the click handler: required to unlock audio on tablets
@@ -1212,7 +1244,20 @@ try {
 
 // The server sleeps when idle (Cloud Run scales to zero; waking takes ~10 s). Wake it as soon as
 // the app is on screen -- also when he returns to a tab left open -- so it's ready by his tap.
-const warmUp = () => { if (document.visibilityState === "visible" && !s) fetch("api/health").catch(() => {}); };
+// The same check finds a page left open since before a deploy: it reloads (between sessions only,
+// once per version), so a session never runs the old script.
+const PAGE_VERSION = new URLSearchParams(ASSET_QUERY).get("v");
+const warmUp = () => {
+  if (document.visibilityState !== "visible" || s) return;
+  fetch("api/health").then((r) => r.json()).then(({ asset_version: v }) => {
+    if (!v || !PAGE_VERSION || v === PAGE_VERSION || s) return;
+    try {
+      if (sessionStorage.getItem("reloadedFor") === v) return; // never a reload loop
+      sessionStorage.setItem("reloadedFor", v);
+    } catch { return; }
+    location.reload();
+  }).catch(() => {});
+};
 warmUp();
 document.addEventListener("visibilitychange", warmUp);
 
