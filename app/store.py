@@ -50,7 +50,7 @@ MAX_PLAN_ATTEMPTS = 3  # automatic plan builds per session; then the sweep stops
 
 def _claimable(session: dict, now: dt.datetime) -> bool:
     status = session.get("memory_status")
-    if session.get("status") != ENDED:
+    if session.get("status") != ENDED or session.get("excluded"):  # a left-out session (20.5) teaches nothing
         return False
     if status in (MEM_PENDING, MEM_FAILED):
         return True
@@ -107,7 +107,9 @@ class SessionStore(Protocol):
     def searches_in_month(self, month: str, provider: str = "tavily") -> int: ...
     def add_search(self, month: str, provider: str = "tavily") -> None: ...
     # caregiver page (sub-plan 08), newest first
-    def list_sessions(self, pid: str, n: int = 30) -> list[dict]: ...
+    # Newest first. Left-out sessions (20.5) are skipped unless left_out=True, so a new reader is safe by
+    # default; still up to n counted ones.
+    def list_sessions(self, pid: str, n: int = 30, *, left_out: bool = False) -> list[dict]: ...
     def list_flags(self, pid: str, n: int = 50) -> list[dict]: ...
     def list_recommendations(self, pid: str) -> list[dict]: ...
     def list_memory_history(self, pid: str, n: int = 20) -> list[dict]: ...
@@ -294,7 +296,7 @@ class InMemorySessionStore:
     def recent_session_plans(self, pid, n=5):
         sessions = sorted((v for k, v in self.sessions.items() if k[0] == pid),
                           key=lambda v: v["started_at"], reverse=True)
-        return [v["class_plan"] for v in sessions if v.get("class_plan")][:n]
+        return [v["class_plan"] for v in sessions if v.get("class_plan") and not v.get("excluded")][:n]
 
     def add_games_recommendation(self, pid, sid, rec):
         key = (pid, recommendation_id(rec))
@@ -318,8 +320,8 @@ class InMemorySessionStore:
     def research_runs_on(self, pid, day):
         return self.research_runs.get((pid, day), 0)
 
-    def list_sessions(self, pid, n=30):
-        found = [v for k, v in self.sessions.items() if k[0] == pid]
+    def list_sessions(self, pid, n=30, *, left_out=False):
+        found = [v for k, v in self.sessions.items() if k[0] == pid and (left_out or not v.get("excluded"))]
         return sorted(found, key=lambda v: v["started_at"], reverse=True)[:n]
 
     def list_flags(self, pid, n=50):
@@ -446,7 +448,7 @@ class InMemorySessionStore:
     def pending_plan_sessions(self, pid, limit=2):
         found = [v for k, v in self.sessions.items()
                  if k[0] == pid and v.get("plan_status") in (PLAN_PENDING, PLAN_FAILED)
-                 and v.get("plan_attempts", 0) < MAX_PLAN_ATTEMPTS]
+                 and v.get("plan_attempts", 0) < MAX_PLAN_ATTEMPTS and not v.get("excluded")]
         found.sort(key=lambda v: v["started_at"], reverse=True)
         return [v["id"] for v in found[:limit]]
 
@@ -603,8 +605,8 @@ class FirestoreSessionStore:
     def recent_session_plans(self, pid, n=5):
         query = (self._patient(pid).collection("sessions")
                  .order_by("started_at", direction=self._fs.Query.DESCENDING).limit(n * 3))
-        plans = [s.to_dict().get("class_plan") for s in query.stream()]
-        return [p for p in plans if p][:n]
+        docs = [s.to_dict() for s in query.stream()]
+        return [d["class_plan"] for d in docs if d.get("class_plan") and not d.get("excluded")][:n]
 
     def add_games_recommendation(self, pid, sid, rec):
         ref = self._patient(pid).collection("games_app_recommendations").document(recommendation_id(rec))
@@ -620,7 +622,7 @@ class FirestoreSessionStore:
         query = self._patient(pid).collection("sessions").where(
             filter=self._fs.FieldFilter("plan_status", "in", [PLAN_PENDING, PLAN_FAILED]))
         found = [{"id": s.id, **s.to_dict()} for s in query.stream()]
-        found = [v for v in found if v.get("plan_attempts", 0) < MAX_PLAN_ATTEMPTS]
+        found = [v for v in found if v.get("plan_attempts", 0) < MAX_PLAN_ATTEMPTS and not v.get("excluded")]
         found.sort(key=lambda v: v.get("started_at") or _now(), reverse=True)
         return [v["id"] for v in found[:limit]]
 
@@ -637,10 +639,12 @@ class FirestoreSessionStore:
                  .order_by("created_at", direction=self._fs.Query.DESCENDING).limit(n))
         return [s.to_dict() for s in query.stream()]
 
-    def list_sessions(self, pid, n=30):
+    def list_sessions(self, pid, n=30, *, left_out=False):
+        # A few extra so n counted ones remain after skipping left-out sessions (rare: a handful at most).
         query = (self._patient(pid).collection("sessions")
-                 .order_by("started_at", direction=self._fs.Query.DESCENDING).limit(n))
-        return [{"id": s.id, **s.to_dict()} for s in query.stream()]
+                 .order_by("started_at", direction=self._fs.Query.DESCENDING).limit(n if left_out else n + 10))
+        found = [{"id": s.id, **s.to_dict()} for s in query.stream()]
+        return [s for s in found if left_out or not s.get("excluded")][:n]
 
     def list_flags(self, pid, n=50):
         query = (self._patient(pid).collection("flags")

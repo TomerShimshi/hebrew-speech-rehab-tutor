@@ -57,7 +57,7 @@ def text_for(day: dt.date) -> str:
 
 
 def practiced_on(store: SessionStore, pid: str, day: dt.date) -> bool:
-    for s in store.list_sessions(pid, 10):
+    for s in store.list_sessions(pid, 10, left_out=True):  # he did talk, even if left out (20.5)
         started = s.get("started_at")
         if started and started.astimezone(TZ).date() == day and (s.get("turn_count") or 0) >= 2:
             return True

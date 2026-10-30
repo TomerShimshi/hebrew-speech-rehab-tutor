@@ -74,6 +74,8 @@ def recheck_names_game(store, client, audio, settings: Settings, pid: str, sid: 
     The checks before the claim are cheap and quiet (no trace): the hooks call this on every session."""
     try:
         session = store.get_session(pid, sid) or {}
+        if session.get("excluded"):  # left out (20.5): nothing learns from it; not stored, so a put-back can run it
+            return "skipped"
         if session.get("memory_status") != MEM_DONE:
             return "not_ready"
         items = _game_items(session)

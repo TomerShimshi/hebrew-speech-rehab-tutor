@@ -149,7 +149,7 @@ def live_minutes_today(store: SessionStore, settings: Settings, pid: str) -> flo
     midnight = now.astimezone(tz).replace(hour=0, minute=0, second=0, microsecond=0)
     cap = dt.timedelta(minutes=settings.live_max_session_minutes)
     total = dt.timedelta()
-    for s in store.list_sessions(pid, 30):
+    for s in store.list_sessions(pid, 30, left_out=True):  # a left-out session (20.5) still used minutes
         started = s.get("started_at")
         if not started or started < midnight:
             continue
@@ -404,7 +404,7 @@ def join_left_recordings(store, audio, min_age: dt.timedelta = dt.timedelta(minu
     out = []
     now = now_utc()
     for pid in store.list_patient_ids():
-        for s in store.list_sessions(pid, 10):
+        for s in store.list_sessions(pid, 10, left_out=True):  # kept, just not learned from (20.5)
             ended = s.get("ended_at")
             if (s.get("status") == "ended" and not s.get("audio_uri") and s.get("audio_type") and ended
                     and now - ended >= min_age):
@@ -567,7 +567,8 @@ def memory_sweep(
         played = games.latest_played if games and not games.error else None
         built_at = next_plan.get("built_at") if next_plan else None
         if (played and built_at and played > built_at and len(results) < budget
-                and next_plan.get("built_after_session")):
+                and next_plan.get("built_after_session")
+                and not (store.get_session(pid, next_plan["built_after_session"]) or {}).get("excluded")):  # 20.5
             sid = next_plan["built_after_session"]
             results[f"replan:{sid}"] = build_next_plan(
                 store, llm_client, settings, pid, sid,

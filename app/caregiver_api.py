@@ -23,6 +23,7 @@ from google.genai import types
 from pydantic import BaseModel
 
 from app.agent.memory_edit import MemoryEditError, remove_item, remove_word, restore_version
+from app.leave_out import LeaveOutBusy, leave_out, put_back
 from app.agent.memory_update import run_memory_update
 from app import billing_guard, telemetry
 from app.agent.next_class import _models, build_next_plan
@@ -59,6 +60,7 @@ class Translations(BaseModel):
 
 SESSION_FIELDS = ("id", "status", "started_at", "ended_at", "end_reason", "turn_count", "prompt_version",
                   "summary", "topics", "mood", "highlights", "difficulties", "probe_results",
+                  "excluded", "memory_restored_away",  # left out of everything that learns (20.5)
                   "own_names", "names_game",  # names found / missed in free talk; the names game (12)
                   "sequencing",  # telling things in order (14): the task and its score
                   "summarizing",  # a short text in his own words (17): its score
@@ -201,8 +203,10 @@ def progress_series(sessions: list[dict], word_bank: dict) -> dict:
 
 
 @router.get("/{email}/progress")
-def progress(pid: str = Depends(account), store: SessionStore = Depends(get_store)) -> dict:
-    return progress_series(store.list_sessions(pid, 30), (store.get_memory(pid) or {}).get("word_bank") or {})
+def progress(left_out: bool = False, pid: str = Depends(account), store: SessionStore = Depends(get_store)) -> dict:
+    """Left-out sessions (20.5) only with ?left_out=1 (the page's "show them too" toggle)."""
+    return progress_series(store.list_sessions(pid, 30, left_out=left_out),
+                           (store.get_memory(pid) or {}).get("word_bank") or {})
 
 
 @router.post("/billing/resume")
@@ -284,7 +288,7 @@ def overview(pid: str = Depends(account), settings: Settings = Depends(get_setti
 
 @router.get("/{email}/sessions")
 def sessions(pid: str = Depends(account), store: SessionStore = Depends(get_store)) -> dict:
-    return {"sessions": [_session_row(s) for s in store.list_sessions(pid, 30)]}
+    return {"sessions": [_session_row(s) for s in store.list_sessions(pid, 30, left_out=True)]}  # marked (20.5)
 
 
 @router.get("/{email}/sessions/{sid}")
@@ -587,8 +591,46 @@ def memory_restore(
         restore_version(store, pid, version)
     except MemoryEditError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    left_out = store.get_session(pid, version)  # restored to before a left-out conversation (20.5)
+    if left_out and left_out.get("excluded"):
+        store.update_session(pid, version, {"memory_restored_away": True})
     print(f"[caregiver] {caregiver.email} restored {pid}'s memory to {version}; backup={backup}", flush=True)
     return {"ok": True, "backup": backup}
+
+
+@router.post("/{email}/sessions/{sid}/leave-out")
+def session_leave_out(
+    sid: str,
+    pid: str = Depends(account),
+    caregiver: User = Depends(require_caregiver),
+    store: SessionStore = Depends(get_store),
+) -> dict:
+    """Leaves a conversation out of everything that learns (20.5); it stays visible, marked."""
+    try:
+        out = leave_out(store, pid, sid, caregiver.email)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Session not found") from exc
+    except LeaveOutBusy as exc:
+        raise HTTPException(status_code=409, detail="Its memory update is running: try again in a minute") from exc
+    print(f"[caregiver] {caregiver.email} left out {pid}/{sid}", flush=True)
+    return out
+
+
+@router.post("/{email}/sessions/{sid}/put-back")
+def session_put_back(
+    sid: str,
+    restored_away: bool = Body(False, embed=True),
+    pid: str = Depends(account),
+    caregiver: User = Depends(require_caregiver),
+    store: SessionStore = Depends(get_store),
+) -> dict:
+    """Puts a left-out conversation back (20.5). process=True: the page then calls /process."""
+    try:
+        out = put_back(store, pid, sid, restored_away=restored_away)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Session not found") from exc
+    print(f"[caregiver] {caregiver.email} put back {pid}/{sid}", flush=True)
+    return out
 
 
 @router.post("/{email}/export/translate", dependencies=[Depends(not_paused)])
@@ -642,6 +684,8 @@ def process_session(
     session = store.get_session(pid, sid)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
+    if session.get("excluded"):  # left out (20.5): nothing learns from it -- put it back first
+        raise HTTPException(status_code=409, detail="This conversation is left out")
     if session.get("status") == ACTIVE:
         started = session.get("started_at")
         if started and dt.datetime.now(dt.timezone.utc) - started < STUCK_ACTIVE_AFTER:

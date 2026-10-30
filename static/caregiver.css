@@ -46,6 +46,7 @@ body.cg { font-size: 1.05rem; line-height: 1.5; }
 .session .when { font-weight: bold; }
 .chip { display: inline-block; font-size: .85rem; padding: .05rem .55rem; border-radius: 1rem; background: var(--accent-soft); color: var(--accent); }
 .chip.warn { background: #fdecec; color: var(--danger); }
+.session.left-out > :not(.head):not(.cg-actions) { opacity: .6; } /* left out of what learns (20.5) */
 .probes { display: flex; flex-wrap: wrap; gap: .35rem; margin: .3rem 0; }
 .probe { font-size: .95rem; padding: .1rem .6rem; border-radius: .6rem; background: #f1f3f8; }
 .probe.uncued { background: #e3f6e8; } .probe.cued { background: #fff4d6; } .probe.failed { background: #fde3e3; }

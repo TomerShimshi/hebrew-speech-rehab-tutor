@@ -98,3 +98,41 @@ def correct_result(current: dict, sid: str, target: str, result: str) -> bool:
     entry["result"] = result
     entry["rechecked"] = True
     return True
+
+
+def _last_asked(item: dict) -> str | None:
+    return max((r.get("date") for r in item.get("results") or [] if r.get("date")), default=None)
+
+
+def remove_session(current: dict, sid: str) -> list[dict]:
+    """Leaving a conversation out (20.5): drops its results from the set, with `asked`, `last_asked` and
+    `sessions_played` corrected. Returns what it removed ({target, entry}), kept so a put-back is exact."""
+    removed = []
+    for item in current.get("items") or []:
+        mine = [r for r in item.get("results") or [] if r.get("session_id") == sid]
+        if not mine:
+            continue
+        item["results"] = [r for r in item["results"] if r.get("session_id") != sid]
+        item["asked"] = max(0, item.get("asked", 0) - len(mine))
+        item["last_asked"] = _last_asked(item)
+        removed += [{"target": item["target"], "entry": r} for r in mine]
+    if removed:
+        current["sessions_played"] = max(0, current.get("sessions_played", 0) - 1)
+    return removed
+
+
+def restore_session(current: dict, removed: list[dict]) -> bool:
+    """Puts back what remove_session took (20.5), once: an entry already there is not added again."""
+    by_target = {_norm(i["target"]): i for i in current.get("items") or []}
+    added = False
+    for r in removed:
+        item = by_target.get(_norm(r["target"]))
+        if item is None or r["entry"] in (item.get("results") or []):
+            continue  # a newer set, or already back
+        item["results"] = sorted([*item.get("results", []), r["entry"]], key=lambda e: e.get("date") or "")
+        item["asked"] = item.get("asked", 0) + 1
+        item["last_asked"] = _last_asked(item)
+        added = True
+    if added:
+        current["sessions_played"] = current.get("sessions_played", 0) + 1
+    return added

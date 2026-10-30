@@ -281,6 +281,63 @@ function renderTranscript(box, turns) {
   }));
 }
 
+// Leaving a conversation out (20.5): nothing that learns reads it; it stays here, marked, and can come back.
+async function rebuildAfterLeaveOut() {
+  try { await api(acct("/plan/rebuild"), {}); return true; } catch { return false; }
+}
+
+function leaveOutControl(s) {
+  const sid = encodeURIComponent(s.id);
+  if (s.excluded) {
+    return confirmButton("↩ להחזיר", "להחזיר את השיחה לזיכרון ולתכנון?", async (where) => {
+      busy(where, "מחזיר");
+      try {
+        const r = await api(acct(`/sessions/${sid}/put-back`), { restored_away: !!s.memory_restored_away });
+        if (r.process) {
+          busy(where, "השיחה תעובד מחדש: זיכרון, הגדרות קול והשיעור הבא. זה עשוי לקחת עד 2–3 דקות");
+          await api(acct(`/sessions/${sid}/process`), {}).catch(() => null);
+        }
+        await loadAccount();
+        status(r.process ? "✓ השיחה הוחזרה ועובדה מחדש." : "✓ השיחה הוחזרה: הסיכום ותוצאות משחק השמות שלה חזרו.");
+      } catch {
+        where.textContent = "ההחזרה נכשלה. נסה שוב.";
+      }
+    });
+  }
+  return confirmButton("🚫 לא לכלול בזיכרון ובתכנון",
+    "לא ללמוד מהשיחה הזו? היא תישאר כאן, מסומנת, ואפשר להחזיר אותה.", async (where) => {
+      busy(where, "מוציא את השיחה");
+      let r;
+      try {
+        r = await api(acct(`/sessions/${sid}/leave-out`), {});
+      } catch (err) {
+        where.textContent = err.status === 409 ? "הזיכרון מתעדכן מהשיחה הזו ממש עכשיו. נסה שוב בעוד דקה." : "הפעולה נכשלה. נסה שוב.";
+        return;
+      }
+      const finish = async (note) => {
+        if (r.rebuild) busy(where, "בונה מחדש את השיעור הבא, בלי השיחה הזו");
+        const rebuilt = r.rebuild ? await rebuildAfterLeaveOut() : true;
+        await loadAccount();
+        status(["✓ השיחה לא נכללת יותר.", note, rebuilt ? "" : "בניית השיעור הבא מחדש נכשלה: אפשר ללחוץ \"בנייה מחדש\"."]
+          .filter(Boolean).join(" "));
+      };
+      if (r.is_latest) { // the latest processed conversation: an exact restore is possible
+        const yes = el("button", { class: "yes", type: "button", text: "כן, להחזיר" });
+        const no = el("button", { type: "button", text: "לא" });
+        yes.addEventListener("click", async () => {
+          yes.disabled = no.disabled = true;
+          busy(where, "מחזיר את הזיכרון");
+          try { await api(acct("/memory/restore"), { version: s.id }); } catch { status("החזרת הזיכרון נכשלה."); }
+          await finish("הזיכרון הוחזר למצב שלפני השיחה.");
+        });
+        no.addEventListener("click", async () => { yes.disabled = no.disabled = true; await finish(""); });
+        where.replaceChildren(el("span", { class: "confirm" }, "גם להחזיר את הזיכרון למצב שלפני השיחה?", yes, no));
+        return;
+      }
+      await finish(r.was_processed ? "שיחות מאוחרות יותר כבר נלמדו -- פריטים מהשיחה הזו אפשר להסיר אחד אחד בזיכרון." : "");
+    });
+}
+
 function renderSessions(sessions) {
   if (!sessions.length) {
     $("sessions").replaceChildren(p("עדיין אין שיחות בחשבון הזה.", "muted"));
@@ -318,9 +375,10 @@ function renderSessions(sessions) {
     });
     // Not processed yet (memory update or next lesson missing/failed, or a tab closed mid-session):
     // process it now instead of waiting for the hourly sweep.
-    const unprocessed = (s.status === "active" && s.started_at && Date.now() - new Date(s.started_at) > 20 * 60000)
+    const unprocessed = !s.excluded && ( // a left-out one (20.5) isn't processed
+      (s.status === "active" && s.started_at && Date.now() - new Date(s.started_at) > 20 * 60000)
       || (s.status === "ended" && ["pending", "failed", "processing"].includes(s.memory_status))
-      || (s.memory_status === "done" && ["pending", "failed"].includes(s.plan_status));
+      || (s.memory_status === "done" && ["pending", "failed"].includes(s.plan_status)));
     // Picks up where it stopped: if only the next lesson is missing, only that runs.
     const onlyPlan = s.memory_status === "done";
     const processButton = unprocessed ? confirmButton(
@@ -343,7 +401,7 @@ function renderSessions(sessions) {
     const problems = [s.memory_status === "failed" && "עדכון הזיכרון נכשל", s.plan_status === "failed" && "בניית השיעור נכשלה",
                       s.goodbye_refusals > 0 && `⚠ סירוב פרידה ×${s.goodbye_refusals}`] // a goodbye that looped (20)
       .filter(Boolean);
-    return el("div", { class: "session" },
+    return el("div", { class: s.excluded ? "session left-out" : "session" },
       el("div", { class: "head" },
         el("span", { class: "when", text: when(s.started_at) }),
         el("span", { class: "muted", text: [minutes(s.started_at, s.ended_at), `${s.turn_count || 0} תורות`,
@@ -351,6 +409,7 @@ function renderSessions(sessions) {
                                             .filter(Boolean).join(" · ") }),
         s.plan_goal ? el("span", { class: "chip", text: GOAL[s.plan_goal] || s.plan_goal }) : null,
         s.plan_type === "intro" ? el("span", { class: "chip", text: "היכרות" }) : null,
+        s.excluded ? el("span", { class: "chip warn", text: "לא נכלל" }) : null,
         MOOD[s.mood] ? el("span", { class: "chip", text: MOOD[s.mood] }) : null,
         modelChip("memory", s.memory_model), modelChip("plan", s.plan_model),
         ...problems.map((t) => el("span", { class: "chip warn", text: t })),
@@ -364,7 +423,7 @@ function renderSessions(sessions) {
       summarizingLine(s),
       stepsLine(s),
       voiceLine(s),
-      el("div", { class: "cg-actions" }, button, promptButton, recordingButton(s), processButton),
+      el("div", { class: "cg-actions" }, button, promptButton, recordingButton(s), processButton, leaveOutControl(s)),
       box, promptBox,
     );
   }));
@@ -1113,7 +1172,8 @@ function probeStats(results) {
 // t(): maps each English text to its Hebrew translation (identity when not translating).
 function buildExport(n, t = (s) => s, translated = false) {
   const ov = lastOverview;
-  const sessions = lastSessions.filter((s) => s.status !== "active").slice(0, n);
+  const sessions = lastSessions.filter((s) => s.status !== "active" && (!s.excluded || $("progress-left-out").checked))
+    .slice(0, n); // left out (20.5): only when shown
   const oldest = sessions.at(-1)?.started_at;
   const newest = sessions[0]?.started_at;
   const list = (items) => el("ul", {}, items.map((i) => el("li", { dir: "auto", text: t(i) })));
@@ -1235,10 +1295,16 @@ $("translate-yes").addEventListener("click", async () => {
 window.addEventListener("afterprint", () => document.body.classList.remove("printing"));
 
 // ---- loading ----------------------------------------------------------------------------
+// Left-out conversations (20.5) are in the graphs only when asked; the therapist export uses what's shown.
+const progressPath = () => ($("progress-left-out").checked ? "/progress?left_out=1" : "/progress");
+$("progress-left-out").addEventListener("change", async () => {
+  try { renderProgress(await api(acct(progressPath()))); } catch { status("טעינת ההתקדמות נכשלה."); }
+});
+
 async function loadAccount() {
   status("טוען…");
   try {
-    const [ov, ss, pr] = await Promise.all([api(acct("/overview")), api(acct("/sessions")), api(acct("/progress"))]);
+    const [ov, ss, pr] = await Promise.all([api(acct("/overview")), api(acct("/sessions")), api(acct(progressPath()))]);
     renderProgress(pr);
     lastOverview = ov;
     lastSessions = ss.sessions;

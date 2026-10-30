@@ -37,6 +37,7 @@ const $ = (id) => document.getElementById(id);
 const ASSET_QUERY = new URL(import.meta.url).search;
 const { initAuth, signIn, signOut, idToken } = await import(`./auth.js${ASSET_QUERY}`);
 const { soundsLike, herReplyRejected } = await import(`./sounds_like.js${ASSET_QUERY}`); // the names game's live match (20)
+const { readyToAnswerStep } = await import(`./step_timing.js${ASSET_QUERY}`); // next_step waits for her reaction (20.5)
 const screens = {
   signin: $("screen-signin"), start: $("screen-start"), session: $("screen-session"), ended: $("screen-ended"),
 };
@@ -64,6 +65,7 @@ function setIndicator(state) {
       s.recBase = s.recCount;
       // In the names game, 300 ms (20): his answer comes quick, and she never says a name before it.
       if (!speaking) s.echoUntil = performance.now() + (namesGameNow() ? 300 : 800);
+      if (!speaking) s.tutorQuietSince = performance.now(); // when the next_step reply may go (20.5)
     }
     s.tutorAudio = speaking;
     if (!speaking) s.gateOpen = false; // the noise filter re-arms for her next turn
@@ -774,7 +776,6 @@ function handleServerMessage(msg, isResume) {
 // her mumble). Her transcript lags behind her audio (12.10), so when she has already spoken in this
 // turn the page waits a moment for it to catch up before answering (the tool is blocking: she waits).
 // At most twice per step: a step never gets stuck.
-const TRANSCRIPT_CATCHUP_MS = 1200;
 function nextStepTooSoon(herLine) {
   const herTurn = herLine?.textEl?.textContent || "";
   const heldHere = s.guardedStep === s.stepIndex ? (s.guardCount || 0) : 0;
@@ -826,7 +827,17 @@ function handleToolCall(toolCall) {
   const herLine = s.tutorLine; // her turn so far (he may start a new line while we wait)
   const asksStep = (toolCall.functionCalls || []).some((fc) => fc.name === "next_step");
   if (asksStep && (s.turnAudioS || 0) > 0) {
-    setTimeout(() => answerToolCall(toolCall, herLine), TRANSCRIPT_CATCHUP_MS);
+    // She called it mid-reaction: answer once her reaction has finished playing (20.5) -- the reply
+    // starts the next step, and Gemini drops what of the reaction hadn't played yet (30.10).
+    const sess = s, calledAt = performance.now();
+    const timer = setInterval(() => {
+      if (s !== sess) return clearInterval(timer); // the session ended meanwhile
+      const now = performance.now();
+      if (!readyToAnswerStep({ sinceCallMs: now - calledAt, herAudioPlaying: !!s.tutorAudio,
+                               quietMs: s.tutorAudio ? 0 : now - (s.tutorQuietSince || 0) })) return;
+      clearInterval(timer);
+      answerToolCall(toolCall, herLine);
+    }, 100);
     return;
   }
   answerToolCall(toolCall, herLine);

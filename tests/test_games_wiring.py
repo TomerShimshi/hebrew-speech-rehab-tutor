@@ -118,3 +118,15 @@ def test_upstash_down_never_blocks_a_session(env):
     env.configure(simon_profiles=PROFILES)
     r = env.client.post("/api/session/start", headers=auth())
     assert r.status_code == 200 and "## HIS GAMES APP" not in instruction()
+
+
+def test_sweep_never_rebuilds_after_a_left_out_session(env):  # 20.5: the page rebuilds after the latest counted one
+    with_games(env)
+    env.store.save_memory(DAD, "s0", {"memory_prompt": "x"}, None)
+    sid = env.store.create_session(DAD, user_email=DAD, model="m", prompt_version="v")
+    env.store.update_session(DAD, sid, {"excluded": True})
+    env.store.save_next_plan(DAD, sid, plan().model_dump(mode="json"))
+    env.store.next_plans[DAD]["built_at"] = NOW - dt.timedelta(days=3)
+    env.configure(simon_profiles=PROFILES, simon_app_url="https://simon.example")  # no model answers scripted
+    r = env.client.post("/internal/memory/sweep", headers={"Authorization": "Bearer oidc-scheduler"})
+    assert r.json()["processed"] == {}
