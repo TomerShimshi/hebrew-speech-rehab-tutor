@@ -73,7 +73,10 @@ def load_prompt() -> dict:
 
 @lru_cache
 def techniques_text() -> str:
-    return TECHNIQUES_PATH.read_text(encoding="utf-8")
+    """The techniques file for the builder's prompt, without its comments and version line (repo notes)."""
+    lines = TECHNIQUES_PATH.read_text(encoding="utf-8").splitlines()
+    kept = [ln for ln in lines if not ln.lstrip().startswith("#") and not ln.startswith("prompt_version:")]
+    return "\n".join(kept).strip() + "\n"
 
 
 def _norm(word: str) -> str:

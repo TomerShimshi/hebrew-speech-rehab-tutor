@@ -62,6 +62,12 @@ def get_text_client(settings: Settings = Depends(get_settings)):
     return text_client(settings.gemini_api_key)
 
 
+def get_optional_text_client(settings: Settings = Depends(get_settings)):
+    """The text client, or None without a key: for work that must not wait on Gemini (joining a
+    recording -- only its names-game recheck needs a model, 20)."""
+    return text_client(settings.gemini_api_key) if settings.gemini_api_key else None
+
+
 def _bounded_generate(budget_s: float):
     """generate() with one shared time budget across all calls of a memory update."""
     deadline = time.monotonic() + budget_s

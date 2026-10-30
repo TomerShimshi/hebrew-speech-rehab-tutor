@@ -15,13 +15,14 @@ from google import genai
 
 from app.agent.memory_update import run_memory_update
 from app.agent.next_class import build_next_plan
+from app.names_recheck import recheck_names_game
 from app.games import game_link, profile_for
 from app.auth import User, verify_user, verify_sweeper
 from app.config import Settings, get_settings
 from app.live_token import create_live_token
-from app.class_plan import plan_names
+from app.class_plan import game_names
 from app.steps import min_answers
-from app.patient_profile import account_profile, extract_vocabulary
+from app.patient_profile import account_profile
 from app.prompt_archive import PromptArchive
 from app.schemas import VoiceSettings
 from app import billing_guard, telemetry
@@ -31,7 +32,7 @@ from app.rate_limit import SlidingWindowLimiter
 from app.store import ACTIVE, MEM_DONE, SessionStore
 from app.deps import (  # noqa: F401 -- shared with the caregiver router (tests override these)
     _bounded_generate, games_for, get_audio_store, get_games_reader, get_prompt_archive,
-    get_push_sender, get_store, get_text_client,
+    get_optional_text_client, get_push_sender, get_store, get_text_client,
 )
 from app.reminders import ReminderSettings, run_reminders, subscription_id
 from app.audio_store import AUDIO_TYPES, MAX_AUDIO_BYTES, MAX_PART_BYTES, MAX_PARTS
@@ -207,9 +208,6 @@ def start_session(
         prompt,
         client,
         resume_handle=resume_handle,
-        # his names from the profile + today's names (game, practice, reserve): the short proper
-        # names the transcription mishears most (12b)
-        vocabulary=list(dict.fromkeys([*extract_vocabulary(profile_text), *plan_names(plan)])),
         voice=voice,
     )
     if not session_id:
@@ -253,6 +251,7 @@ def start_session(
         "agenda": {"steps": [s["text"] for s in built.steps], "kinds": [s["kind"] for s in built.steps],
                    "min_answers": [s.get("min_answers", min_answers(s["kind"])) for s in built.steps],
                    "cards": [s.get("cards") for s in built.steps],  # the scrambled game's cards (14)
+                   "game_names": game_names(plan),  # the names game's names: the page catches his answers (20)
                    "after": built.after_steps},
         # buttons for the end screen: the game homework the tutor will suggest
         "game_homework": homework_buttons(plan, patient_id_for(user), settings),
@@ -382,6 +381,7 @@ def upload_audio_finish(
     settings: Settings = Depends(get_settings),
     store: SessionStore = Depends(get_store),
     audio=Depends(get_audio_store),
+    llm_client=Depends(get_optional_text_client),
 ) -> dict:
     """The session ended: join its parts (23.10). `parts`: how many the page sent -- a gap is logged."""
     session = _own_recording_session(store, settings, audio, user, session_id)
@@ -390,6 +390,8 @@ def upload_audio_finish(
     if parts and got < parts:
         print(f"[audio] {pid}/{session_id}: {got} of {parts} parts arrived", flush=True)
     fields = finish_recording(store, audio, pid, session_id, session)
+    if fields and llm_client is not None and not billing_guard.is_paused(store):  # the names game rechecked (20)
+        recheck_names_game(store, llm_client, audio, settings, pid, session_id, generate_fn=_bounded_generate(120))
     return {"ok": True, "parts": got, "sent": parts, **({"bytes": fields["audio_bytes"]} if fields else {})}
 
 
@@ -423,13 +425,21 @@ def end_session(
     store: SessionStore = Depends(get_store),
     llm_client=Depends(get_text_client),
     games_reader=Depends(get_games_reader),
+    audio=Depends(get_audio_store),
 ) -> dict:
     pid = patient_id_for(user)
     _own_active_session(store, settings, user, session_id)
     store.end_session(pid, session_id, body.reason)
+    ended_fields = {}
     if body.steps_done or body.steps_held:  # what she reported finished, in order; and the held calls
-        store.update_session(pid, session_id, {"steps_done": [s.model_dump() for s in body.steps_done],
-                                               "steps_held": [h.model_dump() for h in body.steps_held]})
+        ended_fields.update(steps_done=[s.model_dump() for s in body.steps_done],
+                            steps_held=[h.model_dump() for h in body.steps_held])
+    if body.goodbye_refusals:  # her end_session calls the page refused (20): a goodbye that looped
+        ended_fields["goodbye_refusals"] = body.goodbye_refusals
+    if body.names_live:  # the names game as the page caught it live (20)
+        ended_fields["names_live"] = [n.model_dump() for n in body.names_live]
+    if ended_fields:
+        store.update_session(pid, session_id, ended_fields)
     if body.live:  # the live session's own trace (19)
         telemetry.record_live_session(store, pid, session_id, store.get_session(pid, session_id) or {}, body)
     # Update the tutor's memory now, inside this request (Cloud Run throttles CPU after the
@@ -453,6 +463,8 @@ def end_session(
             store, llm_client, settings, pid, session_id, profile_text=account_profile(store, pid).text,
             generate_fn=bounded, games=games_for(pid, settings, games_reader),
         )
+        # The names game rechecked from the recording, if it was joined first (its own budget).
+        recheck_names_game(store, llm_client, audio, settings, pid, session_id, generate_fn=_bounded_generate(120))
     return {"status": "ended", "memory_status": memory_status, "plan_status": plan_status}
 
 
@@ -561,6 +573,16 @@ def memory_sweep(
                 store, llm_client, settings, pid, sid,
                 profile_text=profile_text, generate_fn=_bounded_generate(180), games=games,
             )
+        # The names game rechecked from the recording, for sessions both hooks missed (last 2 days).
+        for s in store.list_sessions(pid, 10):
+            ended = s.get("ended_at")
+            if (len(results) < budget and s.get("status") == "ended" and s.get("memory_status") == MEM_DONE
+                    and s.get("audio_uri") and s.get("names_recheck") in (None, "processing")
+                    and ended and now_utc() - ended <= dt.timedelta(days=2)):
+                status = recheck_names_game(store, llm_client, audio, settings, pid, s["id"],
+                                            generate_fn=_bounded_generate(120))
+                if status not in ("not_ready", "not_claimed", "skipped"):  # a model call was made
+                    results[f"names:{s['id']}"] = status
         if len(results) >= budget:
             break
     return {"processed": results, "reminders": reminders, "recordings_joined": joined}

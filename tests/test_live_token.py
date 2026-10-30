@@ -66,13 +66,12 @@ def test_voice_is_pinned_and_optional():
     assert config.live_connect_constraints.config.speech_config.voice_config is None
 
 
-def test_vocabulary_biases_transcription():
+def test_transcription_gets_no_vocabulary_list():
+    # 30.10: with a list, an unclear answer came out as the list's first name, and a long unclear
+    # line as the whole list, word for word; without it, both were transcribed as he said them.
     settings = Settings(gemini_api_key="k")
     client = SimpleNamespace(auth_tokens=FakeAuthTokens())
-    prompt = render_tutor_prompt()
-    create_live_token(settings, prompt, client, now=NOW, vocabulary=["ראש פינה", "כנרת"])
-    live_config = client.auth_tokens.config.live_connect_constraints.config
-    assert live_config.input_audio_transcription.custom_vocabulary == ["ראש פינה", "כנרת"]
-    create_live_token(settings, prompt, client, now=NOW)
+    create_live_token(settings, render_tutor_prompt(), client, now=NOW)
     live_config = client.auth_tokens.config.live_connect_constraints.config
     assert live_config.input_audio_transcription.custom_vocabulary is None
+    assert live_config.output_audio_transcription.custom_vocabulary is None

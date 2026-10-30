@@ -63,6 +63,7 @@ SESSION_FIELDS = ("id", "status", "started_at", "ended_at", "end_reason", "turn_
                   "sequencing",  # telling things in order (14): the task and its score
                   "summarizing",  # a short text in his own words (17): its score
                   "agenda", "agenda_after", "steps_done", "steps_held",  # steps mode (13): the steps it ran (exact texts), and her reports
+                  "goodbye_refusals",  # her end_session calls the page refused (20)
                   "memory_status", "memory_error", "plan_status", "plan_error",
                   "memory_model", "plan_model",  # which model did the work (09)
                   "voice_used", "voice_decision",  # the settings it ran with, and the automatic decision after it

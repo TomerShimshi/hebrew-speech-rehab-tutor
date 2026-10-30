@@ -1,6 +1,6 @@
-# Sub-plan 21: Picture sequences, like the therapist's (a draft)
+# Sub-plan 22: Picture sequences, like the therapist's (a draft)
 
-Part of the [master design](00-master-design.md). After [20](20-names-and-goodbyes.md) and [20.5](20.5-leaving-a-conversation-out.md). Requested by Tomer (2026-10-13). (Was 20 until 2026-10-24.) **A draft: to be planned in detail after the voice-only sequencing of [14](14-sequencing-stories.md) has been tried.**
+Part of the [master design](00-master-design.md). After [21](21-editing-the-memory.md). Requested by Tomer (2026-10-13). (Was 20 until 2026-10-24, then 21 until 2026-10-30.) **A draft: to be planned in detail after the voice-only sequencing of [14](14-sequencing-stories.md) has been tried.**
 
 ## Why
 His speech therapist works with picture cards: he puts them in order and tells their story chronologically. Plan 14 does the same by voice only. Pictures would bring it closer to her work. For some people pictures help, and for others they don't, so his own results with each will tell ([Doyle 1998](https://aphasiology.pitt.edu/1124/)).
@@ -16,4 +16,4 @@ His speech therapist works with picture cards: he puts them in order and tells t
 - **Compare with the voice version:** which one gets better practice and results for him.
 
 ## Commit
-`Sub-plan 21: picture sequences, like the therapist's`
+`Sub-plan 22: picture sequences, like the therapist's`

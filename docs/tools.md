@@ -292,7 +292,7 @@ Report a mistake the TUTOR made in this session, for the family to review (e.g. 
 
 | Parameter | Type | Required | Allowed values | Description |
 |---|---|---|---|---|
-| `kind` | string | yes | `invented_fact`, `insisted`, `wrong_language`, `cut_off`, `early_goodbye`, `confusing_question`, `other` |  |
+| `kind` | string | yes | `invented_fact`, `insisted`, `wrong_language`, `cut_off`, `early_goodbye`, `confusing_question`, `misheard`, `other` |  |
 | `tutor_said` | string | yes |  | HEBREW: her words, quoted exactly (just the relevant part). |
 | `he_said` | string |  |  | HEBREW: his reply, quoted exactly (empty if none). |
 | `what_went_wrong` | string | yes |  | ENGLISH: one short sentence, no Hebrew sentences. |

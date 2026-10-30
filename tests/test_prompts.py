@@ -1,4 +1,9 @@
+import json
+import re
+
+from app.agent.next_class import techniques_text
 from app.prompts import read_optional_text, render_tutor_prompt
+from app.schemas import CheckInItem, CheckInProposal
 
 
 def test_renders_all_fixed_sections_and_version():
@@ -51,3 +56,15 @@ def test_conversation_flow_rules_present():
     assert with_steps.index("## ROLE") < with_steps.index("## HOW THE SESSION WORKS") < with_steps.index("## HOW YOU TALK")
     flat = " ".join(with_steps.split())
     assert "He must never notice" in flat and "follow the HOW exactly" in flat and "FIRST call next_step" in flat
+
+
+def test_the_techniques_text_has_no_repo_notes():
+    text = techniques_text()
+    assert "docs/" not in text and "prompt_version" not in text
+    assert not any(line.lstrip().startswith("#") for line in text.splitlines())
+    assert len(text) > 500  # the techniques themselves are still there
+
+
+def test_schemas_sent_to_gemini_have_no_plan_numbers():
+    for cls in (CheckInItem, CheckInProposal):
+        assert not re.search(r"\(\d+(\.\d+)?\)", json.dumps(cls.model_json_schema()))

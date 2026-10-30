@@ -5,12 +5,16 @@ a line can keep growing (her text streams in, his line later gets Gemini's trans
 so the browser re-sends changed lines and we UPSERT by seq: retries never duplicate.
 """
 
+import re
 from enum import Enum
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
 MAX_TURNS_PER_BATCH = 50
 MAX_TEXT_CHARS = 5000
+# A transcription marker, e.g. "<no speech detected>" (20): a closed pair, which speech never has
+MARKER_RE = re.compile(r"<[^<>\n]{1,60}>")
 
 
 class Speaker(str, Enum):
@@ -32,6 +36,18 @@ class TurnIn(BaseModel):
     live_text: str = Field(default="", max_length=MAX_TEXT_CHARS)  # browser recognizer (his lines)
     t_start_s: float = Field(ge=0)
     interrupted: bool = False
+    matched_target: str | None = Field(default=None, max_length=80)  # the names-game name the page matched (20)
+
+
+class NameLive(BaseModel):
+    """One names-game name as the page saw it live (20): his transcripts, what matched, and the notes."""
+    target: str = Field(max_length=200)
+    gem: str = Field(default="", max_length=200)
+    live: str = Field(default="", max_length=200)
+    matched_by: Literal["gemini", "caption", ""] = ""
+    early_note: bool = False  # she was told during his line
+    she_accepted: bool | None = None  # her reply after it said he got it
+    corrected: bool = False  # she was told afterwards, and corrected herself
 
 
 class TurnsBatch(BaseModel):
@@ -99,6 +115,14 @@ class EndRequest(BaseModel):
     steps_done: list[StepDone] = Field(default=[], max_length=40)  # steps mode (13)
     steps_held: list[StepHeld] = Field(default=[], max_length=60)
     live: LiveStats | None = None  # the session's trace (19)
+    goodbye_refusals: int = Field(default=0, ge=0, le=20)  # end_session calls the page refused (20)
+    names_live: list[NameLive] = Field(default=[], max_length=12)  # the names game, caught live (20)
+
+
+def strip_markers(text: str) -> str:
+    """The text without transcription markers ("<no speech detected>"), and without the spaces they
+    left behind."""
+    return " ".join(MARKER_RE.sub(" ", text or "").split())
 
 
 def turn_doc_id(seq: int) -> str:

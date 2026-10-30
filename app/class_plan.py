@@ -119,12 +119,11 @@ def session_steps(plan: ClassPlan | None) -> list[dict]:
     return out
 
 
-def plan_names(plan: ClassPlan | None) -> list[str]:
-    """Every name today's session may ask for (the names game, practice): they go into the
-    transcription vocabulary -- short proper names are what it mishears most (12b)."""
+def game_names(plan: ClassPlan | None) -> list[str]:
+    """The names game's names (20): the page catches his answers with them."""
     if plan is None:
         return []
-    return list(dict.fromkeys(n for s in plan.steps for n in s.names()))
+    return list(dict.fromkeys(n for s in plan.steps if s.kind == "names_game" for n in s.names()))
 
 
 HEBREW = re.compile(r"[֐-׿]")

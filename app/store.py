@@ -58,6 +58,15 @@ def _claimable(session: dict, now: dt.datetime) -> bool:
     return status == MEM_PROCESSING and (claimed_at is None or now - claimed_at > STALE_PROCESSING)
 
 
+def _recheck_claimable(session: dict, now: dt.datetime) -> bool:
+    """The names game's recheck from the recording runs once: unset, or a crashed run (stale)."""
+    status = session.get("names_recheck")
+    if status is None:
+        return True
+    claimed_at = session.get("names_recheck_claimed_at")
+    return status == "processing" and (claimed_at is None or now - claimed_at > STALE_PROCESSING)
+
+
 def _now() -> dt.datetime:
     return dt.datetime.now(dt.timezone.utc)
 
@@ -72,6 +81,7 @@ class SessionStore(Protocol):
     # memory (sub-plan 04)
     def update_session(self, pid: str, sid: str, fields: dict) -> None: ...
     def claim_for_memory(self, pid: str, sid: str) -> bool: ...
+    def claim_names_recheck(self, pid: str, sid: str) -> bool: ...
     def pending_memory_sessions(self, pid: str, limit: int = 2) -> list[str]: ...
     def get_memory(self, pid: str) -> dict | None: ...
     def save_memory(self, pid: str, sid: str, memory: dict, previous: dict | None) -> None: ...
@@ -205,6 +215,13 @@ class InMemorySessionStore:
         if not session or not _claimable(session, _now()):
             return False
         session.update(memory_status=MEM_PROCESSING, memory_claimed_at=_now())
+        return True
+
+    def claim_names_recheck(self, pid, sid):
+        session = self.sessions.get((pid, sid))
+        if not session or not _recheck_claimable(session, _now()):
+            return False
+        session.update(names_recheck="processing", names_recheck_claimed_at=_now())
         return True
 
     def pending_memory_sessions(self, pid, limit=2):
@@ -508,6 +525,20 @@ class FirestoreSessionStore:
             if not snap.exists or not _claimable(snap.to_dict(), _now()):
                 return False
             transaction.update(ref, {"memory_status": MEM_PROCESSING, "memory_claimed_at": _now()})
+            return True
+
+        return claim(self._db.transaction())
+
+    def claim_names_recheck(self, pid, sid):
+        ref = self._session(pid, sid)
+        fs = self._fs
+
+        @fs.transactional
+        def claim(transaction):
+            snap = ref.get(transaction=transaction)
+            if not snap.exists or not _recheck_claimable(snap.to_dict(), _now()):
+                return False
+            transaction.update(ref, {"names_recheck": "processing", "names_recheck_claimed_at": _now()})
             return True
 
         return claim(self._db.transaction())

@@ -17,11 +17,9 @@ VOCABULARY_PREFIX = "vocabulary:"
 
 
 def extract_vocabulary(profile: str) -> list[str]:
-    """Names/places listed on 'Vocabulary: a, b, c' lines of the profile.
-
-    They bias Gemini's transcription toward his proper nouns -- exactly the words his
-    therapist says he struggles to retrieve, and the ones speech recognition gets wrong.
-    """
+    """Names/places listed on 'Vocabulary: a, b, c' lines of the profile (his own names, in the
+    profile she reads). Not sent to the transcription any more (30.10: it wrote them instead of his
+    words)."""
     words: list[str] = []
     for line in profile.splitlines():
         stripped = line.strip().lstrip("-* ").strip()
@@ -87,8 +85,7 @@ def needs_lines(needs: dict | None) -> list[str]:
 
 
 def render_inferred(about: list[str], vocabulary: list[str], needs: dict | None) -> str:
-    """The inferred profile's text, by code (never free-written): the same shape as an uploaded one,
-    so its Vocabulary line feeds the transcription the same way."""
+    """The inferred profile's text, by code (never free-written): the same shape as an uploaded one."""
     lines = ["Inferred by the app from his conversations (not a diagnosis; only what he said and how it went):"]
     lines += [f"- {a}" for a in about]
     need = needs_lines(needs)

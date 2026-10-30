@@ -223,7 +223,7 @@ def test_his_pace_is_measured_from_his_real_sessions():
     assert "typical" in render_pace([])
 
 
-def test_todays_names_go_into_the_transcription_vocabulary(env):
+def test_todays_names_never_go_into_the_transcription_vocabulary(env):  # 30.10: they came out instead of his words
     from conftest import FakeAuthTokens, auth
     env.store.save_memory(DAD, "s0", {"memory_prompt": "He loves the Galilee."}, None)
     env.store.save_next_plan(DAD, "s0", a_plan(steps=[
@@ -231,11 +231,22 @@ def test_todays_names_go_into_the_transcription_vocabulary(env):
         {"kind": "practice", **practice("נהריה")}]).model_dump(mode="json"))
     env.store.save_check_in_set(DAD, a_set(("עכו", "untreated")))
     env.client.post("/api/session/start", headers=auth())
-    vocabulary = FakeAuthTokens.last_config.live_connect_constraints.config.input_audio_transcription.custom_vocabulary
-    assert ["עכו", "כרמיאל", "נהריה"] == [w for w in vocabulary if w in ("עכו", "כרמיאל", "נהריה")]
+    assert FakeAuthTokens.last_config.live_connect_constraints.config.input_audio_transcription.custom_vocabulary is None
 
 
 def test_the_tutor_is_told_no_wrap_up_questions():
     from app.prompts import render_tutor_prompt
     text = " ".join(render_tutor_prompt().text.split())
     assert "no wrap-up questions" in text and "end a TOPIC, not the session" in text
+
+
+def test_the_names_game_asks_once_more_when_his_answer_is_unclear():
+    from app.steps import NamesGameStep
+    rules = NamesGameStep.RULES
+    assert "סליחה, לא שמעתי טוב, תגיד שוב?" in rules
+    assert "no second try" not in rules.lower()
+
+
+def test_the_names_game_counts_an_answer_that_sounds_like_the_name():
+    from app.steps import NamesGameStep
+    assert "sounds like" in NamesGameStep.RULES.lower()

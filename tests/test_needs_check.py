@@ -159,7 +159,7 @@ def test_the_session_gets_the_inferred_profile(env):
     env.client.post("/api/session/start", headers=auth())
     cfg = FakeAuthTokens.last_config.live_connect_constraints.config
     assert "Inferred..." in cfg.system_instruction.parts[0].text
-    assert cfg.input_audio_transcription.custom_vocabulary == ["עכו", "נהריה"]
+    assert cfg.input_audio_transcription.custom_vocabulary is None  # in her prompt, never the transcription's (30.10)
 
 
 def test_the_family_sets_an_area_and_the_inferred_profile_follows(env):

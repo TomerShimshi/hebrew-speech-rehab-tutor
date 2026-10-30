@@ -1,6 +1,13 @@
 # Sub-plan 20: Hearing the names right, and a clean goodbye
 
-Part of the [master design](00-master-design.md). After [19](19-observability.md), before [20.5](20.5-leaving-a-conversation-out.md). (Was 13.5, then 14, then 15, then 16, then 17, then 18, then 19, until 2026-10-24.) Requested by Tomer (2026-10-11). **Reviewed against the code 29.10** (after 13-19 were built): the noise filter is already off during the names game (built in 13); the recheck moved out of the memory update (the recording isn't joined yet when it runs); leaving a conversation out (was C) is now [20.5](20.5-leaving-a-conversation-out.md); the tasks below are in build order.
+Part of the [master design](00-master-design.md). After [19](19-observability.md), before [20.5](20.5-leaving-a-conversation-out.md). (Was 13.5, then 14, then 15, then 16, then 17, then 18, then 19, until 2026-10-24.) Requested by Tomer (2026-10-11). **Reviewed against the code 29.10** (after 13-19 were built): the noise filter is already off during the names game (built in 13); the recheck moved out of the memory update (the recording isn't joined yet when it runs); leaving a conversation out (was C) is now [20.5](20.5-leaving-a-conversation-out.md); the tasks below are in build order. **Built and deployed 29.10 (tasks 1-6).** After the first live test (29.10) the noise filter is back ON during the names game: off, noise in the room interrupted her question and the game stalled. And a turn of hers that was cut off no longer counts for the question gate (13.5): her repeat of the cut question is played (it was held back, and he never heard the question). **30.10: no `custom_vocabulary` for the transcription.** Replaying a session's audio to Gemini Live with and without it: with the names list, an unclear answer came out as the list's first name (3 of 3) and a long unclear line as the whole list word for word (2 of 3); without it, the line was right (3 of 3). It had been sent since 02 (the profile's names since 15.5, today's names since 12). The page's own matching (Design A) now catches the names. The manual and live checks (tasks 2, 3, 6) and the recheck's dry run (task 5) are still to do. Changes from the sketch:
+- **Result values:** names-game results are `uncued`/`cued`/`failed` (the memory agent's values), so the recheck writes those, not `self_found`/`not_found`.
+- **Corrections both ways:** the recheck corrects a lenient "yes" the recording contradicts too.
+- **The `misheard` flag** uses the caregiver page's fields (`tutor_said`, `he_said`, `evidence`) plus `names`.
+- **Joining a recording never needs Gemini:** without a key, only the recheck waits.
+- **`נדבר` isn't a goodbye in "נדבר על…".** Her goodbye mark clears when a whole turn of hers goes on without one.
+- **Console checks:** the page exposes `window.tutorDebug` with `?debug=1`.
+- **The Node 24 command** is `node --test "tests/js/*.test.mjs"`.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -36,7 +43,7 @@ Also tested, though less likely: the recording ends before the game's last answe
 
 ## Why
 - **A names-game answer misheard live (a patient session, 11.10).** He said a name correctly. Gemini, listening to the session's recording afterwards, heard it clearly (95%+ sure). But the live model answered as if he hadn't found it, and the live transcript wrote something else. So the game recorded "failed" for a name he found.
-  - The suspected contributor, the noise filter cutting a quick answer, is already handled: since 13 the filter is off while the names-game step runs (`namesGameNow()` in `noiseGate`).
+  - The suspected contributor, the noise filter cutting a quick answer, was handled in 13 by turning the filter off while the names-game step runs; that was reverted 29.10 (noise interrupted her questions), so the filter is on in the game too.
 - **A goodbye loop (Tomer's test session, 11.10).**
   - At 6.6 minutes he said "להתראות". Gemini's transcript wrote **"מה הליטרות?"**; the browser caption had it right.
   - The page decides from **Gemini's transcript only** once it arrives (`addUserFinal` sets `s.lastUserText = u.gem`), so it refused her `end_session` ("he has not said goodbye yet").
@@ -60,7 +67,7 @@ Also tested, though less likely: the recording ends before the game's last answe
   - an answer that is **clearly a different word** gets the name, warmly, with no second try.
 
   Being told "no" when he was right is the mistake that discourages him; a lenient "yes" is corrected in the score by the recheck.
-- **Live (code): done in 13.** The noise filter is off during the names-game step.
+- **Live (code):** the noise filter was off during the names-game step (13); back on since 29.10 (noise cut her questions).
 - **Live (code, added 29.10): the page catches his answer, using the names it expects.** The page knows the game's names (new: the agenda's `game_names`), and it has two transcripts of each of his lines.
   - **The browser caption is primed with the names.** Chrome has an experimental `SpeechRecognition.phrases` (`SpeechRecognitionPhrase(phrase, boost)`), which biases recognition toward expected phrases. It may need on-device recognition (`processLocally`), and Hebrew support there isn't confirmed.
     - When the names-game step starts, the page restarts its recognizer with the names at boost 5. MDN warns that 9-10 makes it hear the name in other words.
@@ -76,7 +83,7 @@ Also tested, though less likely: the recording ends before the game's last answe
   - **A match fixes the caption and the record:** the caption shows the name; the saved turn gets `matched_target`; the memory agent's transcript shows "(the page matched the names-game name: …)".
   - **A match tells her, as early as possible:**
     - *During his line* (the browser caption's interim results arrive while he is still talking), the page sends a silent note at once: `[His answer matched the name "…" -- he found it.]` It's in her context before she replies; whether it shapes the reply is tested in a session.
-    - *If her reply still treated it as wrong* (her line after his has no `נכון|כל הכבוד|מצוין|בדיוק|יפה`), the page sends, once her turn is complete, a note she answers: `[He actually said "…", the right name. Tell him warmly, in one short sentence, that he got it right, then go on with the game.]` He hears "אה, סליחה -- אמרת נכון!", once per name at most.
+    - *If her reply still treated it as wrong* (`herReplyRejected` in `static/sounds_like.js`: no praise word, and she says the name herself or asks him to say it again; moving on counts as accepting -- 29.10, a plain list of praise words missed "מדויק!" and the correction made her repeat the question), the page sends, once her turn is complete, a note she answers: `[He actually said "…", the right name. Tell him warmly, in one short sentence, that he got it right, then go on with the game -- don't ask a question you already asked.]` He hears "אה, סליחה -- אמרת נכון!", once per name at most.
   - **Recorded:** `names_live` on the session, one entry per name: `{target, gem, live, matched_by, early_note, she_accepted, corrected}`. The recheck then shows how often the page's match agreed with the recording.
 - **After the session (code, the main fix): a recheck job**, `app/names_recheck.py`. It can't be part of the memory update: `/end` runs the memory update while the page's `/audio/finish` joins the recording in parallel, so the recording is usually not there yet.
   - **Runs when both are done** (memory `done`, `audio_uri` set, the plan had a names game, `probe_results` has names-game items), from whichever finishes second: the end of `/audio/finish`, the end of `/end`, and the hourly sweep (for the rest). A claim (`names_recheck: processing`) makes it run once.
@@ -351,7 +358,7 @@ def test_end_runs_the_recheck_when_the_recording_was_joined_first(client, ...):
 - [ ] **Step 1: Write the failing tests.** Invented names and words only.
 
 ```js
-// tests/js/sounds_like.test.mjs -- run: node --test tests/js/
+// tests/js/sounds_like.test.mjs -- run: node --test "tests/js/*.test.mjs"
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { soundsLike, skeleton } from "../../static/sounds_like.js";
@@ -388,7 +395,7 @@ def test_the_memory_agent_sees_the_pages_match():
     assert "the page matched the names-game name: חיפה" in format_transcript(turns)
 ```
 
-- [ ] **Step 2:** `node --test tests/js/` and `pytest -k "game_names or names_live or pages_match" -v`. Expected: both FAIL.
+- [ ] **Step 2:** `node --test "tests/js/*.test.mjs"` and `pytest -k "game_names or names_live or pages_match" -v`. Expected: both FAIL.
 - [ ] **Step 3: Implement `static/sounds_like.js`.**
   - Edit distance between `skeleton(target)` and the skeleton of every run of 1-3 consecutive words in `heard`.
   - Allowed: 0 for a skeleton of up to 3 letters, 1 for 4-6 letters, 2 for 7 or more.
@@ -409,10 +416,10 @@ def test_the_memory_agent_sees_the_pages_match():
       - record `s.namesLive[target]` (`matched_by`, `gem`, `live`);
       - if his line is still open (no reply of hers since it started), `sendSilentNote` the early note and set `early_note: true`.
   - **Correction:**
-    - When her turn after a matched line completes, set `she_accepted` from her line (`/נכון|כל הכבוד|מצוין|בדיוק|יפה/`).
+    - When her turn after a matched line completes, set `she_accepted` from her line (`herReplyRejected`, see Design A).
     - If it's false, send the correction note (`sendNote`), once per name, and set `corrected: true`.
   - **Saving:** `matched_target` goes in the turn's upload; `names_live: Object.values(s.namesLive)` goes in the `/end` body.
-- [ ] **Step 6:** `node --test tests/js/` and `pytest`. Expected: all pass.
+- [ ] **Step 6:** `node --test "tests/js/*.test.mjs"` and `pytest`. Expected: all pass.
 - [ ] **Step 7: Live check on a test account** (credit: one short session per check).
   - **The early note:** in the names game, answer right but mumbled. The `tutor` trace's context shows the early note before her reply. Note whether she said "נכון!" (`she_accepted`).
   - **The correction:** say a near-miss she rejects. She corrects herself after her turn.
@@ -425,7 +432,7 @@ def test_the_memory_agent_sees_the_pages_match():
 - [ ] After her goodbye, a short reply from him ends the session whatever the transcripts heard; a long one doesn't; never more than two refusals; "בייגלה" is not a goodbye.
 - [ ] No `<...>` transcription markers in the captions, the saved transcript or the memory agent's input.
 - [ ] The plan builder's prompt has the techniques only: no file comments, no `docs/` references; the names-game set's schema has no plan numbers.
-- [ ] `pytest` and `node --test tests/js/` pass.
+- [ ] `pytest` and `node --test "tests/js/*.test.mjs"` pass.
 
 ## Commit (when Tomer asks)
 `Sub-plan 20: hearing the names right, and a clean goodbye`

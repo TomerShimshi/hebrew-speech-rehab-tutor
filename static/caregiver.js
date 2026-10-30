@@ -132,7 +132,8 @@ function renderFlags(flags) {
 }
 
 const ISSUE = { invented_fact: "המציאה עובדה", insisted: "התעקשה", wrong_language: "לא בעברית",
-                cut_off: "קטעה אותו", early_goodbye: "סיימה מוקדם מדי", confusing_question: "שאלה מבלבלת", other: "אחר" };
+                cut_off: "קטעה אותו", early_goodbye: "סיימה מוקדם מדי", confusing_question: "שאלה מבלבלת",
+                misheard: "שמעה לא נכון במשחק השמות", other: "אחר" };
 
 // Each language on its own line: the English explanation, her words, his words -- never
 // mixed in one line (bidirectional text is unreadable otherwise).
@@ -339,7 +340,8 @@ function renderSessions(sessions) {
           where.textContent = err.status === 409 ? "נראה שהשיחה עוד פעילה." : "העיבוד נכשל. נסה שוב.";
         }
       }) : null;
-    const problems = [s.memory_status === "failed" && "עדכון הזיכרון נכשל", s.plan_status === "failed" && "בניית השיעור נכשלה"]
+    const problems = [s.memory_status === "failed" && "עדכון הזיכרון נכשל", s.plan_status === "failed" && "בניית השיעור נכשלה",
+                      s.goodbye_refusals > 0 && `⚠ סירוב פרידה ×${s.goodbye_refusals}`] // a goodbye that looped (20)
       .filter(Boolean);
     return el("div", { class: "session" },
       el("div", { class: "head" },

@@ -64,7 +64,6 @@ def build_live_config(
     settings: Settings,
     prompt: TutorPrompt,
     resume_handle: str | None = None,
-    vocabulary: list[str] | None = None,
     voice: VoiceSettings | None = None,
 ) -> types.LiveConnectConfig:
     voice = voice or VoiceSettings(silence_ms=settings.vad_silence_ms)
@@ -77,10 +76,10 @@ def build_live_config(
         )
     # The language hint DOES apply to transcription (his speech and hers as captions).
     # VERBATIM (default) keeps hesitations and false starts -- useful for later analysis.
-    transcription = types.AudioTranscriptionConfig(
-        language_codes=[settings.live_language],
-        custom_vocabulary=vocabulary or None,  # his names and places (from the private profile)
-    )
+    # No custom_vocabulary (30.10): with his names in it, an unclear answer was transcribed as the
+    # list's first name, and a long unclear line as the whole list, word for word. The page catches
+    # the names game's names itself (20), from both transcripts.
+    transcription = types.AudioTranscriptionConfig(language_codes=[settings.live_language])
     return types.LiveConnectConfig(
         response_modalities=[types.Modality.AUDIO],
         system_instruction=types.Content(parts=[types.Part(text=prompt.text)]),
@@ -122,7 +121,6 @@ def create_live_token(
     client: genai.Client,
     now: dt.datetime | None = None,
     resume_handle: str | None = None,
-    vocabulary: list[str] | None = None,
     voice: VoiceSettings | None = None,
 ) -> LiveToken:
     now = now or dt.datetime.now(dt.timezone.utc)
@@ -134,7 +132,7 @@ def create_live_token(
             new_session_expire_time=now + dt.timedelta(minutes=1),
             live_connect_constraints=types.LiveConnectConstraints(
                 model=settings.live_model,
-                config=build_live_config(settings, prompt, resume_handle, vocabulary, voice),
+                config=build_live_config(settings, prompt, resume_handle, voice),
             ),
         )
     )

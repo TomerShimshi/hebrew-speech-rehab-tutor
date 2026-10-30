@@ -18,7 +18,7 @@ from app.config import Settings, get_settings
 from app.audio_store import InMemoryAudioStore
 from app.main import (
     app, get_push_sender, get_audio_store, get_games_reader, get_genai_client, get_prompt_archive, get_store,
-    get_text_client, get_token_limiter,
+    get_optional_text_client, get_text_client, get_token_limiter,
 )
 from app.prompt_archive import PromptArchive
 from app.rate_limit import SlidingWindowLimiter
@@ -118,6 +118,7 @@ def env(tmp_path, monkeypatch):
         app.dependency_overrides[get_token_verifier] = lambda: fake_verifier
         app.dependency_overrides[get_oidc_verifier] = lambda: fake_oidc_verifier
         app.dependency_overrides[get_text_client] = lambda: state.llm
+        app.dependency_overrides[get_optional_text_client] = lambda: state.llm
         app.dependency_overrides[get_games_reader] = lambda: state.games_reader
         app.dependency_overrides[get_audio_store] = lambda: state.audio  # never the real bucket
         # notifications (11): recorded here, never sent; a subscription whose endpoint contains

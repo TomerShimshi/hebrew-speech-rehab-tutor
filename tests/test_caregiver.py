@@ -87,6 +87,13 @@ def test_sessions_and_transcript(env):
     assert get(env, f"/api/caregiver/{TOMER}/sessions/{sid}").status_code == 404
 
 
+def test_the_session_row_shows_goodbye_refusals(env):
+    sid = seed(env, DAD)
+    env.store.update_session(DAD, sid, {"goodbye_refusals": 1})
+    row = get(env, f"/api/caregiver/{DAD}/sessions").json()["sessions"][0]
+    assert row["goodbye_refusals"] == 1
+
+
 def test_memory_history(env):
     seed(env, DAD)
     versions = get(env, f"/api/caregiver/{DAD}/memory/history").json()["versions"]

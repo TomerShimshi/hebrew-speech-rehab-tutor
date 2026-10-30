@@ -30,7 +30,7 @@ def test_a_session_gets_only_its_own_profile_and_names(env):
     env.store.save_profile(DAD, ASSESSMENT, "uploaded", TOMER)
     env.client.post("/api/session/start", headers=auth())
     assert "Man, 69" in config().system_instruction.parts[0].text
-    assert config().input_audio_transcription.custom_vocabulary == ["עין גדי", "מצפה רמון"]
+    assert config().input_audio_transcription.custom_vocabulary is None  # 30.10: no list for the transcription
     env.client.post("/api/session/start", headers=auth("tok-tomer"))  # an account without a profile
     text_ = config().system_instruction.parts[0].text
     assert "Man, 69" not in text_ and not config().input_audio_transcription.custom_vocabulary

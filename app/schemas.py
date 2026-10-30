@@ -168,7 +168,7 @@ class PrimaryGoal(BaseModel):
 
 
 class CheckInItem(BaseModel):
-    """One name in the names game (12): asked the same way every time."""
+    """One name in the names game: asked the same way every time."""
     target: str = Field(description="HEBREW: the name he should come up with.")
     question: str = Field(description="HEBREW: the fixed describing question she asks, WITHOUT hints, in her voice.")
     about_his_life: bool = Field(default=False, description=(
@@ -178,9 +178,23 @@ class CheckInItem(BaseModel):
 
 
 class CheckInProposal(BaseModel):
-    """The plan builder's proposal for a new names-game set (12)."""
+    """The plan builder's proposal for a new names-game set."""
     items: list[CheckInItem] = Field(json_schema_extra={"minItems": 6, "maxItems": 10})
     rationale: str = Field(default="", description="ENGLISH, one sentence: how the set was chosen (for the family).")
+
+
+class NameHeard(BaseModel):
+    """His answer to one names-game question, as heard in the session's recording."""
+    target: str = Field(description="The target name, copied exactly as given in the list.")
+    heard: str = Field(description="HEBREW: what he actually said in reply to this question (empty if nothing).")
+    found: bool = Field(description="true if he said the target name himself (a near pronunciation counts), "
+                                    "before the tutor said it.")
+    confident: bool = Field(description="false if the recording is unclear here, cut, or you are unsure.")
+
+
+class NamesHeard(BaseModel):
+    """What he answered in the names game, from the recording."""
+    names: list[NameHeard] = Field(default=[], description="One entry per question you can hear answered.")
 
 
 class GameHomework(BaseModel):

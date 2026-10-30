@@ -26,6 +26,7 @@ from app.config import REPO_ROOT, Settings
 from app.llm import generate
 from app.schemas import SECTION_NAMES, ClassPlan, MemoryDoc, MemorySections
 from app.store import MEM_DONE, MEM_FAILED, MEM_SKIPPED, PLAN_PENDING, SessionStore
+from app.transcripts import strip_markers
 
 PROMPT_PATH = REPO_ROOT / "prompts" / "memory_update.yaml"
 MIN_PATIENT_LINES = 2
@@ -53,12 +54,15 @@ def format_transcript(turns: list[dict]) -> str:
         stamp = f"[{t.get('t_start_s', 0):6.1f}s]"
         if t["speaker"] == "tutor":
             cut = " (interrupted by him)" if t.get("interrupted") else ""
-            lines.append(f"{stamp} TUTOR: {t.get('text', '')}{cut}")
+            lines.append(f"{stamp} TUTOR: {strip_markers(t.get('text', ''))}{cut}")
         else:
-            gem, live = (t.get("text") or "").strip(), (t.get("live_text") or "").strip()
+            # no transcription markers (20): sessions saved before the page dropped them
+            gem, live = strip_markers(t.get("text") or ""), strip_markers(t.get("live_text") or "")
             line = f"{stamp} HIM: {gem or '(no Gemini transcript)'}"
             if live and live != gem:
                 line += f"\n{'':9} browser caption: {live}"
+            if t.get("matched_target"):  # the page heard the expected name in one of his transcripts (20)
+                line += f"\n{'':9} (the page matched the names-game name: {t['matched_target']})"
             lines.append(line)
     return "\n".join(lines)
 

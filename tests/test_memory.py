@@ -6,7 +6,7 @@ from app.agent.memory_update import format_transcript, run_memory_update
 from app.config import Settings
 from app.schemas import MemorySections, WordResult
 from app.store import InMemorySessionStore
-from app.transcripts import EndReason, TurnIn
+from app.transcripts import EndReason, TurnIn, strip_markers
 from fake_llm import FakeClient, server_error, text, tool_calls
 
 TODAY = dt.date(2026, 10, 1)
@@ -183,6 +183,25 @@ def test_a_session_is_processed_only_once():
     # an active (not ended) session can't be claimed either
     active = store.create_session(PID, user_email="d", model="m", prompt_version="v")
     assert not store.claim_for_memory(PID, active)
+
+
+def test_markers_are_dropped():
+    assert strip_markers("נהדר, ספר לי עוד <no speech detected>") == "נהדר, ספר לי עוד"
+    assert strip_markers("<noise> כן ") == "כן"
+    assert strip_markers("כן") == "כן"
+
+
+def test_the_memory_agent_never_reads_markers():
+    turns = [{"speaker": "tutor", "text": "שלום <no speech detected>", "t_start_s": 0},
+             {"speaker": "patient", "text": "<noise>", "live_text": "שלום", "t_start_s": 2}]
+    out = format_transcript(turns)
+    assert "<" not in out and "שלום" in out
+
+
+def test_the_memory_agent_sees_the_pages_match():
+    turns = [{"speaker": "patient", "text": "היפה", "matched_target": "חיפה", "t_start_s": 3}]
+    assert "the page matched the names-game name: חיפה" in format_transcript(turns)
+    assert "the page matched" not in format_transcript([{"speaker": "patient", "text": "כן", "t_start_s": 4}])
 
 
 def test_transcript_formatting_shows_both_versions_when_they_differ():

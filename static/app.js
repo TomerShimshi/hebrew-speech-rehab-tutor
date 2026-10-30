@@ -36,6 +36,7 @@ const $ = (id) => document.getElementById(id);
 // Carry app.js's ?v=<asset version> onto the worklets, so a deploy never runs stale audio code.
 const ASSET_QUERY = new URL(import.meta.url).search;
 const { initAuth, signIn, signOut, idToken } = await import(`./auth.js${ASSET_QUERY}`);
+const { soundsLike, herReplyRejected } = await import(`./sounds_like.js${ASSET_QUERY}`); // the names game's live match (20)
 const screens = {
   signin: $("screen-signin"), start: $("screen-start"), session: $("screen-session"), ended: $("screen-ended"),
 };
@@ -61,7 +62,8 @@ function setIndicator(state) {
       // Whatever the recognizer heard while she was audible is her echo: skip past it,
       // and keep ignoring it for a moment after she stops (the recognizer lags).
       s.recBase = s.recCount;
-      if (!speaking) s.echoUntil = performance.now() + 800;
+      // In the names game, 300 ms (20): his answer comes quick, and she never says a name before it.
+      if (!speaking) s.echoUntil = performance.now() + (namesGameNow() ? 300 : 800);
     }
     s.tutorAudio = speaking;
     if (!speaking) s.gateOpen = false; // the noise filter re-arms for her next turn
@@ -77,6 +79,9 @@ if (DEBUG) {
 }
 const eventLog = [];
 window.tutorLog = eventLog;
+// The goodbye's checks (20), for trying them in the console with ?debug=1 (this file is a module).
+if (DEBUG) window.tutorDebug = { goodbyeRe: () => GOODBYE_RE, heSaidGoodbye: () => heSaidGoodbye(),
+                                 repliedToHerBye: () => repliedToHerBye(), state: () => s };
 function log(kind, detail) {
   const t0 = s?.startedAt ?? performance.now();
   const entry = { t: ((performance.now() - t0) / 1000).toFixed(2), kind, detail };
@@ -100,6 +105,12 @@ function log(kind, detail) {
 //   interrupted, so Gemini's transcript -- which can arrive after she starts -- joins it.
 // - The live recognizer is ignored while her turn is active or her audio is playing
 //   (that's her own voice, or his late words that Gemini's transcript will cover).
+// Transcription markers ("<no speech detected>", 20): never shown, saved or matched. A closed pair --
+// speech never has one. A marker split across two pieces is caught by cleaning the whole line after
+// each append.
+const MARKER_RE = /<[^<>\n]{1,60}>/g;
+const dropMarkers = (t) => (t || "").replace(MARKER_RE, "").replace(/ {2,}/g, " ");
+
 function newLine(speaker) {
   const line = document.createElement("div");
   line.className = `line ${speaker}`;
@@ -116,7 +127,8 @@ function newLine(speaker) {
 
 function renderUser(u) {
   markDirty(u);
-  u.textEl.textContent = u.gem || u.live;
+  // a names-game answer the page matched shows as the name (20); the transcripts are saved as heard
+  u.textEl.textContent = u.matchedTarget || u.gem || u.live;
   u.line.classList.toggle("live", !u.gem);
   $("captions").scrollTop = $("captions").scrollHeight;
 }
@@ -125,6 +137,10 @@ function ensureUserLine() {
   if (!s.userLine) {
     s.tutorLine = null;
     s.userLine = newLine("patient");
+    s.userLine.startedAt = performance.now(); // "after her goodbye" compares line starts (20)
+    s.prevUserLine = s.lastUserLine; // his last two lines: a goodbye split across two (20)
+    s.lastUserLine = s.userLine;
+    s.userLine.inGame = namesGameNow(); // his answer is matched even if she moves on before its transcript (20)
     countAnswer();
   }
   return s.userLine;
@@ -148,8 +164,10 @@ function onTutorOutput() {
     // turn isn't an answer to one of our notes -- then it would be a second question in a row.
     // Decided here, at the start of the NEXT turn: by now her previous words have been transcribed
     // (checking her text at the tool call came too early -- the transcript lags behind the audio).
+    // Not after a turn of hers that was cut off (noise, 29.10): this one repeats a question he never
+    // fully heard -- held back, the game stalled in silence.
     s.suppressTurn = !!(s.turnsSinceUser > 0 && /[?؟]/.test(s.tutorTextSinceUser || "")
-                        && (s.lastNoteAt || 0) < (s.lastTutorEndAt || 0));
+                        && (s.lastNoteAt || 0) < (s.lastTutorEndAt || 0) && !s.lastTurnCut);
     if (s.suppressTurn) {
       log("gate", "turn not played: she already asked him a question he hasn't answered");
       sendSilentNote("[Your last turn was NOT played to him: he hasn't answered your previous question yet. " +
@@ -163,12 +181,17 @@ function addTutorText(text) {
   onTutorOutput();
   if (!s.tutorLine) {
     s.tutorLine = newLine("tutor");
+    s.herLineBye = false;
     if (s.suppressTurn) { // kept in the transcript, marked: he never heard it
       s.tutorLine.notPlayed = true;
       s.tutorLine.line.classList.add("not-played");
     }
   }
-  s.tutorLine.textEl.textContent += text;
+  text = dropMarkers(text);
+  s.tutorLine.textEl.textContent = dropMarkers(s.tutorLine.textEl.textContent + text);
+  // Her goodbye (20): the moment her line first says it (or the closing started); a played line only.
+  if (!s.suppressTurn && !s.herLineBye && GOODBYE_RE.test(s.tutorLine.textEl.textContent)) s.herLineBye = true;
+  if (!s.suppressTurn && !s.herByeAt && (s.herLineBye || s.closing)) s.herByeAt = performance.now();
   if (!s.suppressTurn) s.tutorTextSinceUser = (s.tutorTextSinceUser || "") + text;
   if (s.cards && !s.suppressTurn) {
     s.cardsHeard += text;
@@ -187,7 +210,16 @@ function endTutorTurn(reason) {
   s.modelActive = false;
   s.turnAudioS = 0;
   if (s.cards && s.cardsHeard && !s.suppressTurn) revealCards(true); // the transcript can miss words
+  // A whole turn of hers with words but no goodbye, before the closing: the conversation went on
+  // (e.g. "רוצה להפסיק?" -- "לא"), so his short lines aren't goodbyes anymore (20).
+  if (!s.suppressTurn && !s.closing && s.tutorLine?.textEl.textContent.trim() && !s.herLineBye) s.herByeAt = 0;
+  // her reply to a names-game answer the page matched (20); an interrupted one isn't judged
+  if (!s.suppressTurn && s.pendingMatch) {
+    if (reason === "complete") checkHerReply(s.tutorLine?.textEl.textContent || "");
+    else s.pendingMatch = null;
+  }
   if (!s.suppressTurn) {
+    s.lastTurnCut = reason === "interrupted";
     s.turnsSinceUser = (s.turnsSinceUser || 0) + 1;
     s.lastTutorEndAt = performance.now();
   }
@@ -257,8 +289,9 @@ function setUserLive(text) {
   s.lastUserAt = performance.now();
   heSpoke();
   const u = ensureUserLine();
-  u.live = text;
+  u.live = dropMarkers(text);
   s.lastUserText = u.gem || u.live;
+  matchName(u, "caption");
   renderUser(u);
 }
 
@@ -268,22 +301,118 @@ function addUserFinal(text) {
   heSpoke();
   log("in", `gemini heard: ${text}`);
   const u = ensureUserLine();
-  u.gem += text;
+  u.gem = dropMarkers(u.gem + text);
   s.lastUserText = u.gem;
+  matchName(u, "gemini");
   renderUser(u);
+}
+
+// ---- the names game, caught live (20) -------------------------------------------------------
+// The live model sometimes hears a name he said right as something else (11.10). The page knows the
+// names it expects: every line of his during the game -- interim and final, from both transcripts --
+// is matched against the names not yet found (soundsLike: a consonant skeleton, a small distance).
+// A match fixes the caption and the saved turn, and tells her: at once while his line is still open
+// (a silent note, in her context before she replies), or -- if her reply still treated it as wrong --
+// right after her turn (a note she answers, once per name).
+function matchName(u, by) {
+  const entry = u.matchedTarget && s.namesLive[u.matchedTarget];
+  if (entry) { // the line keeps growing: keep both of its transcripts with the match
+    Object.assign(entry, { gem: u.gem.slice(0, 200), live: u.live.slice(0, 200) });
+    return;
+  }
+  if (!(u.inGame || namesGameNow()) || !s.gameNames.length) return;
+  const heard = by === "gemini" ? u.gem : u.live;
+  const target = s.gameNames.find((n) => !s.namesLive[n] && soundsLike(heard, n));
+  if (!target) return;
+  u.matchedTarget = target;
+  const open = s.userLine === u && !s.modelActive; // no reply of hers since his line started
+  s.namesLive[target] = { target, gem: u.gem.slice(0, 200), live: u.live.slice(0, 200), matched_by: by,
+                          early_note: open, she_accepted: null, corrected: false };
+  s.pendingMatch = target; // her reply to this line is checked when her turn completes
+  log("names", `matched "${target}" (${by}: "${heard}")${open ? "; early note" : ""}`);
+  if (open) sendSilentNote(`[His answer matched the name "${target}" -- he found it.]`);
+}
+
+// Her turn after a matched line is complete: did she take it as right? If not, she's told (once per name).
+function checkHerReply(herText) {
+  const entry = s.pendingMatch && s.namesLive[s.pendingMatch];
+  if (!entry || !herText.trim()) return; // no words yet (e.g. only a tool call): her next turn is the reply
+  s.pendingMatch = null;
+  entry.she_accepted = !herReplyRejected(herText, entry.target);
+  if (entry.she_accepted || entry.corrected) return;
+  entry.corrected = true;
+  log("names", `correction: she didn't accept "${entry.target}"`);
+  sendNote(`[He actually said "${entry.target}", the right name. Tell him warmly, in one short sentence, that he ` +
+           "got it right, then go on with the game -- don't ask a question you already asked.]");
+}
+
+// The names game's step starts or ends (20): the caption is primed with its names -- where the browser
+// can (Chrome's experimental SpeechRecognition.phrases) -- and back to the plain recognizer after it.
+function syncNamesGame() {
+  const on = namesGameNow();
+  if (on && !s.gameNames.length) {
+    s.gameNames = s.agenda?.game_names || [];
+    log("names", `names game: ${s.gameNames.length} names`);
+  }
+  const want = on && s.gameNames.length && !s.primingOff ? s.gameNames : null;
+  if (!!want !== !!s.rec?.primed && s.rec) restartRecognizer(want);
 }
 
 function recognizerMuted() {
   return s.muted || s.modelActive || s.tutorAudio || performance.now() < s.echoUntil;
 }
 
-function startLiveRecognizer() {
+// Priming the caption with the names game's names (20). Boost 5: MDN warns 9-10 makes it hear the
+// name inside other words. Experimental (Chrome), and it may need on-device recognition, whose Hebrew
+// isn't confirmed: feature-detected, and any error falls back to the plain recognizer, logged once.
+const NAMES_BOOST = 5;
+const PRIMING_ERRORS = ["phrases-not-supported", "language-not-supported", "service-not-allowed"];
+function primingUnavailable(reason) {
+  if (s.primingOff) return;
+  s.primingOff = true;
+  log("recognizer", `names priming not available (${reason})`);
+}
+
+function primeRecognizer(SR, rec, names) {
+  if (!("phrases" in SR.prototype) || typeof window.SpeechRecognitionPhrase !== "function") {
+    primingUnavailable("no phrases in this browser");
+    return;
+  }
+  try {
+    if ("processLocally" in SR.prototype) rec.processLocally = true;
+    rec.phrases = names.map((n) => new window.SpeechRecognitionPhrase(n, NAMES_BOOST));
+    rec.primed = true;
+    log("recognizer", `primed with ${names.length} names`);
+  } catch (err) {
+    primingUnavailable(err.message);
+  }
+}
+
+// A new recognizer (primed with `names`, or plain): the old one is stopped first -- one at a time.
+function restartRecognizer(names) {
+  const sess = s, old = s.rec;
+  let started = false;
+  const start = () => {
+    if (started || s !== sess || s.ending || s.hangingUp) return;
+    started = true;
+    s.recBase = s.recCount = 0;
+    s.rec = startLiveRecognizer(names);
+  };
+  if (!old) return start();
+  old.onresult = old.onerror = null;
+  old.onend = start;
+  setTimeout(start, 1000); // in case the old one had already ended
+  try { old.abort(); } catch { start(); }
+}
+
+function startLiveRecognizer(names = null) {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) return null; // e.g. Firefox: captions fall back to Gemini's transcript only
   const rec = new SR();
   rec.lang = "he-IL";
   rec.continuous = true;
   rec.interimResults = true;
+  if (names?.length) primeRecognizer(SR, rec, names);
   rec.onresult = (e) => {
     if (!s) return;
     s.recCount = e.results.length;
@@ -297,6 +426,11 @@ function startLiveRecognizer() {
   };
   rec.onerror = (e) => {
     log("recognizer", `error: ${e.error}`);
+    if (rec.primed && PRIMING_ERRORS.includes(e.error) && s) { // the priming failed: the plain one (20)
+      primingUnavailable(e.error);
+      restartRecognizer(null);
+      return;
+    }
     if (e.error === "not-allowed" || e.error === "service-not-allowed") rec.onend = null;
   };
   rec.onend = () => {
@@ -464,6 +598,7 @@ async function fetchToken(resumeHandle) {
     s.stepsDone = [];
     s.stepsHeld = [];
     showCards();
+    syncNamesGame();
   }
   if (t.start_note) s.startNote = t.start_note; // the greeting cue, with when they last talked
   if (t.game_homework) s.gameHomework = t.game_homework; // buttons for the end screen (06)
@@ -488,6 +623,7 @@ function turnPayload(line) {
     live_text: line.speaker === "patient" ? line.live : "",
     t_start_s: Math.max(0, line.t),
     interrupted: !!line.interrupted,
+    matched_target: line.matchedTarget || null, // the names-game name the page matched (20)
   };
 }
 
@@ -509,6 +645,11 @@ async function flushTurns(sess, { keepalive = false } = {}) {
   if (sess.dirty.size && !keepalive) await flushTurns(sess); // more than 50 were pending
 }
 
+// One entry per names-game name (20): what the page matched, and the names it never matched.
+function namesLiveRecord(sess) {
+  return (sess.gameNames || []).slice(0, 12).map((n) => sess.namesLive?.[n] || { target: n });
+}
+
 async function finishRemote(sess, reason) {
   if (!sess.sessionId) return;
   await flushTurns(sess, { keepalive: true });
@@ -518,7 +659,9 @@ async function finishRemote(sess, reason) {
   }
   try {
     log("save", `session ended (${reason}); updating memory…`);
-    const res = await api(`api/session/${sess.sessionId}/end`, { reason, steps_done: sess.stepsDone || [], steps_held: sess.stepsHeld || [], live: sess.live },
+    const res = await api(`api/session/${sess.sessionId}/end`, { reason, steps_done: sess.stepsDone || [], steps_held: sess.stepsHeld || [], live: sess.live,
+                                                                    goodbye_refusals: sess.goodbyeRefusals || 0,
+                                                                    names_live: namesLiveRecord(sess) },
                           { keepalive: true });
     const body = await res.json().catch(() => ({}));
     log("save", `memory update: ${body.memory_status ?? res.status}`);
@@ -645,13 +788,39 @@ function holdStep(reason) {
   s.stepsHeld.push({ step: s.stepIndex, reason, at_s: Math.round((performance.now() - s.startedAt) / 100) / 10 });
 }
 
-// Words that mean he is saying goodbye / wants to stop (Hebrew, plus common loanwords).
-const GOODBYE_RE = /להתראות|ביי|bye|ciao|צ'?או|נתראה|יום טוב|ערב טוב|לילה טוב|שלום שלום|להפסיק|לסיים|מספיק להיום|די להיום/i;
+// Words that mean he is saying goodbye / wants to stop (Hebrew, plus common loanwords). Whole words
+// only (20: "ביי" matched inside "בייגלה"), with a one-letter prefix allowed ("ולהתראות"). "נדבר" but
+// not "נדבר על..." (that's her starting a topic, not a goodbye).
+const GOODBYE_RE =
+  /(?<![א-ת])[ושהבלכמ]?(?:להתראות|ביי|bye|ciao|צ'?או|נתראה|נדבר(?!\s+על)|יום טוב|ערב טוב|לילה טוב|שלום שלום|להפסיק|לסיים|מספיק להיום|די להיום)(?![א-ת])/i;
+// "שיהיה לך (יום טוב...)" is his goodbye only after hers (20): before it, it's just a wish.
+const SOON_BYE_RE = /שיהיה לך/;
+const MAX_GOODBYE_REFUSALS = 2; // never a goodbye loop (20): the third end_session is accepted
+
+// Did he say goodbye? (20) Both transcripts -- Gemini's and the browser caption -- of his last line
+// and the line before it (a goodbye split across two lines). On 11.10 Gemini wrote "מה הליטרות?" for
+// his "להתראות" while the caption had it right, and the refusals looped.
+function heSaidGoodbye() {
+  const afterHers = s.closing || s.herLineBye;
+  return [s.lastUserLine, s.prevUserLine].some((u) => u && [u.gem, u.live].some((t) =>
+    t && (GOODBYE_RE.test(t) || (afterHers && SOON_BYE_RE.test(t)))));
+}
+
+// Her goodbye, then his reply (20): two people don't check each other's words at the end of a call.
+// After she said goodbye, a short line of his (1-4 words in either transcript) is his goodbye, whatever
+// the transcripts made of it; a longer one means he's still talking. Compared by when his line started.
+function repliedToHerBye() {
+  const u = s.lastUserLine;
+  if (!s.herByeAt || !u || !(u.startedAt > s.herByeAt)) return false;
+  const words = (t) => (t || "").split(/\s+/).filter(Boolean).length;
+  return [u.gem, u.live].some((t) => words(t) >= 1 && words(t) <= 4);
+}
 
 // The tutor's only tool: she hangs up -- but, like two people, only after he said goodbye
 // too. The model sometimes hangs up in the same breath as her own goodbye, so the browser
 // enforces it: a premature call is refused, and she's told to wait and call again. After a
-// silence nudge (he went quiet after her goodbye) the call is accepted.
+// silence nudge (he went quiet after her goodbye), a short reply to her goodbye, or two
+// refusals (20), the call is accepted.
 function handleToolCall(toolCall) {
   for (const fc of toolCall.functionCalls || []) addContext("call", { id: fc.id || "", name: fc.name, args: fc.args || {} });
   const herLine = s.tutorLine; // her turn so far (he may start a new line while we wait)
@@ -680,7 +849,7 @@ function answerToolCall(toolCall, herLine) {
       continue;
     }
     const needed = s.agenda?.min_answers?.[s.stepIndex] ?? 2;
-    if (fc.name === "next_step" && (s.answersInStep || 0) < needed && !GOODBYE_RE.test(s.lastUserText || "")) {
+    if (fc.name === "next_step" && (s.answersInStep || 0) < needed && !heSaidGoodbye()) {
       // A talking step is a real short conversation (12.10): not before he has answered enough times.
       log("tool", `next_step held: ${s.answersInStep || 0} of ${needed} answers in this step`);
       holdStep("answers");
@@ -700,6 +869,7 @@ function answerToolCall(toolCall, herLine) {
       s.stepIndex += 1;
       s.answersInStep = 0;
       showCards();
+      syncNamesGame();
       const steps = s.agenda?.steps || [];
       const left = steps.length - s.stepIndex;
       const longEnough = performance.now() - s.startedAt >= MIN_SESSION_MS;
@@ -713,13 +883,22 @@ function answerToolCall(toolCall, herLine) {
       continue;
     }
     if (fc.name === "end_session") {
-      const heSaidBye = GOODBYE_RE.test(s.lastUserText || "");
-      if (heSaidBye || s.nudged) {
-        log("tool", `end_session accepted (${heSaidBye ? "he said goodbye" : "after silence"})`);
+      const heSaidBye = heSaidGoodbye();
+      const replied = !heSaidBye && repliedToHerBye();
+      const refusals = s.goodbyeRefusals || 0;
+      if (heSaidBye || replied || s.nudged || refusals >= MAX_GOODBYE_REFUSALS) {
+        const why = heSaidBye ? "he said goodbye" : replied ? "he replied to her goodbye"
+          : s.nudged ? "after silence" : `after ${refusals} refusals`;
+        log("tool", `end_session accepted (${why})`);
         hangUpAfterGoodbye();
         continue; // no reply needed: we're closing (and a reply mid-goodbye can upset the session)
       } else {
-        log("tool", `end_session refused: his last words were not a goodbye ("${s.lastUserText}")`);
+        s.goodbyeRefusals = refusals + 1;
+        const u = s.lastUserLine;
+        const herBye = !s.herByeAt ? "she hasn't said goodbye yet"
+          : !(u?.startedAt > s.herByeAt) ? "he hasn't spoken since her goodbye" : "his reply to her goodbye was long";
+        log("tool", `end_session refused (${s.goodbyeRefusals} of ${MAX_GOODBYE_REFUSALS}): no goodbye in his last ` +
+                    `lines ("${s.lastUserText}"), and ${herBye}`);
         response = {
           ok: false,
           result: "Not ended: he has not said goodbye yet. Wait for his goodbye, then call end_session again.",
@@ -773,6 +952,10 @@ async function startSession() {
     live: { prompt_tokens: 0, response_tokens: 0, audio_in_tokens: 0, audio_out_tokens: 0, usage_reports: 0,
             max_report_total: 0, response_ms: [], reconnects: 0, go_aways: 0, by_step: [] },
     heardAt: 0, measuredFrom: 0, voiceAt: 0, liveContext: [],
+    // the goodbye (20): his last two lines, when she first said goodbye, the end_session calls refused
+    lastUserLine: null, prevUserLine: null, herByeAt: 0, herLineBye: false, goodbyeRefusals: 0,
+    // the names game, caught live (20): its names, what the page matched, the priming's state
+    gameNames: [], namesLive: {}, pendingMatch: null, primingOff: false,
   };
   try {
     s.audio = await startAudio(); // inside the click handler: required to unlock audio on tablets
@@ -803,7 +986,7 @@ async function startSession() {
     if (!s || s.hangingUp || !s.ready) return;
     // No time notes once a closing has started: on 12.10 "not time to close yet" made her refuse
     // the goodbye he had asked for.
-    if (s.closing || GOODBYE_RE.test(`${s.lastUserText || ""} ${s.userLine?.live || ""}`)) {
+    if (s.closing || heSaidGoodbye()) {
       log("ui", `silent note skipped (closing): ${n.text.slice(1, 40)}…`);
       return;
     }
@@ -922,12 +1105,13 @@ const NOISE_GATE_HOLD_MS = 300;
 function sendSilence(buf) {
   sendJson({ realtimeInput: { audio: { data: b64FromBuffer(new ArrayBuffer(buf.byteLength)), mimeType: MIC_MIME } } });
 }
-// The names game (13): short quick answers right as she finishes -- the filter is off then.
 function namesGameNow() {
   return s.agenda?.kinds?.[s.stepIndex] === "names_game";
 }
+// The filter stays on in the names game too: turned off there (13), noise in the room cut off her
+// question, and the game stalled (29.10). His quick answers still pass: held audio is sent once it qualifies.
 function noiseGate(buf) {
-  if (!s?.noiseLevel || s.tapToTalk || !s.tutorAudio || s.gateOpen || namesGameNow()) return false; // pass through
+  if (!s?.noiseLevel || s.tapToTalk || !s.tutorAudio || s.gateOpen) return false; // pass through
   const now = performance.now();
   if (micRms(buf) >= NOISE_GATE_RMS[s.noiseLevel]) {
     if (!s.loudSince) s.loudSince = now;

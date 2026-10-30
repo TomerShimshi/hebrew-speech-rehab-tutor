@@ -85,3 +85,16 @@ def record_results(current: dict, probe_results: list[dict], sid: str, today: dt
     if played:
         current["sessions_played"] = current.get("sessions_played", 0) + 1
     return played
+
+
+def correct_result(current: dict, sid: str, target: str, result: str) -> bool:
+    """This session's result for a name, corrected from the recording (the live one kept as
+    live_result). Returns True if it changed."""
+    item = next((i for i in current.get("items") or [] if _norm(i["target"]) == _norm(target)), None)
+    entry = next((r for r in reversed((item or {}).get("results") or []) if r.get("session_id") == sid), None)
+    if entry is None or entry.get("result") == result:
+        return False
+    entry.setdefault("live_result", entry.get("result"))
+    entry["result"] = result
+    entry["rechecked"] = True
+    return True

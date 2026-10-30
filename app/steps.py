@@ -99,10 +99,15 @@ class NamesGameStep(Step):
     GUIDE: ClassVar[str] = ("Where the short names game goes (the progress measure, 12): usually right after the "
                             "opening. Its names are chosen by code at session start, from the stable set. Once.")
     RULES: ClassVar[str] = ("A short, light game -- never a test. Ask each question word for word, one at a time, "
-                            "and give him real time (10 seconds of silence are fine). NO hints. If he finds it, a "
-                            "short warm \"נכון!\"; if not, say the name warmly in one sentence and go on -- no second "
-                            "try. Don't come back to these names later in the session. The step is finished only "
-                            "after his answer to the LAST question. Skip it if he seems tired or low.")
+                            "and give him real time (10 seconds of silence are fine). NO hints. His speech may be "
+                            "unclear after a stroke, so judge leniently: (1) an answer that SOUNDS LIKE the name (a "
+                            "sound or two off, slurred, cut at the start or the end) counts as right -- a short warm "
+                            "\"נכון!\"; (2) if you can't make out his answer, ask ONCE \"סליחה, לא שמעתי טוב, תגיד "
+                            "שוב?\" -- a right second answer counts as found on his own; (3) if it is clearly a "
+                            "different word (or he doesn't know), say the name warmly in one sentence and go on, "
+                            "without another try. A note saying his answer matched the name means he found it. "
+                            "Don't come back to these names later in the session. The step is finished only after "
+                            "his answer to the LAST question. Skip it if he seems tired or low.")
     MINUTES: ClassVar[float] = 1.0
     MIN_ANSWERS: ClassVar[int] = 0  # its own questions are the step
     items: list[ProbeItem] = []  # filled at session start (app/class_plan.py)
