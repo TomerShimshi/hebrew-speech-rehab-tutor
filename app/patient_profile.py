@@ -84,6 +84,52 @@ def needs_lines(needs: dict | None) -> list[str]:
     return out
 
 
+MAX_BLOCKED = 100  # words the family removed from the vocabulary (21)
+
+
+class VocabularyInvalid(ValueError):
+    """The word itself is wrong (empty, too long): a 422."""
+
+
+def _save_inferred(store, pid: str, prof: dict, vocabulary: list[str], blocked: list[str]) -> dict:
+    about = list(prof.get("about") or [])
+    text = render_inferred(about, vocabulary, store.get_needs(pid))
+    extra = {"about": about, "vocabulary": vocabulary, "vocabulary_blocked": blocked[-MAX_BLOCKED:]}
+    store.save_profile(pid, text, "inferred", "app", extra=extra)
+    return {**extra, "text": text, "source": "inferred"}
+
+
+def _inferred(store, pid: str) -> dict:
+    prof = store.get_profile(pid) or {}
+    if prof.get("source") != "inferred":
+        raise ValueError("no inferred profile (an uploaded one is edited as text)")
+    return prof
+
+
+def remove_vocabulary(store, pid: str, word: str) -> dict:
+    """The family removes one of his names / places (21): out of the profile she reads, and blocked so the
+    memory agent never adds it back. Raises ValueError (nothing changed)."""
+    prof = _inferred(store, pid)
+    vocabulary = list(prof.get("vocabulary") or [])
+    if word not in vocabulary:
+        raise ValueError("word not found (the profile may have changed; reload)")
+    blocked = [w for w in prof.get("vocabulary_blocked") or [] if w != word] + [word]
+    _log(f"{pid}: a vocabulary word removed and blocked")
+    return _save_inferred(store, pid, prof, [w for w in vocabulary if w != word], blocked)
+
+
+def add_vocabulary_word(store, pid: str, word: str) -> dict:
+    """The family adds a word (or puts back a removed one): newest first, and no longer blocked (21)."""
+    word = " ".join(str(word or "").split())
+    if not word or len(word) > MAX_VOCABULARY_CHARS:
+        raise VocabularyInvalid(f"one name or place, 1-{MAX_VOCABULARY_CHARS} characters")
+    prof = _inferred(store, pid)
+    vocabulary = [word, *[w for w in prof.get("vocabulary") or [] if w != word]][:MAX_VOCABULARY]
+    blocked = [w for w in prof.get("vocabulary_blocked") or [] if w != word]
+    _log(f"{pid}: a vocabulary word added")
+    return _save_inferred(store, pid, prof, vocabulary, blocked)
+
+
 def render_inferred(about: list[str], vocabulary: list[str], needs: dict | None) -> str:
     """The inferred profile's text, by code (never free-written): the same shape as an uploaded one."""
     lines = ["Inferred by the app from his conversations (not a diagnosis; only what he said and how it went):"]

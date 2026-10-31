@@ -22,7 +22,11 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from google.genai import types
 from pydantic import BaseModel
 
-from app.agent.memory_edit import MemoryEditError, remove_item, remove_word, restore_version
+from app.agent.memory_edit import (
+    MemoryEditError, MemoryEditInvalid, add_item, edit_focus, edit_item, edit_summary, edit_text, remove_item,
+    remove_summary,
+    remove_word, restore_version,
+)
 from app.leave_out import LeaveOutBusy, leave_out, put_back
 from app.agent.memory_update import run_memory_update
 from app import billing_guard, telemetry
@@ -40,7 +44,10 @@ from app.deps import (
 from app.reminders import TITLE, ReminderSettings, send_to_devices, text_for
 from fastapi.responses import Response
 from app import progress as progress_rules  # 17 (the page also has a `progress` endpoint)
-from app.patient_profile import AREA_NAMES, LEVELS, PROFILE_MAX_CHARS, account_profile, render_inferred
+from app.patient_profile import (
+    AREA_NAMES, LEVELS, PROFILE_MAX_CHARS, VocabularyInvalid, account_profile, add_vocabulary_word,
+    remove_vocabulary, render_inferred,
+)
 from app.session_prompt import build_session_prompt
 from app.prompt_archive import PromptArchive
 from app.schemas import VoiceSettings
@@ -257,7 +264,8 @@ def overview(pid: str = Depends(account), settings: Settings = Depends(get_setti
                      "auto_state": (store.get_settings(pid) or {}).get("auto_state") or {}},
         "flags": store.list_flags(pid),
         "memory": {k: memory.get(k) for k in ("memory_prompt", "sections", "focus_next_session",
-                                               "sessions_processed", "updated_at", "last_session_id")},
+                                               "sessions_processed", "updated_at", "last_session_id",
+                                               "recent_summaries")},  # editable on the page (21)
         "profile": store.get_profile(pid),  # his own profile (15): uploaded here, or inferred (15.5)
         "needs": store.get_needs(pid),  # his needs per area (15.5): inferred, or set by the family
         "progress": store.get_progress(pid),  # the app's settings per area, the log, the therapist's scores (17)
@@ -390,7 +398,8 @@ def save_need(area: str, level: str = Body("", embed=True), note: str = Body("",
         store.save_profile(pid, render_inferred(profile.get("about") or [], profile.get("vocabulary") or [],
                                                 {"areas": areas}),
                            "inferred", "app", extra={"about": profile.get("about") or [],
-                                                     "vocabulary": profile.get("vocabulary") or []})
+                                                     "vocabulary": profile.get("vocabulary") or [],
+                                                     "vocabulary_blocked": profile.get("vocabulary_blocked") or []})
     print(f"[caregiver] {caregiver.email} set the {area} need of {pid}", flush=True)
     return {"ok": True}
 
@@ -535,6 +544,118 @@ def memory_remove_item(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     print(f"[caregiver] {caregiver.email} removed a {section} item from {pid}'s memory; backup={backup}", flush=True)
     return {"ok": True, "memory_prompt": memory["memory_prompt"], "backup": backup}
+
+
+def _memory_edit(archive, store, pid: str, caregiver: User, what: str, edit) -> dict:
+    """The family's memory edits (21): backup first, then the edit; 409 when it no longer matches,
+    422 when the new text is wrong."""
+    backup = _backup(archive, pid, store.get_memory(pid), what)
+    try:
+        memory = edit()
+    except MemoryEditInvalid as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except MemoryEditError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    print(f"[caregiver] {caregiver.email} {what} in {pid}'s memory; backup={backup}", flush=True)
+    return {"ok": True, "memory_prompt": memory["memory_prompt"], "backup": backup}
+
+
+@router.post("/{email}/memory/edit-item")
+def memory_edit_item(
+    section: str = Body(..., embed=True, max_length=64),
+    old: str = Body(..., embed=True, max_length=2000),
+    new: str = Body(..., embed=True, max_length=2000),
+    pid: str = Depends(account), caregiver: User = Depends(require_caregiver),
+    store: SessionStore = Depends(get_store), archive: PromptArchive = Depends(get_prompt_archive),
+) -> dict:
+    return _memory_edit(archive, store, pid, caregiver, "edit-item",
+                        lambda: edit_item(store, pid, section, old, new))
+
+
+@router.post("/{email}/memory/add-item")
+def memory_add_item(
+    section: str = Body(..., embed=True, max_length=64),
+    text: str = Body(..., embed=True, max_length=2000),
+    pid: str = Depends(account), caregiver: User = Depends(require_caregiver),
+    store: SessionStore = Depends(get_store), archive: PromptArchive = Depends(get_prompt_archive),
+) -> dict:
+    return _memory_edit(archive, store, pid, caregiver, "add-item", lambda: add_item(store, pid, section, text))
+
+
+@router.post("/{email}/memory/edit-summary")
+def memory_edit_summary(
+    date: str = Body(..., embed=True, max_length=40),
+    old: str = Body(..., embed=True, max_length=5000),
+    new: str = Body(..., embed=True, max_length=5000),
+    pid: str = Depends(account), caregiver: User = Depends(require_caregiver),
+    store: SessionStore = Depends(get_store), archive: PromptArchive = Depends(get_prompt_archive),
+) -> dict:
+    return _memory_edit(archive, store, pid, caregiver, "edit-summary",
+                        lambda: edit_summary(store, pid, date, old, new))
+
+
+@router.post("/{email}/memory/edit-text")
+def memory_edit_text(
+    old: str = Body(..., embed=True, max_length=60000),
+    text: str = Body(..., embed=True, max_length=60000),
+    pid: str = Depends(account), caregiver: User = Depends(require_caregiver),
+    store: SessionStore = Depends(get_store), archive: PromptArchive = Depends(get_prompt_archive),
+) -> dict:
+    return _memory_edit(archive, store, pid, caregiver, "edit-text", lambda: edit_text(store, pid, old, text))
+
+
+@router.post("/{email}/memory/edit-focus")
+def memory_edit_focus(
+    items: list[str] = Body(..., embed=True, max_length=20),
+    pid: str = Depends(account), caregiver: User = Depends(require_caregiver),
+    store: SessionStore = Depends(get_store), archive: PromptArchive = Depends(get_prompt_archive),
+) -> dict:
+    return _memory_edit(archive, store, pid, caregiver, "edit-focus", lambda: edit_focus(store, pid, items))
+
+
+@router.post("/{email}/memory/remove-summary")
+def memory_remove_summary(
+    date: str = Body(..., embed=True, max_length=40),
+    old: str = Body(..., embed=True, max_length=5000),
+    pid: str = Depends(account), caregiver: User = Depends(require_caregiver),
+    store: SessionStore = Depends(get_store), archive: PromptArchive = Depends(get_prompt_archive),
+) -> dict:
+    return _memory_edit(archive, store, pid, caregiver, "remove-summary",
+                        lambda: remove_summary(store, pid, date, old))
+
+
+def _vocabulary_edit(archive, store, pid: str, caregiver: User, what: str, edit) -> dict:
+    backup = _backup(archive, pid, store.get_profile(pid), what)
+    try:
+        prof = edit()
+    except VocabularyInvalid as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    print(f"[caregiver] {caregiver.email} {what} in {pid}'s profile; backup={backup}", flush=True)
+    return {"ok": True, "vocabulary": prof["vocabulary"], "vocabulary_blocked": prof["vocabulary_blocked"],
+            "backup": backup}
+
+
+@router.post("/{email}/vocabulary/remove")
+def vocabulary_remove(
+    word: str = Body(..., embed=True, max_length=200),
+    pid: str = Depends(account), caregiver: User = Depends(require_caregiver),
+    store: SessionStore = Depends(get_store), archive: PromptArchive = Depends(get_prompt_archive),
+) -> dict:
+    """His names and places (21): removed from the profile she reads, and never added back by the app."""
+    return _vocabulary_edit(archive, store, pid, caregiver, "vocabulary-remove",
+                            lambda: remove_vocabulary(store, pid, word))
+
+
+@router.post("/{email}/vocabulary/add")
+def vocabulary_add(
+    word: str = Body(..., embed=True, max_length=200),
+    pid: str = Depends(account), caregiver: User = Depends(require_caregiver),
+    store: SessionStore = Depends(get_store), archive: PromptArchive = Depends(get_prompt_archive),
+) -> dict:
+    return _vocabulary_edit(archive, store, pid, caregiver, "vocabulary-add",
+                            lambda: add_vocabulary_word(store, pid, word))
 
 
 @router.post("/{email}/word-bank/remove")

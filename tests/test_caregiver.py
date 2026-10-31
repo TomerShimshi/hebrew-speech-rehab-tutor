@@ -500,3 +500,203 @@ def test_names_game_set_on_the_page_new_set_and_remove_a_name(env):
     assert post("check-in/new").json()["retired"] is True
     ov = get(env, f"/api/caregiver/{DAD}/overview").json()
     assert ov["check_in_set"] is None and ov["check_in_history"][0]["items"][0]["target"] == "צפת"
+
+
+# ---- editing the memory (21): edit / add items, edit / remove summaries ----------------------------
+
+def with_summaries(env, pid=DAD):
+    memory_with_facts(env, pid)
+    m = env.store.get_memory(pid)
+    m.pop("updated_at", None)
+    m["recent_summaries"] = [{"date": "2026-10-01", "session_id": "a", "mood": "good", "summary": "Talked about trips."},
+                             {"date": "2026-10-02", "session_id": "b", "mood": "ok", "summary": "Talked about tea."}]
+    env.store.save_memory(pid, "s2", m, None)
+
+
+def test_edit_item_replaces_in_place_and_rerenders(env):
+    from fake_llm import FakeClient
+    env.configure(prompt_archive_uri="gs://bucket/debug/prompts")
+    memory_with_facts(env)
+    env.llm = FakeClient()  # no model call
+    r = post(env, f"/api/caregiver/{DAD}/memory/edit-item",
+             {"section": "personal_facts", "old": "Has a dog named Bobo", "new": "  Has two dogs  "})
+    assert r.status_code == 200 and env.llm.requests == []
+    memory = env.store.get_memory(DAD)
+    assert memory["sections"]["personal_facts"] == ["Lives in Haifa with his wife Rina", "Has two dogs"]
+    assert "Has two dogs" in memory["memory_prompt"] and "Bobo" not in memory["memory_prompt"]
+    assert "Has a dog named Bobo" in env.store.list_memory_history(DAD)[0]["sections"]["personal_facts"]  # restorable
+    assert r.json()["backup"] in env.archived  # bucket backup first
+
+
+def test_edit_of_a_changed_item_is_refused_and_changes_nothing(env):  # Review Focus 1
+    memory_with_facts(env)
+    before = env.store.get_memory(DAD)
+    path = f"/api/caregiver/{DAD}/memory/edit-item"
+    assert post(env, path, {"section": "personal_facts", "old": "not there", "new": "x"}).status_code == 409
+    assert post(env, path, {"section": "bogus", "old": "x", "new": "y"}).status_code == 409
+    assert env.store.get_memory(DAD) == before
+
+
+def test_empty_or_too_long_edits_are_refused(env):  # Review Focus 5
+    memory_with_facts(env)
+    before = env.store.get_memory(DAD)
+    path = f"/api/caregiver/{DAD}/memory/edit-item"
+    assert post(env, path, {"section": "personal_facts", "old": "Has a dog named Bobo", "new": "   "}).status_code == 422
+    assert post(env, path, {"section": "personal_facts", "old": "Has a dog named Bobo", "new": "x" * 201}).status_code == 422
+    assert post(env, f"/api/caregiver/{DAD}/memory/add-item", {"section": "interests", "text": " "}).status_code == 422
+    assert env.store.get_memory(DAD) == before
+
+
+def test_add_item_is_newest_and_a_full_section_is_refused(env):
+    from app.schemas import MAX_ITEMS_PER_SECTION
+    memory_with_facts(env)
+    path = f"/api/caregiver/{DAD}/memory/add-item"
+    assert post(env, path, {"section": "interests", "text": "Cooking on weekends"}).status_code == 200
+    memory = env.store.get_memory(DAD)
+    assert memory["sections"]["interests"] == ["The Galilee", "Cooking on weekends"]
+    assert memory["memory_prompt"].index("Cooking on weekends") < memory["memory_prompt"].index("The Galilee")
+    for i in range(MAX_ITEMS_PER_SECTION - 2):
+        post(env, path, {"section": "interests", "text": f"interest {i}"})
+    assert post(env, path, {"section": "interests", "text": "one too many"}).status_code == 422
+    assert post(env, path, {"section": "interests", "text": "Cooking on weekends"}).status_code in (409, 422)
+
+
+def test_editing_the_newest_summary_changes_the_last_time_line(env):  # Review Focus 4
+    with_summaries(env)
+    r = post(env, f"/api/caregiver/{DAD}/memory/edit-summary",
+             {"date": "2026-10-02", "old": "Talked about tea.", "new": "Talked about coffee."})
+    assert r.status_code == 200
+    memory = env.store.get_memory(DAD)
+    assert memory["recent_summaries"][-1]["summary"] == "Talked about coffee."
+    assert "Talked about coffee." in memory["memory_prompt"] and "tea" not in memory["memory_prompt"]
+
+
+def test_remove_summary_and_its_failures(env):
+    with_summaries(env)
+    path = f"/api/caregiver/{DAD}/memory/remove-summary"
+    assert post(env, path, {"date": "2026-10-02", "old": "not it"}).status_code == 409
+    assert post(env, path, {"date": "2026-10-02", "old": "Talked about tea."}).status_code == 200
+    memory = env.store.get_memory(DAD)
+    assert [r["date"] for r in memory["recent_summaries"]] == ["2026-10-01"]
+    assert "Talked about trips." in memory["memory_prompt"]
+    assert post(env, f"/api/caregiver/{DAD}/memory/edit-summary",
+                {"date": "2026-10-01", "old": "Talked about trips.", "new": ""}).status_code == 422
+
+
+def rendered_memory(env, pid=DAD):
+    """with_summaries, with her text rendered from the sections as the app renders it."""
+    from app.memory_text import render_memory
+    with_summaries(env, pid)
+    m = env.store.get_memory(pid)
+    m.pop("updated_at", None)
+    m["memory_prompt"] = render_memory(m)
+    env.store.save_memory(pid, "s3", m, None)
+
+
+def test_editing_her_whole_text_updates_the_sections_and_the_last_summary(env):
+    rendered_memory(env)
+    text = env.store.get_memory(DAD)["memory_prompt"]
+    edited = (text.replace("Has a dog named Bobo", "Has a cat named Mitzi").replace("Talked about tea.", "Talked about coffee.")
+              .replace("His interests:\n- The Galilee", "His interests:\n- Football\n- The Galilee"))
+    r = post(env, f"/api/caregiver/{DAD}/memory/edit-text", {"old": text, "text": edited})
+    assert r.status_code == 200, r.text
+    memory = env.store.get_memory(DAD)
+    assert memory["sections"]["personal_facts"] == ["Lives in Haifa with his wife Rina", "Has a cat named Mitzi"]
+    assert memory["sections"]["interests"] == ["The Galilee", "Football"]  # the top line is the newest
+    assert memory["recent_summaries"][-1]["summary"] == "Talked about coffee."
+    assert memory["memory_prompt"] == edited.strip()  # it stays as written: the next render gives the same text
+    assert env.store.list_memory_history(DAD)[0]["memory_prompt"] == text  # restorable
+
+
+def test_her_text_without_a_heading_empties_that_section(env):
+    rendered_memory(env)
+    text = env.store.get_memory(DAD)["memory_prompt"]
+    edited = text.replace("His interests:\n- The Galilee", "").replace("Last time (2026-10-02):\nTalked about tea.", "")
+    assert post(env, f"/api/caregiver/{DAD}/memory/edit-text", {"old": text, "text": edited}).status_code == 200
+    memory = env.store.get_memory(DAD)
+    assert memory["sections"]["interests"] == []
+    assert [r["date"] for r in memory["recent_summaries"]] == ["2026-10-01"]  # the last summary went with its block
+
+
+def test_her_text_edit_refuses_stray_lines_and_a_changed_memory(env):
+    rendered_memory(env)
+    before = env.store.get_memory(DAD)
+    text = before["memory_prompt"]
+    path = f"/api/caregiver/{DAD}/memory/edit-text"
+    r = post(env, path, {"old": text, "text": text + "\nA line with no heading"})
+    assert r.status_code == 422 and "A line with no heading" in r.json()["detail"]
+    assert post(env, path, {"old": text, "text": "Some heading:\n- x"}).status_code == 422
+    assert post(env, path, {"old": "an older text", "text": text}).status_code == 409
+    assert env.store.get_memory(DAD) == before
+
+
+def test_focus_points_are_edited_one_per_line(env):
+    rendered_memory(env)
+    path = f"/api/caregiver/{DAD}/memory/edit-focus"
+    r = post(env, path, {"items": ["  Ask about the trip  ", "", "Practice the names game"]})
+    assert r.status_code == 200
+    memory = env.store.get_memory(DAD)
+    assert memory["focus_next_session"] == ["Ask about the trip", "Practice the names game"]
+    assert post(env, path, {"items": ["a", "b", "c", "d", "e"]}).status_code == 422
+    assert post(env, path, {"items": ["x" * 201]}).status_code == 422
+    assert post(env, path, {"items": []}).status_code == 200 and env.store.get_memory(DAD)["focus_next_session"] == []
+
+
+def test_memory_edits_are_for_caregivers_only(env):
+    memory_with_facts(env)
+    r = post(env, f"/api/caregiver/{DAD}/memory/add-item", {"section": "interests", "text": "x"}, token="tok-dad")
+    assert r.status_code == 403
+
+
+# ---- his names and places (the profile's vocabulary, 21) -----------------------------------------------
+
+def inferred_profile(env, pid=DAD, vocabulary=("דליה", "חיפה"), blocked=()):
+    from app.patient_profile import render_inferred
+    env.store.save_profile(pid, render_inferred(["Retired."], list(vocabulary), None), "inferred", "app",
+                           extra={"about": ["Retired."], "vocabulary": list(vocabulary),
+                                  "vocabulary_blocked": list(blocked)})
+
+
+def test_a_removed_word_leaves_the_vocabulary_and_the_text(env):
+    from app.patient_profile import extract_vocabulary
+    inferred_profile(env)
+    r = post(env, f"/api/caregiver/{DAD}/vocabulary/remove", {"word": "דליה"})
+    assert r.status_code == 200
+    prof = env.store.get_profile(DAD)
+    assert prof["vocabulary"] == ["חיפה"] and prof["vocabulary_blocked"] == ["דליה"]
+    assert extract_vocabulary(prof["text"]) == ["חיפה"] and prof["about"] == ["Retired."]
+    assert prof["source"] == "inferred"
+    assert post(env, f"/api/caregiver/{DAD}/vocabulary/remove", {"word": "דליה"}).status_code == 409
+
+
+def test_adding_a_word_back_unblocks_it(env):
+    inferred_profile(env, vocabulary=("חיפה",), blocked=("דליה",))
+    assert post(env, f"/api/caregiver/{DAD}/vocabulary/add", {"word": " דליה "}).status_code == 200
+    prof = env.store.get_profile(DAD)
+    assert prof["vocabulary"] == ["דליה", "חיפה"] and prof["vocabulary_blocked"] == []
+    assert post(env, f"/api/caregiver/{DAD}/vocabulary/add", {"word": "x" * 41}).status_code == 422
+    assert post(env, f"/api/caregiver/{DAD}/vocabulary/add", {"word": "  "}).status_code == 422
+
+
+def test_an_uploaded_profile_is_not_edited_by_the_vocabulary_editor(env):  # Review Focus 3
+    env.store.save_profile(DAD, "His assessment.\nVocabulary: דליה", "uploaded", TOMER)
+    before = env.store.get_profile(DAD)
+    assert post(env, f"/api/caregiver/{DAD}/vocabulary/remove", {"word": "דליה"}).status_code == 409
+    assert post(env, f"/api/caregiver/{DAD}/vocabulary/add", {"word": "חיפה"}).status_code == 409
+    assert env.store.get_profile(DAD) == before
+
+
+def test_setting_a_need_keeps_the_blocked_list(env):
+    inferred_profile(env, blocked=("עכו",))
+    assert env.client.put(f"/api/caregiver/{DAD}/needs/naming", headers=auth("tok-tomer"),
+                          json={"level": "some_difficulty", "note": "x"}).status_code == 200
+    assert env.store.get_profile(DAD)["vocabulary_blocked"] == ["עכו"]
+
+
+def test_the_overview_has_the_vocabulary_and_the_summaries(env):
+    inferred_profile(env, blocked=("עכו",))
+    with_summaries(env)
+    ov = get(env, f"/api/caregiver/{DAD}/overview").json()
+    assert ov["profile"]["vocabulary"] == ["דליה", "חיפה"] and ov["profile"]["vocabulary_blocked"] == ["עכו"]
+    assert ov["profile"]["source"] == "inferred"
+    assert [r["date"] for r in ov["memory"]["recent_summaries"]] == ["2026-10-01", "2026-10-02"]

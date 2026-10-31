@@ -252,3 +252,31 @@ def test_missed_checks_go_into_the_second_session_and_then_one_per_plan():
     steps = [{"kind": "opening"}, {"kind": "thread"}, {"kind": "check"}, {"kind": "thread"}, {"kind": "practice"}]
     out = add_one_check(steps, {"kind": "check", "area": "goals"})
     assert [s["kind"] for s in out] == ["opening", "thread", "check", "thread", "check", "practice"]
+
+
+# ---- the family's blocked words (21) ---------------------------------------------------------------
+
+def test_the_memory_agent_cannot_add_back_a_word_the_family_removed():  # Review Focus 2
+    store = InMemorySessionStore()
+    store.save_profile(NEW, "Inferred by the app:\n- Vocabulary: חיפה", "inferred", "app",
+                       extra={"about": [], "vocabulary": ["חיפה"], "vocabulary_blocked": ["עכו", "נהריה"]})
+    sid = session_with_talk(store, NEW)
+    client = FakeClient(
+        tool_calls(("update_profile", {"field": "vocabulary", "op": "add", "item": "עכו"}),
+                   ("record_word_result", {"word": "נהריה", "result": "self_found", "asr_confidence": "high"})),
+        text("done"))
+    assert run_memory_update(store, client, SETTINGS, NEW, sid, generate_fn=gen) == "done"
+    prof = store.get_profile(NEW)
+    assert prof["vocabulary"] == ["חיפה"]  # neither the agent's "add" nor his own name (by code) came back
+    assert prof["vocabulary_blocked"] == ["עכו", "נהריה"]
+    assert extract_vocabulary(prof["text"]) == ["חיפה"]
+    replies = str(client.requests[1]["contents"])
+    assert "the family removed this word" in replies
+
+
+def test_update_profile_refuses_a_blocked_word_directly():
+    draft = MemoryDraft(sections=MemorySections(), word_bank={}, today=dt.date(2026, 10, 30))
+    draft.inferring = Inferring(vocabulary=[], blocked=["עכו"])
+    tool = next(t for t in build_memory_tools(draft) if t.name == "update_profile")
+    with pytest.raises(ValueError, match="the family removed this word"):
+        tool.handler({"field": "vocabulary", "op": "add", "item": "עכו"})

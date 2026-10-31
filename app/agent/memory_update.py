@@ -116,7 +116,8 @@ def save_inferred(store, pid: str, sid: str, draft: MemoryDraft, today: dt.date)
         add_vocabulary(inf, own.get("word", ""))
     text = render_inferred(inf.about, inf.vocabulary, needs)
     if text:
-        store.save_profile(pid, text, "inferred", "app", extra={"about": inf.about, "vocabulary": inf.vocabulary})
+        store.save_profile(pid, text, "inferred", "app", extra={"about": inf.about, "vocabulary": inf.vocabulary,
+                                                                "vocabulary_blocked": inf.blocked})
 
 
 def sequencing_result(plan, reported: dict | None) -> dict | None:
@@ -196,6 +197,7 @@ def run_memory_update(
         prof = store.get_profile(pid) or {}
         needs_doc = store.get_needs(pid) or {}
         draft.inferring = Inferring(about=list(prof.get("about") or []), vocabulary=list(prof.get("vocabulary") or []),
+                                    blocked=list(prof.get("vocabulary_blocked") or []),
                                     areas=dict(needs_doc.get("areas") or {}),
                                     points=list(needs_doc.get("therapist_points") or []),
                                     profile=account_profile(store, pid).source != "uploaded")

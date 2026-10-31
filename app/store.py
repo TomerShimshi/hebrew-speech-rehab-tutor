@@ -110,6 +110,7 @@ class SessionStore(Protocol):
     # Newest first. Left-out sessions (20.5) are skipped unless left_out=True, so a new reader is safe by
     # default; still up to n counted ones.
     def list_sessions(self, pid: str, n: int = 30, *, left_out: bool = False) -> list[dict]: ...
+    def session_starts(self, pid: str, since: dt.datetime) -> list[dict]: ...  # {started_at, turn_count} only (21)
     def list_flags(self, pid: str, n: int = 50) -> list[dict]: ...
     def list_recommendations(self, pid: str) -> list[dict]: ...
     def list_memory_history(self, pid: str, n: int = 20) -> list[dict]: ...
@@ -323,6 +324,10 @@ class InMemorySessionStore:
     def list_sessions(self, pid, n=30, *, left_out=False):
         found = [v for k, v in self.sessions.items() if k[0] == pid and (left_out or not v.get("excluded"))]
         return sorted(found, key=lambda v: v["started_at"], reverse=True)[:n]
+
+    def session_starts(self, pid, since):
+        return [{"started_at": v["started_at"], "turn_count": v.get("turn_count")} for k, v in self.sessions.items()
+                if k[0] == pid and v.get("started_at") and v["started_at"] >= since]
 
     def list_flags(self, pid, n=50):
         return sorted((f for f in self.flags if f.get("pid") == pid), key=lambda f: f["created_at"], reverse=True)[:n]
@@ -645,6 +650,12 @@ class FirestoreSessionStore:
                  .order_by("started_at", direction=self._fs.Query.DESCENDING).limit(n if left_out else n + 10))
         found = [{"id": s.id, **s.to_dict()} for s in query.stream()]
         return [s for s in found if left_out or not s.get("excluded")][:n]
+
+    def session_starts(self, pid, since):
+        # Only two small fields: a session holds its transcript and her context (a full read was ~1.7 s).
+        query = (self._patient(pid).collection("sessions")
+                 .where(filter=self._fs.FieldFilter("started_at", ">=", since)).select(["started_at", "turn_count"]))
+        return [s.to_dict() for s in query.stream()]
 
     def list_flags(self, pid, n=50):
         query = (self._patient(pid).collection("flags")

@@ -34,7 +34,7 @@ from app.deps import (  # noqa: F401 -- shared with the caregiver router (tests 
     _bounded_generate, games_for, get_audio_store, get_games_reader, get_prompt_archive,
     get_optional_text_client, get_push_sender, get_store, get_text_client,
 )
-from app.reminders import ReminderSettings, run_reminders, subscription_id
+from app.reminders import TZ as REMINDER_TZ, ReminderSettings, practice_streak, run_reminders, subscription_id
 from app.audio_store import AUDIO_TYPES, MAX_AUDIO_BYTES, MAX_PART_BYTES, MAX_PARTS
 from app.caregiver_api import router as caregiver_router
 from app.transcripts import ContextBatch, EndRequest, TurnsBatch
@@ -124,7 +124,8 @@ def me(user: User = Depends(verify_user), settings: Settings = Depends(get_setti
     recording = audio.enabled and voice_settings(store, settings, user.email).record_audio
     return {"email": user.email, "is_caregiver": user.email in settings.caregiver_email_set,
             "recording": recording, "paused": billing_guard.is_paused(store),
-            "reminder": ReminderSettings(**(store.get_reminder_settings(user.email) or {})).model_dump()}
+            "reminder": ReminderSettings(**(store.get_reminder_settings(user.email) or {})).model_dump(),
+            "practice": practice_streak(store, patient_id_for(user), now_utc().astimezone(REMINDER_TZ).date())}  # 21
 
 
 def voice_settings(store: SessionStore, settings: Settings, pid: str) -> VoiceSettings:

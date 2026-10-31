@@ -56,6 +56,24 @@ def text_for(day: dt.date) -> str:
     return TEXTS[day.toordinal() % len(TEXTS)]
 
 
+STREAK_MAX_DAYS = 60  # how far back his streak is counted (21)
+
+
+def practice_streak(store: SessionStore, pid: str, today: dt.date) -> dict:
+    """His streak (21): days in a row with a real session (2+ lines, as for the reminder), ending today --
+    or yesterday, when he hasn't practiced yet today (in the morning his streak isn't 0). Left-out
+    sessions count: he did talk (20.5)."""
+    since = dt.datetime.combine(today - dt.timedelta(days=STREAK_MAX_DAYS + 1), dt.time(0), tzinfo=TZ)
+    days = {s["started_at"].astimezone(TZ).date() for s in store.session_starts(pid, since)  # two fields, not whole sessions
+            if s.get("started_at") and (s.get("turn_count") or 0) >= 2}
+    day = today if today in days else today - dt.timedelta(days=1)
+    streak = 0
+    while day in days and streak < STREAK_MAX_DAYS:
+        streak += 1
+        day -= dt.timedelta(days=1)
+    return {"days": streak, "today": today in days}
+
+
 def practiced_on(store: SessionStore, pid: str, day: dt.date) -> bool:
     for s in store.list_sessions(pid, 10, left_out=True):  # he did talk, even if left out (20.5)
         started = s.get("started_at")

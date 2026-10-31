@@ -7,7 +7,7 @@
   <title>דברו איתי</title>
   <!-- Home-screen app (09): an icon on the tablet that opens the app full screen -->
   <link rel="manifest" href="manifest.json">
-  <meta name="theme-color" content="#2f6fdf">
+  <meta name="theme-color" content="#1f5fa8">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -28,10 +28,13 @@
 
   <!-- Start screen -->
   <main id="screen-start" class="screen" hidden>
+    <p id="hello-day" class="day"></p>
     <img class="avatar" src="tutor-512.jpg" onerror="this.onerror=null; this.src='tutor.svg'" alt="המטפלת">
-    <h1>שלום! 👋</h1>
-    <p class="lead">האימון היומי שלנו מחכה</p>
+    <h1 id="hello">שלום!</h1>
+    <p class="lead">מוכן לשיחה של היום?</p>
     <button id="talk" class="big primary" type="button">שנתחיל?</button>
+    <!-- His streak (21): a compliment, never a sad number -->
+    <div id="streak" class="streak" hidden><b id="streak-title"></b><span id="streak-praise"></span></div>
     <p id="start-status" class="status" aria-live="polite"></p>
     <!-- The daily reminder (11): always visible once supported; he can change the time himself -->
     <div id="reminder-box" class="reminder-line" hidden>
@@ -73,6 +76,8 @@
   <!-- Ended screen -->
   <main id="screen-ended" class="screen" hidden>
     <h1>כל הכבוד! 👏</h1>
+    <!-- Only what went well (21): no misses, no "out of"; a row that would say 0 isn't shown -->
+    <div id="today" class="today" hidden></div>
     <p class="lead">נתראה מחר</p>
     <div id="game-homework" class="game-homework" hidden>
       <p class="gh-title">ובינתיים, משחק קטן:</p>

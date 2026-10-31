@@ -111,3 +111,71 @@ def test_he_turns_it_on_and_picks_the_hour_himself(env):
     assert env.store.get_reminder_settings(TOMER) is None  # only his own account
     caregiver_view = env.client.get(f"/api/caregiver/{DAD}/overview", headers=auth("tok-tomer")).json()["reminder"]
     assert (caregiver_view["enabled"], caregiver_view["hour"]) == (False, 17)
+
+
+# ---- his practice streak (21) -----------------------------------------------------------------------
+
+from app.reminders import TZ, practice_streak  # noqa: E402
+
+TODAY = dt.date(2026, 10, 30)
+
+
+def talked(store, day: dt.date, *, lines=4, **fields):
+    sid = store.create_session(DAD, user_email=DAD, model="m", prompt_version="v")
+    started = dt.datetime.combine(day, dt.time(10), tzinfo=TZ).astimezone(dt.timezone.utc)
+    store.update_session(DAD, sid, {"started_at": started, "status": "ended", "turn_count": lines, **fields})
+    return sid
+
+
+def test_the_streak_counts_days_in_a_row_ending_today():
+    store = InMemorySessionStore()
+    for back in (0, 1, 2, 4):  # 3 days ago missed
+        talked(store, TODAY - dt.timedelta(days=back))
+    talked(store, TODAY)  # two sessions on one day count once
+    assert practice_streak(store, DAD, TODAY) == {"days": 3, "today": True}
+
+
+def test_before_todays_session_yesterdays_streak_still_counts():  # Review Focus 6
+    store = InMemorySessionStore()
+    for back in (1, 2, 3):
+        talked(store, TODAY - dt.timedelta(days=back))
+    assert practice_streak(store, DAD, TODAY) == {"days": 3, "today": False}
+
+
+def test_a_missed_day_starts_over():
+    store = InMemorySessionStore()
+    talked(store, TODAY - dt.timedelta(days=2))
+    assert practice_streak(store, DAD, TODAY) == {"days": 0, "today": False}
+    assert practice_streak(InMemorySessionStore(), DAD, TODAY) == {"days": 0, "today": False}
+
+
+def test_a_one_line_session_isnt_practice_but_a_left_out_one_is():
+    store = InMemorySessionStore()
+    talked(store, TODAY, lines=1)
+    talked(store, TODAY - dt.timedelta(days=1), excluded=True)  # he did talk (20.5)
+    assert practice_streak(store, DAD, TODAY) == {"days": 1, "today": False}
+
+
+def test_session_starts_has_only_the_two_fields_and_only_since():
+    store = InMemorySessionStore()
+    talked(store, TODAY, transcript="a long transcript")
+    talked(store, TODAY - dt.timedelta(days=90), excluded=True)
+    since = dt.datetime.combine(TODAY - dt.timedelta(days=61), dt.time(0), tzinfo=TZ)
+    starts = store.session_starts(DAD, since)
+    assert len(starts) == 1 and set(starts[0]) == {"started_at", "turn_count"}
+
+
+def test_the_streak_doesnt_load_whole_sessions():  # every app start asks for it
+    class NoFullReads(InMemorySessionStore):
+        def list_sessions(self, *args, **kwargs):
+            raise AssertionError("loaded whole sessions")
+    store = NoFullReads()
+    for back in (0, 1):
+        talked(store, TODAY - dt.timedelta(days=back))
+    assert practice_streak(store, DAD, TODAY) == {"days": 2, "today": True}
+
+
+def test_me_returns_the_streak(env):
+    talked(env.store, dt.datetime.now(TZ).date())
+    body = env.client.get("/api/me", headers=auth()).json()
+    assert body["practice"] == {"days": 1, "today": True}

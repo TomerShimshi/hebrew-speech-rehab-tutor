@@ -30,6 +30,7 @@ class Inferring:
     (`profile`), a few lines about him and his own names."""
     about: list[str] = field(default_factory=list)
     vocabulary: list[str] = field(default_factory=list)  # newest first
+    blocked: list[str] = field(default_factory=list)  # words the family removed (21): never added back
     areas: dict[str, dict] = field(default_factory=dict)  # area -> {level, evidence, note, set_by, history, ...}
     changed: set[str] = field(default_factory=set)  # areas recorded in this session
     points: list[dict] = field(default_factory=list)  # for his therapist: {id, text, why, evidence, status, ...}
@@ -40,7 +41,7 @@ class Inferring:
 def add_vocabulary(inferring: Inferring, word: str) -> None:
     """Newest first, no duplicates, capped: the oldest names drop off."""
     word = " ".join(str(word).split())
-    if word and len(word) <= MAX_VOCABULARY_CHARS:
+    if word and len(word) <= MAX_VOCABULARY_CHARS and word not in inferring.blocked:
         inferring.vocabulary = [word, *[w for w in inferring.vocabulary if w != word]][:MAX_VOCABULARY]
 
 
@@ -252,6 +253,8 @@ def build_memory_tools(draft: MemoryDraft) -> list[Tool]:
         if field_ == "vocabulary":
             if len(item) > MAX_VOCABULARY_CHARS or len(item.split()) > 4:
                 raise ValueError("a vocabulary item is ONE name or place, in Hebrew")
+            if " ".join(item.split()) in inf.blocked:
+                raise ValueError("the family removed this word: don't add it")
             add_vocabulary(inf, item)
             return {"ok": True, "vocabulary": len(inf.vocabulary)}
         if len(item) > MAX_ABOUT_CHARS:

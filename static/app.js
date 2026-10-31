@@ -35,9 +35,13 @@ const PAUSED_TEXT = "האימון מושהה כרגע, נחזור בקרוב �
 const $ = (id) => document.getElementById(id);
 // Carry app.js's ?v=<asset version> onto the worklets, so a deploy never runs stale audio code.
 const ASSET_QUERY = new URL(import.meta.url).search;
-const { initAuth, signIn, signOut, idToken } = await import(`./auth.js${ASSET_QUERY}`);
-const { soundsLike, herReplyRejected } = await import(`./sounds_like.js${ASSET_QUERY}`); // the names game's live match (20)
-const { readyToAnswerStep } = await import(`./step_timing.js${ASSET_QUERY}`); // next_step waits for her reaction (20.5)
+// Fetched together, not one after another (each round trip added ~0.17 s to his start).
+const [
+  { initAuth, signIn, signOut, idToken },
+  { soundsLike, herReplyRejected }, // the names game's live match (20)
+  { readyToAnswerStep }, // next_step waits for her reaction (20.5)
+  { streakLine }, // his streak, in good words only (21)
+] = await Promise.all(["auth", "sounds_like", "step_timing", "praise"].map((m) => import(`./${m}.js${ASSET_QUERY}`)));
 const screens = {
   signin: $("screen-signin"), start: $("screen-start"), session: $("screen-session"), ended: $("screen-ended"),
 };
@@ -50,7 +54,7 @@ function show(name) {
 }
 
 function setIndicator(state) {
-  const labels = { connecting: "מתחברת…", listening: "מקשיבה לך…", speaking: "מדברת…" };
+  const labels = { connecting: "מתחברת…", listening: "תורך לדבר", speaking: "היא מדברת…" }; // whose turn (21)
   // While muted, the status says so (unless she's still finishing a sentence).
   const shown = s?.muted && state === "listening" ? "muted" : state;
   $("indicator").dataset.state = shown;
@@ -529,6 +533,7 @@ function showMicLevel(buf) {
   const rms = micRms(buf);
   micLevel = Math.max(rms, micLevel * 0.85); // fast attack, slow decay
   $("mic-level").style.width = `${Math.min(100, micLevel * 400)}%`;
+  $("session-avatar").style.setProperty("--level", Math.min(1, micLevel * 4).toFixed(2)); // the ring (21)
 }
 
 function stopAudio(audio) {
@@ -1077,13 +1082,47 @@ function endSession(errorMessage, reason = errorMessage ? "error" : "end_button"
     $("start-status").textContent = "";
     $("start-status").classList.remove("paused-note");
     showGameHomework(sess.gameHomework || []);
+    showToday(sess);
     show("ended");
   }
 }
 
 $("talk").addEventListener("click", startSession);
 $("end").addEventListener("click", () => { log("ui", "end button"); endSession(undefined, "end_button"); });
-$("again").addEventListener("click", () => show("start"));
+$("again").addEventListener("click", () => { showStart(); show("start"); });
+
+// ---- the start and end screens (21) --------------------------------------------------------
+let myPractice = null; // {days, today}: his streak, from /api/me
+function showStart() {
+  const h = new Date().getHours();
+  $("hello").textContent = h >= 5 && h < 12 ? "בוקר טוב!" : h >= 12 && h < 17 ? "צהריים טובים!" : "ערב טוב!";
+  $("hello-day").textContent = new Date().toLocaleDateString("he-IL", { weekday: "long", day: "numeric", month: "long" });
+  const line = streakLine(myPractice);
+  $("streak-title").textContent = line.title;
+  $("streak-praise").textContent = line.praise;
+  $("streak").hidden = !myPractice;
+}
+// Only what went well: minutes together, names he found on his own (20), and the streak with today in it.
+function showToday(sess) {
+  const minutes = Math.round((performance.now() - sess.startedAt) / 60000);
+  const found = Object.keys(sess.namesLive || {}).length;
+  const talked = sess.nextSeq >= 2; // a real session counts for the streak (as on the server)
+  if (myPractice && talked && !myPractice.today) myPractice = { days: myPractice.days + 1, today: true };
+  const rows = [
+    minutes >= 1 && ["דיברנו היום", `${minutes} דק׳`],
+    found >= 1 && ["שמות שמצאת לבד", String(found)],
+    myPractice?.days >= 2 && ["רצף", `${myPractice.days} ימים 🔥`],
+  ].filter(Boolean);
+  $("today").replaceChildren(...rows.map(([k, v]) => {
+    const row = document.createElement("div");
+    row.className = "row";
+    const b = document.createElement("b");
+    b.textContent = v;
+    row.append(k, b);
+    return row;
+  }));
+  $("today").hidden = rows.length === 0;
+}
 // Mute = mute the MICROPHONE only (like muting yourself on a call): the session goes on as
 // usual -- she keeps talking and still answers what he said last -- but background noise
 // (TV, people talking) can't interrupt her. See the capture handler: silence is streamed.
@@ -1093,6 +1132,7 @@ function setMuted(muted) {
   if (s.recMicGain) s.recMicGain.gain.value = muted ? 0 : 1; // muted = not recorded either
   if (muted) {
     $("mic-level").style.width = "0%";
+    $("session-avatar").style.setProperty("--level", "0");
   } else {
     s.recBase = s.recCount; // drop anything the live recognizer picked up while muted
   }
@@ -1400,6 +1440,8 @@ async function onUserChanged(user) {
     $("admin-open").hidden = !me.is_caregiver; // Dad never sees it; the server enforces it too
     $("recording-note").hidden = !me.recording; // he's told when sessions are recorded (09)
     setupPush(me.reminder); // the daily reminder line (11)
+    myPractice = me.practice || null; // his streak (21)
+    showStart();
     // Soft stop on spending (10): practice is paused until a caregiver resumes it.
     $("talk").disabled = !!me.paused;
     $("start-status").textContent = me.paused ? PAUSED_TEXT : "";

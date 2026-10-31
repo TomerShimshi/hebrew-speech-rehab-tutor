@@ -106,6 +106,7 @@ async function api(path, body, method) {
   if (!res.ok) {
     const err = new Error(`HTTP ${res.status}`);
     err.status = res.status;
+    err.detail = await res.json().then((j) => (typeof j.detail === "string" ? j.detail : ""), () => "");
     throw err;
   }
   return res.json();
@@ -423,7 +424,10 @@ function renderSessions(sessions) {
       summarizingLine(s),
       stepsLine(s),
       voiceLine(s),
-      el("div", { class: "cg-actions" }, button, promptButton, recordingButton(s), processButton, leaveOutControl(s)),
+      // The transcript stays one click away; the rest is in one "⋯" menu (21).
+      el("div", { class: "cg-actions" }, button,
+        el("details", { class: "more-menu" }, el("summary", { "aria-label": "עוד פעולות", text: "⋯" }),
+          el("div", { class: "menu" }, promptButton, recordingButton(s), processButton, leaveOutControl(s)))),
       box, promptBox,
     );
   }));
@@ -465,11 +469,119 @@ function notesLine(plan, notes) {
 function sectionLists(sections, editable = false) {
   return Object.entries(SECTION).map(([key, title]) => {
     const items = sections?.[key] || [];
-    if (!items.length) return null;
+    if (!items.length && !editable) return null;
     return el("div", {}, el("h3", { text: title }), el("ul", {}, items.map((item) => el("li", {},
       el("span", { class: "mem-item" }, el("span", { dir: "auto", text: item }),
-        editable ? confirmButton("✕", "להסיר את הפריט (גם מהסיכום)?", (wrap) => removeItem(key, item, wrap), "x") : null)))));
+        editable ? inlineEditor("✎", item, (text, where) =>
+          memoryEdit("/memory/edit-item", { section: key, old: item, new: text }, where, "✓ הפריט עודכן.")) : null,
+        editable ? confirmButton("✕", "להסיר את הפריט (גם מהסיכום)?", (wrap) => removeItem(key, item, wrap), "x") : null)))),
+      editable ? inlineEditor("+ הוספה", "", (text, where) =>
+        memoryEdit("/memory/add-item", { section: key, text }, where, "✓ הפריט נוסף."), "add") : null);
   });
+}
+
+// Editing the memory (21): an inline text box under the clicked button, with save / cancel.
+function inlineEditor(label, initial, save, cls = "x") {
+  const wrap = el("span", {});
+  const button = el("button", { class: cls, type: "button", text: label });
+  button.addEventListener("click", () => {
+    const box = el("input", { type: "text", dir: "auto", value: initial, maxlength: 1500, class: "mem-input" });
+    box.value = initial;
+    const ok = el("button", { class: "yes", type: "button", text: "שמירה" });
+    const no = el("button", { type: "button", text: "ביטול" });
+    no.addEventListener("click", () => wrap.replaceChildren(button));
+    const go = async () => { ok.disabled = no.disabled = true; await save(box.value, wrap); };
+    ok.addEventListener("click", go);
+    box.addEventListener("keydown", (e) => { if (e.key === "Enter") go(); if (e.key === "Escape") no.click(); });
+    wrap.replaceChildren(el("span", { class: "confirm" }, box, ok, no));
+    box.focus();
+  });
+  wrap.append(button);
+  return wrap;
+}
+
+// Free text in the memory (21): the shown block with an edit button that swaps it for a text box.
+function textEditor(view, initial, hint, save) {
+  const wrap = el("div", {});
+  const show = () => {
+    const button = el("button", { class: "add", type: "button", text: "✎ עריכה" });
+    button.addEventListener("click", () => {
+      const box = el("textarea", { dir: "auto", class: "mem-text", rows: Math.min(24, initial.split("\n").length + 2) });
+      box.value = initial;
+      const ok = el("button", { class: "yes", type: "button", text: "שמירה" });
+      const no = el("button", { type: "button", text: "ביטול" });
+      const status = el("span", { class: "muted" });
+      no.addEventListener("click", show);
+      ok.addEventListener("click", async () => { ok.disabled = no.disabled = true; await save(box.value, status); ok.disabled = no.disabled = false; });
+      wrap.replaceChildren(p(hint, "muted kv"), box, el("div", { class: "confirm" }, ok, no, status));
+      box.focus();
+    });
+    wrap.replaceChildren(view, button);
+  };
+  show();
+  return wrap;
+}
+
+// Every memory edit: saved at once (no model), the previous version kept in the versions list.
+async function memoryEdit(path, body, where, okText) {
+  busy(where, "שומר");
+  try {
+    await api(acct(path), body);
+    await loadAccount();
+    $("memory-status").textContent = `${okText} הגרסה הקודמת נשמרה ברשימת הגרסאות. נכנס לתוקף מהשיחה הבאה.`;
+  } catch (err) {
+    const msg = err.status === 409 ? "הזיכרון השתנה בינתיים (או שהפריט כבר קיים). רענן ונסה שוב."
+      : err.status === 422 && path === "/memory/edit-text" ? (err.detail?.startsWith("lines outside")
+        ? `יש שורות שאינן תחת כותרת או שלא מתחילות ב־"- ", והן היו הולכות לאיבוד: ${err.detail.split(": ").slice(1).join(": ")}`
+        : "פריט ארוך מדי (עד 200 תווים), יותר מ־25 פריטים תחת כותרת, או סיכום ריק. שום דבר לא השתנה.")
+      : err.status === 422 && path === "/memory/edit-focus" ? "עד 4 דגשים, ועד 200 תווים בכל שורה."
+      : err.status === 422 ? "הטקסט ריק, ארוך מדי, או שהקטע מלא (25 פריטים). כדי למחוק, השתמש ב־✕."
+      : "השמירה לא הצליחה, ושום דבר לא השתנה. נסה שוב בעוד רגע.";
+    where.textContent = msg;
+    $("memory-status").textContent = msg;
+  }
+}
+
+// The last session summaries she knows (the newest is her "Last time" line): fix or remove one (21).
+function summariesList(recent) {
+  if (!recent?.length) return null;
+  return el("div", {}, el("h3", { text: "שיחות אחרונות (מה היא זוכרת מהן)" }),
+    el("ul", {}, recent.slice().reverse().map((r) => el("li", {},
+      el("span", { class: "mem-item" }, el("span", { dir: "auto", text: `${r.date}: ${r.summary}` }),
+        inlineEditor("✎", r.summary, (text, where) =>
+          memoryEdit("/memory/edit-summary", { date: r.date, old: r.summary, new: text }, where, "✓ הסיכום עודכן.")),
+        confirmButton("✕", "להסיר את הסיכום הזה מהזיכרון שלה?", (wrap) =>
+          memoryEdit("/memory/remove-summary", { date: r.date, old: r.summary }, wrap, "✓ הסיכום הוסר."), "x"))))));
+}
+
+// His names and places, in the profile she reads (21). A removed word is blocked: the app never adds it back.
+function vocabularyBlock(profile) {
+  const head = el("h3", { text: "שמות ומקומות שלו (בפרופיל)" });
+  if (!profile?.source) return null;
+  if (profile.source === "uploaded") {
+    return el("div", {}, head, p("הפרופיל הועלה על ידכם: השמות באים מהשורה \"Vocabulary:\" שבו, ועורכים אותם בכרטיס הפרופיל.", "muted kv"));
+  }
+  const vocab = profile.vocabulary || [], blocked = profile.vocabulary_blocked || [];
+  const send = async (path, word, where, okText) => {
+    busy(where, "שומר");
+    try {
+      await api(acct(path), { word });
+      await loadAccount();
+      $("memory-status").textContent = okText;
+    } catch (err) {
+      where.textContent = err.status === 422 ? "שם או מקום אחד, עד 40 תווים." : "השמירה נכשלה. רענן ונסה שוב.";
+    }
+  };
+  return el("div", {}, head,
+    el("div", { class: "vocab" }, vocab.length ? vocab.map((w) => el("span", { class: "vocab-word", dir: "auto" }, w,
+      confirmButton("✕", "להסיר? האפליקציה לא תוסיף אותה שוב", (wrap) =>
+        send("/vocabulary/remove", w, wrap, `✓ "${w}" הוסרה מהפרופיל, והאפליקציה לא תוסיף אותה שוב.`), "x")))
+      : [p("אין עדיין.", "muted kv")]),
+    inlineEditor("+ הוספת שם או מקום", "", (text, where) => send("/vocabulary/add", text, where, "✓ נוסף לפרופיל."), "add"),
+    blocked.length ? el("div", { class: "vocab blocked" }, p("הוסרו (האפליקציה לא תוסיף אותן שוב):", "muted kv"),
+      blocked.map((w) => el("span", { class: "vocab-word", dir: "auto" }, w,
+        confirmButton("↩ להחזיר", "להחזיר לפרופיל?", (wrap) =>
+          send("/vocabulary/add", w, wrap, `✓ "${w}" חזרה לפרופיל.`), "x")))) : null);
 }
 
 async function removeItem(section, item, where) {
@@ -489,7 +601,7 @@ async function removeItem(section, item, where) {
   }
 }
 
-function renderMemory(memory) {
+function renderMemory(memory, profile) {
   if (!memory.memory_prompt) {
     $("memory").replaceChildren(p("אין זיכרון בחשבון הזה (השיחה הבאה תהיה פגישת היכרות).", "muted"));
     return;
@@ -497,17 +609,23 @@ function renderMemory(memory) {
   $("memory").replaceChildren(
     p(`מבוסס על ${memory.sessions_processed || 0} שיחות · עודכן ${when(memory.updated_at)}`, "muted kv"),
     el("h3", { text: "מה המטפלת מקבלת בתחילת כל שיחה" }),
-    el("pre", { class: "plan", dir: "auto", text: memory.memory_prompt }),
-    memory.focus_next_session?.length
-      ? el("div", {}, el("h3", { text: "דגשים לשיחה הבאה" }),
-           el("ul", {}, memory.focus_next_session.map((f) => el("li", { dir: "auto", text: f }))))
-      : null,
+    textEditor(el("pre", { class: "plan", dir: "auto", text: memory.memory_prompt }), memory.memory_prompt,
+      "כל שורה שמתחילה ב־\"- \" היא פריט, תחת הכותרת שלו (השורה העליונה היא החדשה). מחיקת כותרת מרוקנת את הקטע.",
+      (text, where) => memoryEdit("/memory/edit-text", { old: memory.memory_prompt, text }, where, "✓ הטקסט עודכן.")),
+    el("div", {}, el("h3", { text: "דגשים לשיחה הבאה" }),
+      textEditor(memory.focus_next_session?.length
+          ? el("ul", {}, memory.focus_next_session.map((f) => el("li", { dir: "auto", text: f })))
+          : p("אין דגשים.", "muted kv"),
+        (memory.focus_next_session || []).join("\n"), "דגש אחד בכל שורה, עד 4. השיחה הבאה תקבע דגשים חדשים.",
+        (text, where) => memoryEdit("/memory/edit-focus", { items: text.split("\n") }, where, "✓ הדגשים עודכנו."))),
     ...sectionLists(memory.sections, true),
+    summariesList(memory.recent_summaries),
+    vocabularyBlock(profile),
   );
 }
 
 function versionKind(version) {
-  if (version?.startsWith("edit-")) return " · לפני הסרה (פריט או מילה)";
+  if (version?.startsWith("edit-")) return " · לפני עריכה";
   if (version?.startsWith("restore-")) return " · לפני שחזור";
   return "";
 }
@@ -1036,7 +1154,7 @@ $("notes-save").addEventListener("click", async () => {
 
 // ---- progress graphs (09): plain SVG, drawn here, no libraries ----------------------------
 const SVG = "http://www.w3.org/2000/svg";
-const COLORS = { treated: "#2f6fdf", untreated: "#e08a1e", own: "#38a169", hint: "#ecc94b", not_yet: "#e53e3e" };
+const COLORS = { treated: "#3b7dd8", untreated: "#e8913a", own: "#38a169", hint: "#d4a72c", not_yet: "#d9534f" }; // read in light and dark (21)
 function svg(tag, attrs = {}, ...children) {
   const node = document.createElementNS(SVG, tag);
   for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
@@ -1052,7 +1170,7 @@ function lineChart(points, series, { yMax = 100, yTicks = [0, 50, 100], yLabel =
   const y = (v) => T + (H - T - B) * (1 - v / yMax);
   const chart = svg("svg", { viewBox: `0 0 ${W} ${H}`, class: "chart", role: "img" });
   for (const t of yTicks) {
-    chart.append(svg("line", { x1: L, x2: W - R, y1: y(t), y2: y(t), stroke: "#e3e7f0" }),
+    chart.append(svg("line", { x1: L, x2: W - R, y1: y(t), y2: y(t), style: "stroke: var(--line)" }),
                  svg("text", { x: L - 6, y: y(t) + 4, "text-anchor": "end" }, yLabel(t)));
   }
   const step = Math.max(1, Math.ceil(points.length / 8)); // at most ~8 date labels
@@ -1294,6 +1412,69 @@ $("translate-yes").addEventListener("click", async () => {
 });
 window.addEventListener("afterprint", () => document.body.classList.remove("printing"));
 
+// ---- the face-lift (21): summary tiles and tabs ----------------------------------------------
+const TABS = {
+  overview: ["flags", "sec-progress", "sec-sessions"],
+  lesson: ["sec-plan", "sec-names-game", "sec-next-prompt", "sec-notes"],
+  knows: ["sec-memory", "sec-profile", "sec-needs", "sec-words", "sec-adjust"],
+  tools: ["sec-voice", "sec-export", "sec-info", "sec-research", "sec-games", "sec-reset"],
+};
+function showTab(name) {
+  if (!TABS[name]) name = "overview";
+  for (const [tab, ids] of Object.entries(TABS)) {
+    ids.forEach((id, i) => { const node = $(id); if (node) { node.hidden = tab !== name; node.style.order = i; } });
+  }
+  document.querySelectorAll(".cg-tabs [data-tab]").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === name)));
+  try { localStorage.setItem("cg-tab", name); } catch { /* private window: not remembered */ }
+  if (location.hash.slice(1) !== name) history.replaceState(null, "", `#${name}`);
+}
+document.querySelectorAll(".cg-tabs [data-tab]").forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
+// A click outside an open "⋯" menu closes it.
+document.addEventListener("click", (e) => {
+  document.querySelectorAll(".more-menu[open]").forEach((m) => { if (!m.contains(e.target)) m.open = false; });
+});
+window.addEventListener("hashchange", () => showTab(location.hash.slice(1)));
+showTab(location.hash.slice(1) || (() => { try { return localStorage.getItem("cg-tab"); } catch { return null; } })() || "overview");
+
+function tile(key, value, sub, { cls = "", tab = null, extra = null } = {}) {
+  const node = el(tab ? "button" : "div", { class: `tile ${cls}`, type: tab ? "button" : null },
+    el("span", { class: "k", text: key }), el("span", { class: "v", text: value }),
+    sub ? el("span", { class: "s", text: sub }) : null, extra);
+  if (tab) node.addEventListener("click", () => showTab(tab));
+  return node;
+}
+// A small trend line for the names game (points: 0-100, oldest first).
+function sparkline(values) {
+  if (values.length < 2) return null;
+  const W = 120, H = 30, x = (i) => (i * W) / (values.length - 1), y = (v) => H - 3 - (v / 100) * (H - 6);
+  const line = svg("polyline", { points: values.map((v, i) => `${x(i)},${y(v)}`).join(" "), fill: "none",
+                                 stroke: "currentColor", "stroke-width": 2.5 });
+  const dot = svg("circle", { cx: x(values.length - 1), cy: y(values.at(-1)), r: 3, fill: "currentColor" });
+  const chart = svg("svg", { viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: "none", "aria-hidden": "true",
+                             style: "color: var(--accent)" });
+  chart.append(line, dot);
+  return chart;
+}
+function renderGlance(ov, sessions, progress) {
+  const last = sessions.find((s) => s.status === "ended");
+  const open = (ov.flags || []).filter((f) => f.status === "open").length;
+  const since = Date.now() - 14 * 86400000;
+  const names = (progress.points || []).filter((pt) => pt.items && new Date(pt.date) >= since)
+    .map((pt) => [pt.treated, pt.untreated].filter((v) => v !== null && v !== undefined))
+    .filter((v) => v.length).map((v) => Math.round(v.reduce((a, b) => a + b, 0) / v.length));
+  const planFailed = last?.plan_status === "failed";
+  $("glance").replaceChildren(
+    tile("שיחה אחרונה", last ? when(last.started_at, false) : "אין עדיין",
+         last ? [minutes(last.started_at, last.ended_at), MOOD[last.mood]].filter(Boolean).join(" · ") : "", { tab: "overview" }),
+    tile("דורש תשומת לב", String(open), open ? (open === 1 ? "התראה אחת פתוחה" : "התראות פתוחות") : "הכול בסדר",
+         { cls: open ? "alert" : "", tab: "overview" }),
+    tile("משחק השמות, שבועיים", names.length ? `${Math.round(names.reduce((a, b) => a + b, 0) / names.length)}%` : "–",
+         names.length ? "בלי רמז, בממוצע" : "עוד אין משחקים", { tab: "overview", extra: sparkline(names) }),
+    tile("השיעור הבא", planFailed ? "נכשל" : ov.next_plan?.built_at ? "מוכן" : "אין",
+         ov.next_plan?.built_at ? `נבנה ${when(ov.next_plan.built_at)}` : "", { cls: planFailed ? "bad" : "", tab: "lesson" }),
+  );
+}
+
 // ---- loading ----------------------------------------------------------------------------
 // Left-out conversations (20.5) are in the graphs only when asked; the therapist export uses what's shown.
 const progressPath = () => ($("progress-left-out").checked ? "/progress?left_out=1" : "/progress");
@@ -1306,12 +1487,13 @@ async function loadAccount() {
   try {
     const [ov, ss, pr] = await Promise.all([api(acct("/overview")), api(acct("/sessions")), api(acct(progressPath()))]);
     renderProgress(pr);
+    renderGlance(ov, ss.sessions, pr);
     lastOverview = ov;
     lastSessions = ss.sessions;
     renderFlags(ov.flags);
     renderSessions(ss.sessions);
     renderPlan(ov.next_plan, ov.notes);
-    renderMemory(ov.memory);
+    renderMemory(ov.memory, ov.profile);
     renderWords(ov.word_bank);
     renderNamesGame(ov.check_in_set, ov.check_in_history);
     renderResearch(ov.research_notes);

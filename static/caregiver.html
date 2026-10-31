@@ -10,7 +10,7 @@
 </head>
 <body class="cg">
   <header class="cg-header">
-    <h1>דף מטפל</h1>
+    <h1>דברו איתי <span class="muted">· מטפל</span></h1>
     <div class="cg-account" id="account-bar" hidden>
       <label for="account">חשבון:</label>
       <select id="account"></select>
@@ -32,6 +32,14 @@
     <div id="content" hidden>
       <!-- Always visible -->
       <section id="billing" class="cg-billing" hidden></section>
+      <!-- The face-lift (21): the summary first, then four tabs instead of one long list -->
+      <section id="glance" class="glance" aria-label="סיכום"></section>
+      <nav class="cg-tabs" role="tablist" aria-label="חלקי הדף">
+        <button type="button" role="tab" data-tab="overview">סקירה</button>
+        <button type="button" role="tab" data-tab="lesson">השיעור הבא</button>
+        <button type="button" role="tab" data-tab="knows">מה היא יודעת</button>
+        <button type="button" role="tab" data-tab="tools">כלים</button>
+      </nav>
       <section id="flags" class="cg-flags" aria-live="polite"></section>
 
       <!-- The account's current voice settings, always visible, editable here (09) -->
@@ -83,7 +91,7 @@
         </div>
       </section>
 
-      <details class="cg-card cg-info">
+      <details class="cg-card cg-info" id="sec-info">
         <summary>מידע חשוב: חירום וטיפים למשפחה</summary>
         <div class="cg-two">
           <div>

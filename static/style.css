@@ -1,20 +1,38 @@
+/* The face-lift (21): Rubik for headings and buttons, Assistant for text -- both with Hebrew, served by
+   the app itself (SIL OFL, see fonts/). Blue is him and "go"; the warm sun is her. */
+@font-face { font-family: "Rubik"; font-weight: 300 900; font-display: swap; src: url("fonts/rubik-hebrew.woff2") format("woff2");
+             unicode-range: U+0307-0308, U+0590-05FF, U+200C-2010, U+20AA, U+25CC, U+FB1D-FB4F; }
+@font-face { font-family: "Rubik"; font-weight: 300 900; font-display: swap; src: url("fonts/rubik-latin.woff2") format("woff2");
+             unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "Assistant"; font-weight: 200 800; font-display: swap; src: url("fonts/assistant-hebrew.woff2") format("woff2");
+             unicode-range: U+0307-0308, U+0590-05FF, U+200C-2010, U+20AA, U+25CC, U+FB1D-FB4F; }
+@font-face { font-family: "Assistant"; font-weight: 200 800; font-display: swap; src: url("fonts/assistant-latin.woff2") format("woff2");
+             unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
 :root {
-  --accent: #2f6fdf;
-  --accent-soft: #e6eefc;
-  --text: #1d2433;
-  --muted: #5b6475;
-  --bg: #f6f8fc;
+  --accent: #1f5fa8;       /* him, "go" */
+  --accent-deep: #174a85;
+  --accent-soft: #dde8f6;
+  --sun: #e8913a;          /* her */
+  --sun-ink: #9a5612;
+  --sun-soft: #fbead6;
+  --text: #1c2533;
+  --muted: #5e6878;
+  --bg: #f4f6f9;
   --card: #ffffff;
-  --end: #4a5568;
-  --danger: #c53030;
-  --tutor: #eef3ff;
-  --patient: #eaf7ee;
+  --line: #dfe4ec;
+  --end: #4b5666;
+  --danger: #b23a3a;
+  --danger-soft: #fff5f5;
+  --tutor: #ffffff;
+  --patient: #dde8f6;
+  --display: "Rubik", "Segoe UI", Arial, sans-serif;
+  --body: "Assistant", "Segoe UI", Arial, sans-serif;
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 body {
   margin: 0;
-  font-family: "Segoe UI", Arial, sans-serif; color: var(--text); background: var(--bg);
+  font-family: var(--body); color: var(--text); background: var(--bg);
 }
 /* Screens fill the window (dvh follows mobile browser bars), with room reserved at the
    bottom for the fixed emergency button so nothing ever sits under it. */
@@ -23,7 +41,8 @@ body {
   align-items: center; justify-content: center; gap: 1.75rem; text-align: center;
   padding: 1rem 1rem calc(5rem + env(safe-area-inset-bottom, 0px));
 }
-h1 { font-size: clamp(2.2rem, 7vw, 3.5rem); margin: 0; }
+h1, h2, h3, button, .big { font-family: var(--display); }
+h1 { font-size: clamp(2.2rem, 7vw, 3.5rem); margin: 0; text-wrap: balance; }
 .lead { font-size: clamp(1.4rem, 4.5vw, 2rem); margin: 0; color: var(--muted); }
 .status { min-height: 2.5rem; font-size: 1.4rem; color: var(--muted); margin: 0; }
 
@@ -33,7 +52,9 @@ h1 { font-size: clamp(2.2rem, 7vw, 3.5rem); margin: 0; }
 }
 .big:active { transform: scale(.97); }
 .big:disabled { opacity: .5; cursor: default; }
-.primary { color: #fff; background: var(--accent); box-shadow: 0 6px 18px rgba(47,111,223,.35); }
+.primary { color: #fff; background: var(--accent); box-shadow: 0 7px 0 var(--accent-deep); }
+.primary:active { box-shadow: 0 3px 0 var(--accent-deep); transform: translateY(4px); }
+.big:focus-visible, .link:focus-visible { outline: 3px solid var(--sun); outline-offset: 3px; }
 .secondary { color: var(--accent); background: var(--accent-soft); }
 .secondary.active { color: #fff; background: var(--accent); }
 .end { color: #fff; background: var(--end); }
@@ -72,31 +93,55 @@ h1 { font-size: clamp(2.2rem, 7vw, 3.5rem); margin: 0; }
 
 .avatar {
   width: clamp(9rem, 32vw, 13rem); height: auto; border-radius: 50%;
-  box-shadow: 0 0 0 .4rem #fff, 0 8px 24px rgba(47,111,223,.25);
+  box-shadow: 0 0 0 .4rem var(--card), 0 0 0 .75rem var(--accent-soft);
 }
 /* Shrinks on short windows so the captions keep their room. */
 .avatar.small { width: min(9rem, 22vw, 15vh); flex-shrink: 0; transition: box-shadow .3s; }
-/* Not a moving avatar: just a soft glowing ring while she speaks. */
-.avatar[data-state="speaking"] { animation: speak-glow 1.2s ease-in-out infinite; }
-@keyframes speak-glow {
-  0%, 100% { box-shadow: 0 0 0 .4rem #fff, 0 0 0 .7rem rgba(47,111,223,.25); }
-  50% { box-shadow: 0 0 0 .4rem #fff, 0 0 0 1.2rem rgba(47,111,223,.45); }
+/* Not a moving avatar: a warm glowing ring while she speaks; while she listens, a blue ring that
+   thickens with his voice (--level, 0..1, set from the mic -- 21: the mic bar moved into the ring). */
+.avatar[data-state="speaking"] { animation: speak-glow 1.6s ease-in-out infinite; }
+.avatar[data-state="listening"] {
+  box-shadow: 0 0 0 .35rem var(--card), 0 0 0 calc(.55rem + var(--level, 0) * .9rem) var(--accent),
+              0 0 0 calc(1rem + var(--level, 0) * .9rem) var(--accent-soft);
 }
+@keyframes speak-glow {
+  0%, 100% { box-shadow: 0 0 0 .35rem var(--card), 0 0 0 .75rem var(--sun), 0 0 0 1.2rem var(--sun-soft); }
+  50% { box-shadow: 0 0 0 .35rem var(--card), 0 0 0 .75rem var(--sun), 0 0 0 1.7rem var(--sun-soft); }
+}
+@media (prefers-reduced-motion: reduce) { .avatar[data-state="speaking"] { animation: none; box-shadow: 0 0 0 .35rem var(--card), 0 0 0 .75rem var(--sun); } }
+
+/* Start screen (21): the greeting by the time of day, and his streak. */
+.day { margin: 0; font-size: clamp(1.15rem, 3.6vw, 1.4rem); font-weight: 600; color: var(--muted); }
+.streak { display: flex; flex-direction: column; align-items: center; gap: .15rem; background: var(--sun-soft);
+          border-radius: 1.2rem; padding: .7rem 1.6rem; }
+.streak b { font-family: var(--display); font-size: clamp(1.4rem, 4.5vw, 1.8rem); color: var(--sun-ink); }
+.streak span { font-size: clamp(1.15rem, 3.6vw, 1.4rem); font-weight: 600; color: #7a4d1c; }
+/* End screen (21): only what went well. */
+.today { width: min(100%, 26rem); background: var(--card); border: 1px solid var(--line); border-radius: 1.3rem;
+         padding: 1rem 1.3rem; display: flex; flex-direction: column; gap: .6rem; }
+.today .row { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; font-size: clamp(1.25rem, 4vw, 1.5rem); }
+.today .row b { font-family: var(--display); font-size: 1.3em; color: var(--accent); font-variant-numeric: tabular-nums; }
 
 /* Session screen */
 /* Session layout: header (photo, status, mic) at the top, buttons pinned at the bottom,
    and the captions take whatever is left and scroll inside it. */
 #screen-session { height: 100vh; height: 100dvh; justify-content: flex-start; gap: .8rem; }
 #screen-session > .indicator, #screen-session > .mic { flex-shrink: 0; }
+/* Whose turn (21): one large label -- warm while she speaks, blue when it's his turn. */
 .indicator {
-  display: flex; align-items: center; gap: .6rem; font-size: 1.5rem; color: var(--muted);
+  display: flex; align-items: center; gap: .6rem; font-size: clamp(1.4rem, 4.5vw, 1.8rem); color: var(--muted);
+  font-family: var(--display); font-weight: 700; border-radius: 2rem; padding: .35rem 1.3rem; background: var(--card);
 }
+.indicator[data-state="speaking"] { background: var(--sun-soft); color: var(--sun-ink); }
+.indicator[data-state="listening"] { background: var(--accent-soft); color: var(--accent); }
 .indicator .dot { width: 1.1rem; height: 1.1rem; border-radius: 50%; background: #b8c0cc; }
-.indicator[data-state="listening"] .dot { background: #38a169; animation: pulse 1.6s infinite; }
-.indicator[data-state="speaking"] .dot { background: var(--accent); animation: pulse .8s infinite; }
+.indicator[data-state="listening"] .dot { background: var(--accent); animation: pulse 1.6s infinite; }
+.indicator[data-state="speaking"] .dot { background: var(--sun); animation: pulse .8s infinite; }
+@media (prefers-reduced-motion: reduce) { .indicator .dot { animation: none !important; } }
 @keyframes pulse { 50% { transform: scale(1.5); opacity: .6; } }
 
-.mic { display: flex; align-items: center; gap: .6rem; font-size: 1.5rem; width: min(100%, 20rem); }
+/* The mic level now shows as the ring around her photo (21); the bar stays in the page for the code. */
+.mic { display: none; }
 .mic-bar { flex: 1; height: .9rem; background: #e3e7f0; border-radius: 1rem; overflow: hidden; }
 #mic-level { height: 100%; width: 0; background: #38a169; transition: width .08s linear; }
 .mic.muted { opacity: .45; }
@@ -111,21 +156,29 @@ h1 { font-size: clamp(2.2rem, 7vw, 3.5rem); margin: 0; }
   font-size: clamp(1.4rem, 4.2vw, 2rem); line-height: 1.5; padding: .7rem 1.1rem;
   border-radius: 1.1rem; max-width: 90%; text-align: start;
 }
-.line.tutor { background: var(--tutor); align-self: flex-start; }
-.line.patient { background: var(--patient); align-self: flex-end; }
+.line.tutor { background: var(--tutor); border: 1px solid var(--line); align-self: flex-start; border-start-start-radius: .35rem; }
+.line.patient { background: var(--patient); align-self: flex-end; border-start-end-radius: .35rem; }
+/* Older lines fade (21): his eye lands on the newest one. */
+.line:not(:last-child) { opacity: .6; font-size: clamp(1.2rem, 3.6vw, 1.7rem); }
 .line.live .text { color: var(--muted); } /* still being spoken: provisional */
 .line .who { display: block; font-size: .95rem; color: var(--muted); font-weight: bold; }
+/* Two buttons side by side, the end of the session full width under them (21). */
 .controls {
-  display: flex; gap: 1rem; flex-wrap: wrap; justify-content: center; flex-shrink: 0;
-  width: 100%; /* lets the buttons wrap instead of widening the page on narrow phones */
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem; flex-shrink: 0;
+  width: min(100%, 36rem);
 }
+.controls .big { min-width: 0; font-size: clamp(1.35rem, 5vw, 2rem); padding: .9rem .6rem; }
+.controls .secondary { background: var(--card); color: var(--text); border: 2px solid var(--line); }
+.controls .secondary.active { background: var(--end); color: #fff; border-color: var(--end); }
+#end, #talk-toggle { grid-column: 1 / -1; }
 
 /* Emergency */
+/* Always visible, calmer (21): a red outline, not a solid red block. */
 .emergency {
   position: fixed; bottom: calc(1rem + env(safe-area-inset-bottom, 0px)); inset-inline-start: 1rem;
-  font-size: 1.2rem; font-weight: bold; color: #fff; background: var(--danger);
-  border: none; border-radius: 2rem; padding: .8rem 1.3rem; cursor: pointer;
-  box-shadow: 0 4px 12px rgba(197,48,48,.35); z-index: 10;
+  font-size: 1.2rem; font-weight: bold; color: var(--danger); background: var(--danger-soft);
+  border: 2px solid #e6b9b9; border-radius: 2rem; padding: .7rem 1.2rem; cursor: pointer;
+  box-shadow: 0 3px 10px rgba(178,58,58,.15); z-index: 10;
 }
 .overlay {
   position: fixed; inset: 0; background: rgba(20,24,33,.75); z-index: 20;
